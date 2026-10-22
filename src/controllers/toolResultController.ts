@@ -159,7 +159,7 @@ export const searchToolResults = async (req: Request, res: Response): Promise<vo
     return;
   }
   let mode: 'hybrid' | 'lexical' = 'lexical';
-  let data: ToolResultRecord[] = [];
+  let data: ToolResultRecord[];
   if (repository.hybridSearch) {
     try {
       const embedding = await generateEmbedding(query, 'query');

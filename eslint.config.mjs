@@ -15,7 +15,7 @@ const compat = new FlatCompat({
 
 export default [
   {
-    ignores: ['coverage/**', 'dist/**', 'frontend/dist/**', 'data/**'],
+    ignores: ['coverage/**', 'dist/**', 'frontend/dist/**', 'data/**', 'native/target/**'],
   },
   ...compat.extends('eslint:recommended', 'plugin:@typescript-eslint/recommended'),
   {
