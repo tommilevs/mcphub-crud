@@ -98,6 +98,7 @@ export class ServerDaoDbImpl implements ServerDao {
       command: entity.command,
       args: entity.args,
       env: entity.env,
+      nativeSecretRefs: entity.nativeSecretRefs,
       headers: entity.headers,
       enabled: entity.enabled !== undefined ? entity.enabled : true,
       owner: entity.owner,
@@ -150,6 +151,7 @@ export class ServerDaoDbImpl implements ServerDao {
     assignNullable('command');
     assignNullable('args');
     assignNullable('env');
+    assignNullable('nativeSecretRefs');
     assignNullable('headers');
     assign('enabled');
     assignNullable('owner');
@@ -290,6 +292,7 @@ export class ServerDaoDbImpl implements ServerDao {
     command?: string;
     args?: string[];
     env?: Record<string, string>;
+    nativeSecretRefs?: Record<string, string>;
     headers?: Record<string, string>;
     enabled: boolean;
     owner?: string;
@@ -326,6 +329,7 @@ export class ServerDaoDbImpl implements ServerDao {
       command: server.command,
       args: server.args,
       env: server.env,
+      nativeSecretRefs: server.nativeSecretRefs,
       headers: server.headers,
       enabled: server.enabled,
       owner: server.owner,

@@ -454,6 +454,8 @@ export interface ServerConfig {
   command?: string; // Command to execute for stdio-based servers
   args?: string[]; // Arguments for the command
   env?: Record<string, string>; // Environment variables
+  /** Environment key -> DPAPI secret id resolved only by the native runtime service. */
+  nativeSecretRefs?: Record<string, string>;
   headers?: Record<string, string>; // HTTP headers for SSE/streamable-http/openapi servers
   passthroughHeaders?: string[]; // Header names to pass through from MCP requests to upstream SSE/streamable-http servers
   enabled?: boolean; // Flag to enable/disable the server

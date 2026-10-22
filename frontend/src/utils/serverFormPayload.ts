@@ -241,6 +241,15 @@ export const buildServerPayload = ({
   headerVars,
 }: BuildServerPayloadInput) => {
   const env = buildKeyValueRecord(envVars);
+  const nativeSecretRefs: Record<string, string> = {};
+  for (const line of (formData.nativeSecretRefsText || '').split(/\r?\n/)) {
+    const separator = line.indexOf('=');
+    if (separator > 0) {
+      const key = line.slice(0, separator).trim();
+      const id = line.slice(separator + 1).trim();
+      if (key && id) nativeSecretRefs[key] = id;
+    }
+  }
   const headers = buildKeyValueRecord(headerVars);
   const options = buildOptions(formData.options);
   const description = formData.description?.trim() || '';
@@ -256,6 +265,7 @@ export const buildServerPayload = ({
       ...slot,
       target: serverType === 'stdio' ? (slot.target === 'args' ? 'args' : 'env') : 'headers',
     })),
+    nativeSecretRefs: Object.keys(nativeSecretRefs).length ? nativeSecretRefs : undefined,
     perSessionClient: formData.perSessionClient === true ? true : undefined,
     startOnDemand: formData.startOnDemand === true ? true : undefined,
     idleTimeoutMs:

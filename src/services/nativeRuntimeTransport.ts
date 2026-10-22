@@ -6,6 +6,7 @@ type ManagedProcessSpec = {
   command: string;
   args: string[];
   env: Record<string, string>;
+  secret_env?: Record<string, string>;
   restart_limit?: number;
   restart_delay_ms?: number;
 };
@@ -49,7 +50,8 @@ export class NativeRuntimeTransport implements Transport {
         resolve(socket);
       });
     });
-    await this.control({ op: 'start', spec: this.spec });
+    const { secret_env, ...spec } = this.spec;
+    await this.control({ op: 'start', spec, ...(secret_env ? { secret_env } : {}) });
   }
 
   async send(message: JSONRPCMessage): Promise<void> {

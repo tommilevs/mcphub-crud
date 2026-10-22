@@ -233,6 +233,7 @@ const CONNECTION_RELEVANT_CONFIG_FIELDS = [
   'command',
   'args',
   'env',
+  'nativeSecretRefs',
   'headers',
   'passthroughHeaders',
   'options',

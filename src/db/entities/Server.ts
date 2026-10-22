@@ -37,6 +37,9 @@ export class Server {
   env?: Record<string, string>;
 
   @Column({ type: 'simple-json', nullable: true })
+  nativeSecretRefs?: Record<string, string>;
+
+  @Column({ type: 'simple-json', nullable: true })
   headers?: Record<string, string>;
 
   @Column({ type: 'boolean', default: true })

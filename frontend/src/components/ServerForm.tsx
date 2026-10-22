@@ -134,6 +134,9 @@ const ServerForm = ({
     args: (initialData && initialData.config && initialData.config.args) || [],
     type: getInitialServerType(), // Initialize the type field
     env: getInitialServerEnvVars(initialData),
+    nativeSecretRefsText: Object.entries(initialData?.config?.nativeSecretRefs || {})
+      .map(([key, id]) => `${key}=${id}`)
+      .join('\n'),
     headers: [],
     passthroughHeaders: initialData?.config?.passthroughHeaders?.join(', ') || '',
     visibility: (initialData?.config?.visibility ?? 'private') as 'private' | 'group' | 'public',
@@ -1857,6 +1860,26 @@ const ServerForm = ({
                   {t('credentials.addSlot')}
                 </button>
               </fieldset>
+
+              {serverType === 'stdio' && (
+                <fieldset className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
+                  <legend className="px-1 font-medium">Native runtime secret references</legend>
+                  <p className="text-sm text-gray-500">
+                    One <code>ENV_KEY=secret-id</code> per line. IDs refer to secrets enrolled in the
+                    Windows native runtime; secret values are never stored in this form.
+                  </p>
+                  <textarea
+                    value={formData.nativeSecretRefsText || ''}
+                    onChange={(event) =>
+                      setFormData({ ...formData, nativeSecretRefsText: event.target.value })
+                    }
+                    rows={3}
+                    spellCheck={false}
+                    className="w-full py-2 px-3 form-input font-mono text-sm"
+                    placeholder="API_KEY=github-token"
+                  />
+                </fieldset>
+              )}
 
               {/* Visibility */}
               <div>

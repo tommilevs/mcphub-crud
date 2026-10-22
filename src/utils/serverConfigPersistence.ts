@@ -24,6 +24,23 @@ const normalizeRecord = (value?: Record<string, string>): Record<string, string>
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 };
 
+const NATIVE_SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
+const normalizeNativeSecretRefs = (
+  value?: Record<string, string>,
+): Record<string, string> | undefined => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const refs: Record<string, string> = {};
+  for (const [key, id] of Object.entries(value)) {
+    const envKey = key.trim();
+    const secretId = typeof id === 'string' ? id.trim() : '';
+    if (!envKey || !NATIVE_SECRET_ID.test(secretId)) {
+      throw new ServerConfigValidationError(`Invalid native runtime secret reference for ${key}`);
+    }
+    refs[envKey] = secretId;
+  }
+  return Object.keys(refs).length ? refs : undefined;
+};
+
 const normalizeStringArray = (value?: string[]): string[] | undefined => {
   if (!Array.isArray(value)) {
     return undefined;
@@ -297,6 +314,7 @@ export const normalizeServerConfigForPersistence = (config: ServerConfig): Serve
   const command = trimToUndefined(config.command);
   const args = Array.isArray(config.args) && config.args.length > 0 ? config.args : undefined;
   const env = normalizeRecord(config.env);
+  const nativeSecretRefs = normalizeNativeSecretRefs(config.nativeSecretRefs);
   const headers = normalizeRecord(config.headers);
   const passthroughHeaders = normalizeStringArray(config.passthroughHeaders);
   const options = normalizeOptions(
@@ -330,6 +348,7 @@ export const normalizeServerConfigForPersistence = (config: ServerConfig): Serve
     ...config,
     type: normalizedType,
     credentialTemplate: validateCredentialTemplate({ ...config, type: normalizedType }),
+    nativeSecretRefs,
     description,
     owner,
     visibility,

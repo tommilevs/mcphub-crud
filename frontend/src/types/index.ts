@@ -16,6 +16,8 @@ export interface MarketServerInstallation {
   command: string;
   args: string[];
   env?: Record<string, string>;
+  /** Environment key -> opaque native runtime secret id. Values are never returned. */
+  nativeSecretRefs?: Record<string, string>;
 }
 
 export interface MarketServerArgument {
@@ -394,6 +396,7 @@ export interface ServerFormData {
   args?: string[]; // Added explicit args field
   type?: 'stdio' | 'sse' | 'streamable-http' | 'openapi'; // Added type field with openapi support
   env: EnvVar[];
+  nativeSecretRefsText?: string;
   headers: EnvVar[];
   passthroughHeaders?: string;
   // Visibility for non-admin users.

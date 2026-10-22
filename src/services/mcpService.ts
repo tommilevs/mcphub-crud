@@ -1796,11 +1796,15 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
       !hasCredentialTemplate(conf) &&
       !hasPersonalAuthentication(conf);
     if (nativeRuntimeEligible) {
+      const nativeSecretRefs = conf.nativeSecretRefs;
+      const nativeEnv = { ...env };
+      for (const key of Object.keys(nativeSecretRefs ?? {})) delete nativeEnv[key];
       transport = new NativeRuntimeTransport({
         id: name,
         command: finalCommand,
         args: resolveCredentialArguments(conf, finalArgs),
-        env,
+        env: nativeEnv,
+        ...(nativeSecretRefs ? { secret_env: nativeSecretRefs } : {}),
       });
       logger.log(`[${name}] Using MCPHub native runtime service for stdio`);
     } else {
