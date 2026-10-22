@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
-import { apiDelete, apiPut } from '@/utils/fetchInterceptor';
+import React, { useEffect, useState } from 'react';
+import { apiDelete, apiGet, apiPut } from '@/utils/fetchInterceptor';
 import { useToast } from '@/contexts/ToastContext';
 
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
+type NativeProcessStatus = { id: string; running: boolean; pid?: number; restarts: number };
 
 /** Admin-only enrollment UI. The value is sent once and never rendered back. */
 const NativeRuntimeSecretsPanel: React.FC = () => {
@@ -10,6 +11,25 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
   const [id, setId] = useState('');
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
+  const [runtimeStatus, setRuntimeStatus] = useState<NativeProcessStatus[] | null>(null);
+  const [statusError, setStatusError] = useState<string | null>(null);
+
+  const refreshStatus = async () => {
+    const response = await apiGet<{ success?: boolean; data?: NativeProcessStatus[]; message?: string }>(
+      '/native-runtime/status',
+    );
+    if (response?.success === false || !Array.isArray(response?.data)) {
+      setRuntimeStatus(null);
+      setStatusError(response?.message || 'Native runtime unavailable');
+      return;
+    }
+    setStatusError(null);
+    setRuntimeStatus(response.data);
+  };
+
+  useEffect(() => {
+    void refreshStatus();
+  }, []);
 
   const enroll = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -56,6 +76,14 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
       <p className="mt-1 text-sm text-[var(--hub-ink-2)]">
         Enroll a value under an opaque ID. Values are written to machine-scoped DPAPI storage and are never returned by MCPHub.
       </p>
+      <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
+        <span className={statusError ? 'text-red-600' : 'text-green-600'}>
+          {statusError || `Native runtime online · ${runtimeStatus?.length ?? 0} managed process(es)`}
+        </span>
+        <button type="button" onClick={() => void refreshStatus()} className="hub-btn secondary !py-1 !px-2">
+          Refresh status
+        </button>
+      </div>
       <form onSubmit={enroll} className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_auto_auto]">
         <input value={id} onChange={(event) => setId(event.target.value)} className="form-input px-3 py-2" placeholder="github-token" maxLength={128} aria-label="Secret ID" />
         <input type="password" value={value} onChange={(event) => setValue(event.target.value)} className="form-input px-3 py-2" placeholder="Secret value (never shown again)" maxLength={65536} autoComplete="new-password" aria-label="Secret value" />
