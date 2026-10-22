@@ -1,0 +1,126 @@
+import { expectedIssValues, validateAuthorizationIss } from '../../src/utils/oauthIssuer.js';
+
+describe('oauthIssuer (RFC 9207 iss validation)', () => {
+  describe('expectedIssValues', () => {
+    it('derives the origin from the authorization URL', () => {
+      expect(
+        expectedIssValues({
+          authorizationUrl: 'https://as.example.com/authorize?client_id=x',
+        }),
+      ).toEqual(['https://as.example.com']);
+    });
+
+    it('includes the explicitly configured issuer', () => {
+      expect(
+        expectedIssValues({
+          configuredIssuer: 'https://auth.example.com',
+          authorizationUrl: 'https://auth.example.com/authorize',
+        }),
+      ).toEqual(['https://auth.example.com']);
+    });
+
+    it('deduplicates candidates', () => {
+      expect(
+        expectedIssValues({
+          configuredIssuer: 'https://as.example.com',
+          authorizationUrl: 'https://as.example.com/authorize',
+        }),
+      ).toEqual(['https://as.example.com']);
+    });
+
+    it('returns empty for no usable candidates', () => {
+      expect(expectedIssValues({})).toEqual([]);
+      expect(expectedIssValues({ authorizationUrl: 'not-a-url' })).toEqual([]);
+    });
+  });
+
+  describe('validateAuthorizationIss', () => {
+    it('rejects a missing iss when the expected issuer is known', () => {
+      const result = validateAuthorizationIss({
+        authorizationUrl: 'https://as.example.com/authorize',
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.checked).toBe(true);
+        expect(result.reason).toContain('iss');
+      }
+    });
+
+    it('allows a missing iss only when the flow records legacy support', () => {
+      expect(
+        validateAuthorizationIss({
+          authorizationUrl: 'https://as.example.com/authorize',
+          issRequired: false,
+        }),
+      ).toEqual({ valid: true, checked: false });
+      expect(validateAuthorizationIss({ issRequired: true }).valid).toBe(false);
+    });
+
+    it('rejects an explicitly empty iss even for a legacy server', () => {
+      expect(
+        validateAuthorizationIss({
+          iss: '',
+          configuredIssuer: 'https://as.example.com',
+          issRequired: false,
+        }).valid,
+      ).toBe(false);
+    });
+
+    it('does not accept an origin in place of a complete issuer', () => {
+      expect(
+        validateAuthorizationIss({
+          iss: 'https://as.example.com',
+          configuredIssuer: 'https://as.example.com/tenant',
+          authorizationUrl: 'https://as.example.com/tenant/authorize',
+          issRequired: false,
+        }).valid,
+      ).toBe(false);
+    });
+
+    it('passes without checking when iss is absent and no issuer is expected', () => {
+      // Legacy servers with no established issuer expectation: nothing to bind
+      // the response to, so the flow continues unchecked.
+      expect(
+        validateAuthorizationIss({
+          authorizationUrl: 'not-a-url',
+        }),
+      ).toEqual({ valid: true, checked: false });
+      expect(validateAuthorizationIss({})).toEqual({ valid: true, checked: false });
+    });
+
+    it('accepts an iss matching the authorization endpoint origin', () => {
+      const result = validateAuthorizationIss({
+        iss: 'https://as.example.com',
+        authorizationUrl: 'https://as.example.com/authorize',
+      });
+      expect(result).toEqual({ valid: true, checked: true });
+    });
+
+    it('accepts an iss matching the explicitly configured issuer', () => {
+      const result = validateAuthorizationIss({
+        iss: 'https://tenant.auth.example.com',
+        configuredIssuer: 'https://tenant.auth.example.com',
+        authorizationUrl: 'https://other.example.com/authorize',
+      });
+      expect(result).toEqual({ valid: true, checked: true });
+    });
+
+    it('rejects a mismatched iss before the code is redeemed', () => {
+      const result = validateAuthorizationIss({
+        iss: 'https://evil.example.com',
+        authorizationUrl: 'https://as.example.com/authorize',
+        configuredIssuer: 'https://as.example.com',
+      });
+      expect(result.valid).toBe(false);
+      if (!result.valid) {
+        expect(result.checked).toBe(true);
+        expect(result.reason).toContain('iss');
+      }
+    });
+
+    it('fails safe when iss is present but no expected issuer is known', () => {
+      const result = validateAuthorizationIss({ iss: 'https://somewhere.example.com' });
+      expect(result).toEqual({ valid: true, checked: false });
+    });
+  });
+});

@@ -1,0 +1,304 @@
+import { loadSettings } from '../config/index.js';
+import { getSystemConfigDao } from '../dao/DaoFactory.js';
+import { BetterAuthConfig, BetterAuthOidcProviderConfig, SystemConfig } from '../types/index.js';
+import { resolveInstallBaseUrl } from '../utils/installBaseUrl.js';
+import {
+  normalizeOptionalString,
+  normalizeStringArray,
+  resolveBooleanSetting,
+  resolveStringArraySetting,
+  resolveStringSetting,
+} from '../utils/settingResolvers.js';
+import { getCachedSystemConfig, isDatabaseModeEnabled } from '../utils/systemConfigCache.js';
+
+const DEFAULT_BETTER_AUTH_BASE_PATH = '/api/auth/better';
+const DEFAULT_OIDC_SCOPES = ['openid', 'profile', 'email'];
+const DEFAULT_OIDC_PROVIDER_ID = 'oidc';
+const VALID_OIDC_PROMPTS = new Set<string>([
+  'none',
+  'login',
+  'create',
+  'consent',
+  'select_account',
+  'select_account consent',
+  'login consent',
+]);
+
+export type SsoProviderName = 'google' | 'github' | 'oidc';
+
+// SSO providers whose Better Auth handler this process mounted at startup.
+// Providers are registered once, when `src/betterAuth.ts` loads, so one enabled
+// later in Settings has no working sign-in route until a restart.
+let mountedSsoProviders: ReadonlySet<SsoProviderName> = new Set();
+
+export const setMountedSsoProviders = (providers: Iterable<SsoProviderName>): void => {
+  mountedSsoProviders = new Set(providers);
+};
+
+export interface BetterAuthRuntimeConfig {
+  enabled: boolean;
+  basePath: string;
+  trustedOrigins: string[];
+  disableAutoCreate: boolean;
+  /**
+   * Username/password login is refused. Only ever true while an SSO provider is
+   * enabled and its sign-in route is mounted, so the switch cannot leave a
+   * deployment without any way to log in.
+   */
+  disablePasswordLogin: boolean;
+  providers: {
+    google: {
+      enabled: boolean;
+    };
+    github: {
+      enabled: boolean;
+    };
+    oidc: {
+      enabled: boolean;
+      providerId: string;
+      discoveryUrl?: string;
+      scopes: string[];
+      pkce: boolean;
+      prompt?: BetterAuthOidcProviderConfig['prompt'];
+      trustEmail: boolean;
+    };
+  };
+}
+
+const normalizePath = (value: unknown): string => {
+  const normalizedValue = normalizeOptionalString(value);
+  if (!normalizedValue) {
+    return DEFAULT_BETTER_AUTH_BASE_PATH;
+  }
+  return normalizedValue.startsWith('/') ? normalizedValue : `/${normalizedValue}`;
+};
+
+const normalizeTrustedOrigin = (value: unknown): string | null => {
+  const normalizedValue = normalizeOptionalString(value);
+  if (!normalizedValue) {
+    return null;
+  }
+
+  try {
+    return new URL(normalizedValue).origin;
+  } catch {
+    return null;
+  }
+};
+
+const normalizePrompt = (value: unknown): BetterAuthOidcProviderConfig['prompt'] | undefined => {
+  const normalizedValue = normalizeOptionalString(value);
+  if (!normalizedValue || !VALID_OIDC_PROMPTS.has(normalizedValue)) {
+    return undefined;
+  }
+
+  return normalizedValue as BetterAuthOidcProviderConfig['prompt'];
+};
+
+export const resolveBetterAuthBaseUrl = (systemConfig?: SystemConfig | null): string | undefined =>
+  normalizeOptionalString(process.env.BETTER_AUTH_URL) ||
+  normalizeOptionalString(systemConfig?.auth?.betterAuth?.baseUrl) ||
+  resolveInstallBaseUrl(systemConfig);
+
+const resolvePromptSetting = (
+  envValue: string | undefined,
+  settingsValue: unknown,
+): BetterAuthOidcProviderConfig['prompt'] | undefined => {
+  const envOverride = normalizePrompt(envValue);
+  if (envOverride !== undefined) {
+    return envOverride;
+  }
+
+  return normalizePrompt(settingsValue);
+};
+
+export const resolveBetterAuthRuntimeConfig = (
+  systemConfig?: SystemConfig | null,
+): BetterAuthRuntimeConfig => {
+  const betterAuthSettings: BetterAuthConfig = systemConfig?.auth?.betterAuth || {};
+  const providerSettings = betterAuthSettings.providers || {};
+  const oidcSettings = providerSettings.oidc || {};
+  const databaseModeEnabled = isDatabaseModeEnabled();
+  const betterAuthEnabled =
+    resolveBooleanSetting(process.env.BETTER_AUTH_ENABLED, betterAuthSettings.enabled, true) &&
+    databaseModeEnabled;
+  const basePath = normalizePath(
+    resolveStringSetting(process.env.BETTER_AUTH_BASE_PATH, betterAuthSettings.basePath),
+  );
+  const trustedOriginSettings = resolveStringArraySetting(
+    process.env.BETTER_AUTH_TRUSTED_ORIGINS,
+    betterAuthSettings.trustedOrigins,
+    [],
+  );
+  const trustedOrigins = Array.from(
+    new Set(
+      [
+        ...trustedOriginSettings,
+        process.env.BETTER_AUTH_URL,
+        betterAuthSettings.baseUrl,
+        resolveInstallBaseUrl(systemConfig),
+      ]
+        .map((value) => normalizeTrustedOrigin(value))
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+
+  const googleEnvConfigured = Boolean(
+    process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET,
+  );
+  const githubEnvConfigured = Boolean(
+    process.env.GITHUB_CLIENT_ID && process.env.GITHUB_CLIENT_SECRET,
+  );
+  const oidcEnvConfigured = Boolean(process.env.OIDC_CLIENT_ID && process.env.OIDC_CLIENT_SECRET);
+  const oidcDiscoveryUrl = resolveStringSetting(
+    process.env.BETTER_AUTH_OIDC_DISCOVERY_URL,
+    resolveStringSetting(process.env.OIDC_DISCOVERY_URL, oidcSettings.discoveryUrl),
+  );
+  const oidcProviderId =
+    resolveStringSetting(
+      process.env.BETTER_AUTH_OIDC_PROVIDER_ID,
+      oidcSettings.providerId,
+      DEFAULT_OIDC_PROVIDER_ID,
+    ) || DEFAULT_OIDC_PROVIDER_ID;
+  const oidcScopes = resolveStringArraySetting(
+    process.env.BETTER_AUTH_OIDC_SCOPES,
+    oidcSettings.scopes,
+    DEFAULT_OIDC_SCOPES,
+  );
+  const oidcPkce = resolveBooleanSetting(
+    process.env.BETTER_AUTH_OIDC_PKCE,
+    oidcSettings.pkce,
+    true,
+  );
+  const oidcPrompt = resolvePromptSetting(process.env.BETTER_AUTH_OIDC_PROMPT, oidcSettings.prompt);
+  const oidcTrustEmail = resolveBooleanSetting(
+    process.env.BETTER_AUTH_OIDC_TRUST_EMAIL,
+    undefined,
+    false,
+  );
+  const oidcEnabledSetting = resolveBooleanSetting(
+    process.env.BETTER_AUTH_OIDC_ENABLED,
+    oidcSettings.enabled,
+    false,
+  );
+  const oidcEnabled =
+    betterAuthEnabled && oidcEnabledSetting && Boolean(oidcDiscoveryUrl) && oidcEnvConfigured;
+
+  const googleEnabled =
+    betterAuthEnabled &&
+    resolveBooleanSetting(
+      process.env.BETTER_AUTH_GOOGLE_ENABLED,
+      providerSettings.google?.enabled,
+      true,
+    ) &&
+    googleEnvConfigured;
+  const githubEnabled =
+    betterAuthEnabled &&
+    resolveBooleanSetting(
+      process.env.BETTER_AUTH_GITHUB_ENABLED,
+      providerSettings.github?.enabled,
+      true,
+    ) &&
+    githubEnvConfigured;
+
+  const anyProviderEnabled = googleEnabled || githubEnabled || oidcEnabled;
+
+  const disableAutoCreate = resolveBooleanSetting(
+    process.env.BETTER_AUTH_DISABLE_AUTO_CREATE,
+    betterAuthSettings.disableAutoCreate,
+    false,
+  );
+
+  // Counts only a provider that is enabled now and was mounted at startup: one
+  // enabled in Settings since then shows a sign-in button with no route behind it
+  const ssoSignInAvailable =
+    (googleEnabled && mountedSsoProviders.has('google')) ||
+    (githubEnabled && mountedSsoProviders.has('github')) ||
+    (oidcEnabled && mountedSsoProviders.has('oidc'));
+
+  // The env var wins in both directions, so it is also the recovery switch when
+  // the identity provider is unavailable
+  const disablePasswordLogin =
+    ssoSignInAvailable &&
+    resolveBooleanSetting(
+      process.env.BETTER_AUTH_DISABLE_PASSWORD_LOGIN,
+      betterAuthSettings.disablePasswordLogin,
+      false,
+    );
+
+  return {
+    enabled: anyProviderEnabled,
+    basePath,
+    trustedOrigins,
+    disableAutoCreate,
+    disablePasswordLogin,
+    providers: {
+      google: {
+        enabled: googleEnabled,
+      },
+      github: {
+        enabled: githubEnabled,
+      },
+      oidc: {
+        enabled: oidcEnabled,
+        providerId: oidcProviderId,
+        discoveryUrl: oidcDiscoveryUrl,
+        scopes: oidcScopes,
+        pkce: oidcPkce,
+        prompt: oidcPrompt,
+        trustEmail: oidcTrustEmail,
+      },
+    },
+  };
+};
+
+export const getBetterAuthRuntimeConfig = async (
+  systemConfigOverride?: SystemConfig | null,
+): Promise<BetterAuthRuntimeConfig> => {
+  if (systemConfigOverride !== undefined) {
+    return resolveBetterAuthRuntimeConfig(systemConfigOverride);
+  }
+
+  const systemConfig = await getSystemConfigDao().get();
+  return resolveBetterAuthRuntimeConfig(systemConfig);
+};
+
+/**
+ * True when a request path under the `/api` mount should bypass the shared
+ * authentication gate and its rate limiter. This is the single source of truth
+ * for the exemption applied in `src/middlewares/index.ts` and mirrored by the
+ * `apiAuthGateRateLimiter` skip in `src/utils/rateLimit.ts`: public auth routes
+ * (login, register) and better-auth endpoints carry their own limiters or
+ * handler, so they must not consume the shared authenticated-route budget.
+ *
+ * `reqPath` is the path relative to the `/api` mount (Express strips the mount
+ * prefix), e.g. `/auth/login` for a request to `/api/auth/login`.
+ */
+export const isApiAuthExemptPath = (
+  reqPath: string,
+  betterAuthConfig: Pick<BetterAuthRuntimeConfig, 'basePath'>,
+): boolean => {
+  const betterAuthApiPath = betterAuthConfig.basePath.startsWith('/api')
+    ? betterAuthConfig.basePath.replace(/^\/api/, '') || '/'
+    : null;
+  return (
+    reqPath === '/auth/login' ||
+    reqPath === '/auth/register' ||
+    (betterAuthApiPath !== null && reqPath.startsWith(betterAuthApiPath)) ||
+    reqPath.startsWith('/better-auth')
+  );
+};
+
+export const betterAuthRuntimeConfig = (() => {
+  const cachedSystemConfig = getCachedSystemConfig();
+  if (cachedSystemConfig) {
+    return resolveBetterAuthRuntimeConfig(cachedSystemConfig);
+  }
+
+  if (!isDatabaseModeEnabled()) {
+    const settings = loadSettings();
+    return resolveBetterAuthRuntimeConfig(settings.systemConfig ?? null);
+  }
+
+  return resolveBetterAuthRuntimeConfig(null);
+})();

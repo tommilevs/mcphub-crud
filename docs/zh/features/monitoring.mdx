@@ -1,0 +1,91 @@
+---
+title: '监控与可观测性'
+description: 'MCPHub 提供的健康检查、日志和活动追踪能力'
+---
+
+MCPHub 提供健康检查、可选的 Prometheus 指标端点、日志和活动记录。未内置 OpenTelemetry exporter 或告警管线。
+
+## 健康检查端点
+
+`GET /health` —— 公开访问，无需认证。
+
+```bash
+curl http://localhost:3000/health
+```
+
+响应示例：
+
+```json
+{
+  "status": "healthy",
+  "message": "All enabled MCP servers are ready",
+  "servers": { "connected": 3, "connecting": 0, "disconnected": 0, "total": 3 },
+  "timestamp": "2026-05-18T12:34:56.789Z"
+}
+```
+
+`status` 的取值如下：
+
+| 值          | HTTP 状态码 | 含义                                                        |
+| ----------- | ----------- | ----------------------------------------------------------- |
+| `healthy`   | `200`       | 所有启用的 MCP 服务器均已连接；数据库（如果启用）状态正常。 |
+| `degraded`  | `200`       | 部分启用的 MCP 服务器尚未连接，但 MCPHub 本身正常运行。     |
+| `unhealthy` | `503`       | 数据库模式下的数据库健康检查失败，或发生内部错误。          |
+
+因此，`/health` 适合用于存活和就绪探针。详见 `src/controllers/healthController.ts`。
+
+## 进程内日志
+
+MCPHub 维护一个滚动的进程内存日志缓冲区（`src/services/logService.ts`），供控制台的日志查看器使用。
+
+| 方法与路径             | 说明                                               |
+| ---------------------- | -------------------------------------------------- |
+| `GET /api/logs`        | 以 JSON 返回缓冲区中的日志条目。                   |
+| `DELETE /api/logs`     | 清空日志缓冲区。                                   |
+| `GET /api/logs/stream` | 以 Server-Sent Events 的方式推送新产生的日志条目。 |
+
+日志流会为每个事件发送一行 `data:`，并包含初始的 `{ "type": "initial", "logs": [...] }` 快照。以上三个端点都要求已认证的管理员权限（控制台 JWT、`accessType: all` 的 bearer key、OAuth token 或 Better Auth session）。
+
+该缓冲区只存在于当前进程。在多实例部署中，请将 `stdout` 发送到日志聚合器，不要依赖此端点。
+
+## 活动日志（数据库模式）
+
+当 MCPHub 使用 PostgreSQL 运行时（参见[数据库配置](/zh/configuration/database-configuration)），每个 MCP 请求和响应都会由 `src/services/activityLoggingService.ts` 持久化到 `mcphub_activity` 表。控制台通过以下端点提供访问：
+
+| 方法与路径                       | 说明                                                                                                                                                |
+| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/activities/available`  | 活动日志启用时（数据库模式）返回 `{ available: true }`。                                                                                            |
+| `GET /api/activities`            | 分页查询活动记录。查询参数：`page`、`limit`、`server`、`tool`、`status`（`success`/`error`）、`group`、`keyId`、`keyName`、`startDate`、`endDate`。 |
+| `GET /api/activities/stats`      | 使用相同筛选条件返回聚合统计数据。                                                                                                                  |
+| `GET /api/activities/filters`    | 返回筛选下拉框所需的去重值。                                                                                                                        |
+| `GET /api/activities/:id`        | 返回包含请求输入和响应输出的完整记录。                                                                                                              |
+| `DELETE /api/activities/cleanup` | 删除早于配置保留期限的活动记录。                                                                                                                    |
+
+在文件模式下，这些端点返回 `404`，控制台也会隐藏活动页面。
+
+## 进程级指标
+
+控制台通过 `getServerConnectionStats()` 展示基础的服务器连接统计信息，该信息也嵌入在 `/health` 响应中。如需导出更丰富的进程指标，可以：
+
+- 使用能够自动包装 `http`/`express` 的 Node.js APM agent。
+- 或从监控平台抓取 `/health` 和 `/api/activities/stats`。
+
+## 另请参阅
+
+- [数据库配置](/zh/configuration/database-configuration) —— 启用 PostgreSQL 以使用活动日志。
+- [认证与安全](/zh/features/authentication) —— 了解管理 API 和 bearer key 认证。
+
+## Prometheus 指标
+
+设置 `ENABLE_METRICS=true` 启用根路径 `GET /metrics`，不受 `BASE_PATH` 影响；默认关闭并返回 404。设置 `METRICS_TOKEN` 后，抓取请求必须携带 `Authorization: Bearer <token>`。这是独立的监控凭据，不使用 Dashboard 或 MCP bearer key。启用后如未设置 token，端点可公开访问；多租户部署应设置 token 或限制监控网络访问。
+
+| 指标 | 标签 | 含义 |
+| ---- | ---- | ---- |
+| `mcphub_servers_total` | `status`, `type` | 已启用的共享服务器定义数量（Gauge），包含 `oauth_required` 和 `openapi`。不包含个人凭据运行实例；按需服务器空闲时断开不代表故障。 |
+| `mcphub_tool_calls_total` | `server`, `status` | 已完成的客户端调用数，包含 Smart Routing 元工具和执行前失败。状态为 `success` 或 `error`。 |
+| `mcphub_tool_call_duration_seconds` | `server` | 完整调用耗时直方图，包含凭据准备、连接和重试。 |
+| `mcphub_active_sessions` | 无 | 有状态客户端 transport 会话数，不包含无状态 HTTP 请求或 REST 合成会话 ID。 |
+
+MCP、Dashboard 和 OpenAPI 工具 API 共用埋点。内部重试不会重复计数；异常和 `isError` 返回均视为失败。未解析到上游的调用（包括搜索、描述元工具及凭据准备失败）使用 `server="unknown"`。工具处理器执行前的 HTTP 鉴权拒绝不计入工具调用。首版不增加 group、用户、会话、工具名、原始错误标签或错误分类，也不提供 OTel exporter。
+
+指标不依赖数据库或活动日志。每个进程独立计数，重启归零；多副本部署应分别抓取。服务器和会话 Gauge 在抓取时刷新，不触发上游连接。已删除服务器的历史时间序列保留到重启，避免持续创建不同的服务器名称。Prometheus 抓取配置示例见[英文页面](/features/monitoring)。

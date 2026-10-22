@@ -1,0 +1,181 @@
+---
+title: 'MCP HTTP 端点'
+description: '使用统一的 HTTP 端点连接到您的 MCP 服务器。'
+---
+
+MCPHub 为您的所有 MCP 服务器提供统一的可流式 HTTP 接口。这使您可以向任何配置的 MCP 服务器发送请求并实时接收响应。
+
+**安全提示**：MCP 端点默认需要身份验证，以避免暴露已连接的工具和数据。若需对 MCP 端点开放匿名访问，请在密钥设置中关闭 **启用 Bearer 认证**。**免登录开关**仅影响仪表盘登录。
+
+### 统一端点
+
+此端点提供对所有已启用的 MCP 服务器的访问。
+
+- **端点**: `http://localhost:3000/mcp`
+- **方法**: `POST`
+
+### 特定群组的端点
+
+要定向访问特定的服务器群组，请使用基于群组的 HTTP 端点。
+
+- **端点**: `http://localhost:3000/mcp/{group}`
+- **方法**: `POST`
+- **参数**:
+  - `{group}`: 群组的 ID 或名称。
+
+### 特定服务器的端点
+
+要直接访问单个服务器，请使用特定于服务器的 HTTP 端点。
+
+- **端点**: `http://localhost:3000/mcp/{server}`
+- **方法**: `POST`
+- **参数**:
+  - `{server}`: 服务器的名称。
+
+> **注意**: 如果服务器名称和群组名称相同，则群组将优先。
+
+## 协议兼容矩阵
+
+同一个 `/mcp` URL 同时服务旧版 `2025-11-25` 和新版 `2026-07-28` 客户端。
+群组和服务器端点使用相同的协议处理方式。仅将 URL 从 `/sse` 改成 `/mcp`，
+不会自动升级客户端的协议版本。
+
+| 行为             | 旧版 HTTP+SSE（`/sse`）        | HTTP `2025-11-25`（`/mcp`）            | HTTP `2026-07-28`（`/mcp`）                            |
+| ---------------- | ------------------------------ | -------------------------------------- | ------------------------------------------------------ |
+| 支持状态         | 已弃用，仍受支持               | 保留兼容支持                           | 已支持，迁移工作仍在继续                               |
+| 启动             | 通过 SSE 传输执行 `initialize` | 通过 Streamable HTTP 执行 `initialize` | 无需 `initialize` 握手，使用 SDK 发现机制              |
+| 下游会话         | SSE 连接及会话消息端点         | `Mcp-Session-Id`                       | 不创建下游传输会话                                     |
+| 路由请求头       | 使用旧版传输行为               | 使用旧版传输行为                       | `Mcp-Method`；具名调用和资源读取还需 `Mcp-Name`        |
+| 有状态工具       | 使用已有会话生命周期           | 使用已有会话生命周期                   | Bearer 认证及显式状态 ID 或 OpenAI 会话元数据          |
+| MCP Apps 能力    | 初始化时声明                   | 初始化时声明                           | 每次请求在 `params._meta` 中声明                       |
+| 列表缓存提示     | 保留已有旧版响应结构           | 保留已有旧版响应结构                   | 上游剩余 TTL，最长 5 秒，私有；否则为零                |
+| 资源读取缓存提示 | 保留已有上游提示               | 保留已有上游提示                       | 有效的上游剩余 TTL，范围收紧为 `private`；其他情况为零 |
+
+MCP Apps 透传还取决于请求路由和可见的上游服务器；`$smart` 路由仍按普通 MCP
+路由处理。参见 [MCP Apps](/zh/features/mcp-apps)。上游 MCP 连接目前继续使用
+旧版协议协商；新版下游请求不会自动升级上游服务器。
+
+## 客户端迁移
+
+1. 将旧 SSE 客户端传输改为 HTTP 传输，将 `/sse` 改为 `/mcp`，保留原有群组、
+   服务器或用户路由范围，以及 Bearer 凭据。旧版 HTTP 客户端可以先完成传输迁移，
+   继续使用原有初始化和会话生命周期。
+2. 要采用 `2026-07-28`，需使用支持新版 HTTP 发现机制及逐请求元数据的客户端。
+   SDK v2 HTTP 客户端会自动设置协议和路由请求头。自定义客户端需发送常规
+   JSON-RPC 请求体，将 `params._meta["io.modelcontextprotocol/protocolVersion"]`
+   设为 `2026-07-28`，并在
+   `params._meta["io.modelcontextprotocol/clientCapabilities"]` 中声明客户端能力。
+   同时发送一致的 `MCP-Protocol-Version` 和 `Mcp-Method` 请求头；`tools/call`
+   和 `prompts/get` 需要与 `params.name` 一致的 `Mcp-Name`，`resources/read`
+   则需要与 `params.uri` 一致。工具名称应使用该路由列表响应中的名称。
+3. 使用 `perSessionClient` 或 OpenAPI `cookieSession` 工具时，为每个独立工作流
+   生成 UUID v4，并通过工具调用的 `X-MCPHub-State-Id` 请求头发送。无法设置该
+   扩展的已认证 OpenAI/ChatGPT 工具调用，在显式请求头缺失时也可复用客户端声明的
+   `_meta["openai/session"]` 会话提示。MCPHub 会先对该提示做哈希；它只用于状态
+   关联，不用于认证。显式状态请求头一旦存在但非法，将直接失败而不会回退。无状态
+   工具无需这两个值。只有相同 Bearer 凭据、用户和路由才能复用状态。状态仅保存在
+   当前进程中，闲置 30 分钟后过期，多副本部署需要粘性路由。进程重启、状态过期或
+   凭据、路由变化后需要重新建立应用状态。参见
+   [显式状态配置](/zh/configuration/mcp-settings#mcp-2026-07-28-的有状态工具)。
+4. 使用实际权限验证工具列表和调用，再验证所用的资源读取及 MCP Apps 功能。
+   新版 Apps 宿主需在每次请求中声明 UI 能力。新版调用不依赖 `Mcp-Session-Id`
+   或 `enableSessionRebuild`，这两者仍属于旧版机制。
+
+## 缓存行为
+
+现代列表把上游发现快照与实时配置、权限和每次请求的客户端能力组合起来。
+正向提示始终为私有，取所有上游剩余新鲜时间的最小值，并受最长 5 秒的投影
+窗口限制。保留发现快照的年龄，重复网关列表请求不会续期；空上游列表也参与
+计算。缺失／无效 TTL、未完整分页、失败或不完整的发现、网关生成的智能路由
+条目、内置提示词／资源，以及无法确定新鲜度的托管权限均使用零 TTL。
+
+每个请求重新生成投影。投影期间检测到配置、成员、权限或运行时变更时归零。
+列表刷新在等待新响应之前撤销旧快照的新鲜度；失败、断连或替换不能建立新的
+新鲜度。资源模板列表使用该请求实际获取的响应。不增加网关响应缓存。
+
+本地配置／权限改变后，客户端可能继续保留已获得的列表最多 5 秒，服务端失效
+不能撤回客户端缓存。缓存必须按端点、认证身份和每次请求的客户端能力隔离。
+缓存列表不代表调用权限：MCPHub 在每个请求上重新检查访问权。上游无法提供
+可信新鲜度时使用零 TTL。
+
+现代资源读取仍绕过 SDK 响应缓存，从有效上游 TTL 扣除处理耗时，并限制为
+请求认证上下文内的私有共享。缺失／无效 TTL、内置资源和网关生成的读取错误
+均使用零。旧版响应形状和会话行为保持不变。
+
+## 旧版 SSE 弃用计划
+
+公开通知随包含本计划的下一次版本发布。发布说明必须记录实际通知日期
+**N** 和最早可移除日期 **N 加 12 个日历月**。本页面和 ADR 不构成更早的
+通知日期。在该发布说明发布之前，通知日期和移除日期均未公布。
+
+计划在达到上述日期且满足下方迁移就绪条件后的第一个主版本中移除 SSE。
+条件未满足时延后移除并公布调整后的目标，不缩短通知窗口。至少提前 90 天
+公布确切的目标版本和日期，提前 30 天再次提醒，每次公告附迁移说明。
+实际移除必须通过独立代码评审。
+
+### 保留路由范围和认证
+
+部署配置了基础路径时，为下表所有 URL 加上该前缀。建议使用分组 ID；
+保留原来的路由标识以及 bearer 请求头名称和值。分组名与服务器名相同时，
+分组优先。
+
+| 原 SSE 连接            | Streamable HTTP 替代地址 | 将退役的 SSE 消息端点 |
+| ---------------------- | ------------------------ | --------------------- |
+| `/sse`                 | `/mcp`                   | `/messages`           |
+| `/sse/{group}`         | `/mcp/{group}`           | `/messages`           |
+| `/sse/{server}`        | `/mcp/{server}`          | `/messages`           |
+| `/{user}/sse`          | `/{user}/mcp`            | `/{user}/messages`    |
+| `/{user}/sse/{group}`  | `/{user}/mcp/{group}`    | `/{user}/messages`    |
+| `/{user}/sse/{server}` | `/{user}/mcp/{server}`   | `/{user}/messages`    |
+
+同时保留 `$smart/{group}` 等智能路由后缀。SSE 客户端使用服务端公布的
+消息 URL 和会话查询参数；不要把消息 URL 转换成 HTTP 新端点。替换连接
+URL，让 HTTP transport 管理后续请求。
+
+先独立迁移传输方式，再考虑升级协议。例如使用旧版 TypeScript SDK
+（`@modelcontextprotocol/sdk` 1.29.0，与 MCPHub 独立兼容性测试一致）：
+
+```typescript
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+
+const client = new Client({ name: 'my-client', version: '1.0.0' });
+await client.connect(
+  new StreamableHTTPClientTransport(new URL('https://hub.example.com/alice/mcp/my-group-id'), {
+    requestInit: { headers: { Authorization: 'Bearer YOUR_EXISTING_KEY' } },
+  }),
+);
+const tools = await client.listTools();
+// 使用返回的工具名；在整个工作流中复用此客户端。
+await client.close();
+```
+
+此迁移保留旧版初始化和 `Mcp-Session-Id` 生命周期。有状态工具仍按会话
+隔离，单纯迁移传输方式不需要 `X-MCPHub-State-Id`。现代协议发现和显式
+状态是上文描述的独立升级。SSE 会话 ID 不能跨传输方式复用：建立新的
+HTTP 工作流，重新执行登录或工具初始化。
+
+### 就绪条件和移除边界
+
+公布确切移除目标之前，维护者必须记录：
+
+- 包含公开通知的版本、实际发布日期，以及移除时已满 12 个日历月的依据。
+- 整个窗口内旧版 SSE 和 Streamable HTTP 兼容性测试持续通过，覆盖认证后的
+  全局、分组、服务器和用户路由，会话续接／重建及有状态工具隔离。
+- 每个文档列出的客户端集成的迁移清单：HTTP transport、保留路由／认证、
+  列表和调用成功，以及实际使用的资源、Apps 或有状态工作流。记录测试版本
+  和未解决阻碍；阻碍发布的迁移缺陷必须为零。可补充部署者确认，不能把
+  缺少遥测当作无人使用 SSE 的证据。
+- 中英双语发布说明和文档、提前 90 天和 30 天的提醒，以及仍使用 SSE 的
+  部署的支持渠道。
+
+移除清单仅包括 SSE GET 路由、对应 POST 消息路由、`handleSseConnection`、
+`handleSseMessage`、SSE transport 创建以及 SSE 专用测试／导入。删除共享
+辅助函数前必须检查所有调用方。保留 `/mcp` POST/GET/DELETE、旧版 HTTP
+初始化、会话映射与清理、创建／重建锁、bearer／分组认证、`perSessionClient`
+隔离、OpenAPI cookie jar 和现代显式状态。`server-legacy` 还提供共享的
+旧版 HTTP／OAuth 功能，不能仅因 SSE 退役就删除该依赖。
+
+本计划由 [#1272](https://github.com/samanhappy/mcphub/issues/1272) 跟踪。
+发布通知的版本必须建立独立移除任务，记录实际日期、客户端清单和删除清单。
+旧版 `2025-11-25` Streamable HTTP 支持独立保留。

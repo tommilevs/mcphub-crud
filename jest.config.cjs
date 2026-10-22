@@ -1,0 +1,58 @@
+module.exports = {
+  preset: 'ts-jest/presets/default-esm',
+  testEnvironment: 'node',
+  roots: ['<rootDir>/src', '<rootDir>/tests'],
+  testMatch: [
+    '<rootDir>/src/**/__tests__/**/*.{ts,tsx}',
+    '<rootDir>/src/**/*.{test,spec}.{ts,tsx}',
+    '<rootDir>/tests/**/*.{test,spec}.{ts,tsx}',
+  ],
+  transform: {
+    '^.+\\.tsx?$': [
+      'ts-jest',
+      {
+        useESM: true,
+        tsconfig: './tsconfig.test.json',
+      },
+    ],
+    // jose ships ESM only; compile it to CommonJS for the Jest runtime. The
+    // separators are a class because Jest matches Windows paths with backslashes.
+    '^.+[\\\\/]node_modules[\\\\/]jose[\\\\/]dist[\\\\/].+\\.js$': [
+      'ts-jest',
+      {
+        tsconfig: { allowJs: true, module: 'commonjs', target: 'ES2022', isolatedModules: true },
+      },
+    ],
+  },
+  moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
+  setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
+  collectCoverageFrom: [
+    'src/**/*.{ts,tsx}',
+    '!src/**/*.d.ts',
+    '!src/index.ts',
+    '!src/**/__tests__/**',
+    '!src/**/*.test.{ts,tsx}',
+    '!src/**/*.spec.{ts,tsx}',
+  ],
+  coverageDirectory: 'coverage',
+  coverageReporters: ['text', 'lcov', 'html'],
+  coverageThreshold: {
+    global: {
+      branches: 0,
+      functions: 0,
+      lines: 0,
+      statements: 0,
+    },
+  },
+  moduleNameMapper: {
+    '^@/(.*)$': '<rootDir>/src/$1',
+    '^(\\.{1,2}/.*)\\.js$': '$1',
+    '^uuid$': '<rootDir>/tests/shims/uuid.ts',
+  },
+  transformIgnorePatterns: [
+    'node_modules/(?!(\\.pnpm/[^/]+/node_modules/)?(@modelcontextprotocol|openid-client|oauth4webapi|jose)/)',
+  ],
+  extensionsToTreatAsEsm: ['.ts'],
+  testTimeout: 30000,
+  verbose: true,
+};

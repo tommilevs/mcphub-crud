@@ -1,0 +1,100 @@
+---
+title: 'Monitoring & Observability'
+description: 'What MCPHub exposes for health checks, logs, and activity tracking'
+---
+
+MCPHub exposes health checks, an optional Prometheus metrics endpoint, logs, and activity tracking. OpenTelemetry exporters and alerting pipelines are not bundled.
+
+## Health endpoint
+
+`GET /health` — public, no authentication.
+
+```bash
+curl http://localhost:3000/health
+```
+
+Sample response:
+
+```json
+{
+  "status": "healthy",
+  "message": "All enabled MCP servers are ready",
+  "servers": { "connected": 3, "connecting": 0, "disconnected": 0, "total": 3 },
+  "timestamp": "2026-05-18T12:34:56.789Z"
+}
+```
+
+`status` is one of:
+
+| Value | HTTP code | Meaning |
+| ----- | --------- | ------- |
+| `healthy` | `200` | All enabled MCP servers connected; DB (if enabled) is healthy. |
+| `degraded` | `200` | Some enabled MCP servers are not connected, but MCPHub itself is up. |
+| `unhealthy` | `503` | Database health check failed (in DB mode) or an internal error occurred. |
+
+This makes `/health` suitable for liveness/readiness probes. See `src/controllers/healthController.ts`.
+
+## Prometheus metrics
+
+Set `ENABLE_METRICS=true` to enable `GET /metrics` at the root, independently of `BASE_PATH`. It returns 404 when disabled (the default). Set `METRICS_TOKEN` to require `Authorization: Bearer <token>`; this is a dedicated scrape credential, not a dashboard or MCP bearer key. Without this variable the enabled endpoint is public. Restrict access to your monitoring network or configure the token, especially on multi-tenant deployments.
+
+```yaml
+scrape_configs:
+  - job_name: mcphub
+    static_configs:
+      - targets: ['mcphub:3000']
+    authorization:
+      credentials_file: /etc/prometheus/mcphub-token
+```
+
+| Metric | Labels | Meaning |
+| ------ | ------ | ------- |
+| `mcphub_servers_total` | `status`, `type` | Gauge of enabled shared server definitions. Includes `oauth_required` and OpenAPI. Personal credential runtimes are excluded. An idle on-demand server may be disconnected without being unhealthy. |
+| `mcphub_tool_calls_total` | `server`, `status` | Completed client tool calls (`success` or `error`), including Smart Routing meta-tools and failures before execution. |
+| `mcphub_tool_call_duration_seconds` | `server` | Histogram of complete call duration, including credential preparation, upstream connection, and retries. |
+| `mcphub_active_sessions` | none | Gauge of stateful client transport sessions, excluding stateless HTTP and synthetic REST session IDs. |
+
+Calls through MCP, Dashboard and the OpenAPI tool API share instrumentation. One client call counts once regardless of internal retries; both thrown errors and `isError` results count as failures. Calls without a resolved upstream (including search/describe meta-tools and credential preparation failures) use `server="unknown"`. These counters do not include HTTP authentication rejections before the tool handler. There are no group, user, session, tool-name or raw-error labels. Error categories and an OTel exporter are outside this initial implementation.
+
+Metrics work without a database or activity logging. Each process owns its counters, which reset on restart; scrape each replica separately. Server/session gauges refresh at scrape time without connecting to upstreams. Time series for removed server names remain until restart, so avoid continually creating new server names.
+
+## In-process logs
+
+MCPHub keeps a rolling in-memory log buffer (`src/services/logService.ts`) that powers the dashboard's log viewer.
+
+| Method & Path | Description |
+| ------------- | ----------- |
+| `GET /api/logs` | Returns the buffered log entries as JSON. |
+| `DELETE /api/logs` | Clears the buffer. |
+| `GET /api/logs/stream` | Server-Sent Events stream of new log entries as they are produced. |
+
+The stream emits one `data:` line per event, including an initial `{ "type": "initial", "logs": [...] }` snapshot. All three endpoints require an authenticated admin (dashboard JWT, bearer key with `accessType: all`, OAuth token, or Better Auth session).
+
+The buffer is process-local. For multi-instance deployments, ship `stdout` to your log aggregator instead of relying on this endpoint.
+
+## Activity log (database mode)
+
+When MCPHub runs against PostgreSQL (see [Database Configuration](/configuration/database-configuration)), every MCP request/response is persisted to the `mcphub_activity` table by `src/services/activityLoggingService.ts`. The dashboard exposes it through:
+
+| Method & Path | Description |
+| ------------- | ----------- |
+| `GET /api/activities/available` | Returns `{ available: true }` when activity logging is on (DB mode). |
+| `GET /api/activities` | Paginated activities. Query: `page`, `limit`, `server`, `tool`, `status` (`success`/`error`), `group`, `keyId`, `keyName`, `startDate`, `endDate`. |
+| `GET /api/activities/stats` | Aggregate stats with the same filters. |
+| `GET /api/activities/filters` | Distinct values for filter dropdowns. |
+| `GET /api/activities/:id` | Full record including request input and response output. |
+| `DELETE /api/activities/cleanup` | Delete activities older than a configured retention threshold. |
+
+In file mode these endpoints return `404` and the dashboard hides the Activity page.
+
+## Process-level metrics
+
+The dashboard surfaces basic server connection statistics from `getServerConnectionStats()` (also embedded in `/health`). To export richer process metrics:
+
+- Use any Node.js APM agent that wraps `http`/`express` automatically.
+- Or scrape `/health` and `/api/activities/stats` from your monitoring platform.
+
+## See also
+
+- [Database Configuration](/configuration/database-configuration) — enable PostgreSQL to unlock activity logging.
+- [Authentication & Security](/features/authentication) — how the management API and bearer-key authentication work.

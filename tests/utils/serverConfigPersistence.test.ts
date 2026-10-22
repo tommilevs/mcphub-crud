@@ -1,0 +1,389 @@
+import { normalizeServerConfigForPersistence } from '../../src/utils/serverConfigPersistence.js';
+import { ServerConfig, ServerInfo } from '../../src/types/index.js';
+
+describe('normalizeServerConfigForPersistence', () => {
+  it('keeps remote keep-alive checks disabled by default', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+    });
+
+    expect(normalized).toMatchObject({
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+      enableKeepAlive: false,
+    });
+    expect(normalized).toHaveProperty('keepAliveInterval', undefined);
+  });
+
+  it('preserves explicitly enabled remote keep-alive checks', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+      enableKeepAlive: true,
+    });
+
+    expect(normalized).toMatchObject({
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+      enableKeepAlive: true,
+      keepAliveInterval: 60000,
+    });
+  });
+
+  it('clears empty remote collections while preserving explicit field presence for DB/JSON persistence', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'sse',
+      description: '',
+      url: ' https://example.com/sse ',
+      env: {},
+      headers: {},
+      passthroughHeaders: [],
+      oauth: {},
+      options: {},
+      enableKeepAlive: false,
+      keepAliveInterval: 60000,
+    });
+
+    expect(normalized).toMatchObject({
+      type: 'sse',
+      url: 'https://example.com/sse',
+      enableKeepAlive: false,
+    });
+    expect(normalized).toHaveProperty('description', undefined);
+    expect(normalized).toHaveProperty('env', undefined);
+    expect(normalized).toHaveProperty('headers', undefined);
+    expect(normalized).toHaveProperty('passthroughHeaders', undefined);
+    expect(normalized).toHaveProperty('oauth', undefined);
+    expect(normalized).toHaveProperty('options', undefined);
+    expect(normalized).toHaveProperty('keepAliveInterval', undefined);
+  });
+
+  it('clears stale remote fields when switching to stdio', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      description: ' local ',
+      url: 'https://example.com/sse',
+      command: ' npx ',
+      args: ['-y', 'demo-server'],
+      env: {},
+      headers: {
+        Authorization: 'Bearer token',
+      },
+      passthroughHeaders: ['Authorization'],
+      oauth: {
+        clientId: 'client-id',
+      },
+      openapi: {
+        version: '3.1.0',
+        url: 'https://example.com/openapi.json',
+      },
+      enableKeepAlive: true,
+      keepAliveInterval: 15000,
+    });
+
+    expect(normalized).toMatchObject({
+      type: 'stdio',
+      description: 'local',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+    });
+    expect(normalized).toHaveProperty('url', undefined);
+    expect(normalized).toHaveProperty('headers', undefined);
+    expect(normalized).toHaveProperty('passthroughHeaders', undefined);
+    expect(normalized).toHaveProperty('oauth', undefined);
+    expect(normalized).toHaveProperty('openapi', undefined);
+    expect(normalized).toHaveProperty('enableKeepAlive', undefined);
+    expect(normalized).toHaveProperty('keepAliveInterval', undefined);
+  });
+
+  it('strips runtime-only npx/uvx package fields so they never persist (#1166)', () => {
+    // These runtime-only fields (packageVersion/latestVersion/updateAvailable) are
+    // added by #1186 as top-level ServerInfo fields surfaced on the API response.
+    // The config is typed as ServerConfig & those ServerInfo fields to honestly
+    // express a client round-tripping the fetched config verbatim back into a save.
+    const input: ServerConfig &
+      Pick<ServerInfo, 'packageVersion' | 'latestVersion' | 'updateAvailable'> = {
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'cowsay'],
+      packageVersion: '1.6.0',
+      latestVersion: '2.0.0',
+      updateAvailable: true,
+    };
+    const normalized = normalizeServerConfigForPersistence(input);
+
+    expect(normalized).toMatchObject({ type: 'stdio', command: 'npx', args: ['-y', 'cowsay'] });
+    expect(normalized).not.toHaveProperty('packageVersion');
+    expect(normalized).not.toHaveProperty('latestVersion');
+    expect(normalized).not.toHaveProperty('updateAvailable');
+  });
+
+  it('preserves an explicitly enabled per-session client', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+      perSessionClient: true,
+    });
+
+    expect(normalized).toHaveProperty('perSessionClient', true);
+  });
+
+  it('keeps per-session client present (not merely absent) so unchecking it clears the stored value', () => {
+    // The dashboard drops the key from the JSON payload when unchecked, so the
+    // incoming config has no `perSessionClient`. Normalization must still emit an
+    // explicit key — otherwise the DAO update treats it as "unchanged" and a
+    // previously-enabled server can never be turned off.
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+    });
+
+    expect(Object.prototype.hasOwnProperty.call(normalized, 'perSessionClient')).toBe(true);
+    expect(normalized).toHaveProperty('perSessionClient', undefined);
+  });
+
+  it('preserves an explicitly enabled start on demand', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+      startOnDemand: true,
+    });
+
+    expect(normalized).toHaveProperty('startOnDemand', true);
+  });
+
+  it('normalizes explicit user sharing for group visibility', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+      visibility: 'group',
+      sharedWithUsers: [' alice ', 'bob', 'alice', ''],
+    });
+
+    expect(normalized.sharedWithUsers).toEqual(['alice', 'bob']);
+  });
+
+  it('clears explicit user sharing outside group visibility', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+      visibility: 'private',
+      sharedWithUsers: ['alice'],
+    });
+
+    expect(normalized).toHaveProperty('sharedWithUsers', undefined);
+  });
+
+  it('keeps start on demand present (not merely absent) so unchecking it clears the stored value', () => {
+    // The dashboard drops the key from the JSON payload when unchecked
+    // (JSON.stringify strips `undefined`), so the incoming config has no
+    // `startOnDemand`. Normalization must still emit an explicit key - otherwise
+    // the DAO update's shallow merge ({...existing, ...updates}) treats it as
+    // "unchanged" and a previously-enabled on-demand server can never be turned
+    // off: the toggle would keep reading enabled after save. See #1032.
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+    });
+
+    expect(Object.prototype.hasOwnProperty.call(normalized, 'startOnDemand')).toBe(true);
+    expect(normalized).toHaveProperty('startOnDemand', undefined);
+  });
+
+  it('mirrors startOnDemand/idleTimeoutMs into options so DB-backed storage persists them', () => {
+    // The database-backed ServerDao has no dedicated startOnDemand/idleTimeoutMs
+    // columns, so those two fields must also be piggybacked onto the schema-less
+    // `options` JSON blob (ServerDaoDbImpl.mapToServerConfig unpacks them back out
+    // on read). Without this, saving a server with startOnDemand enabled while
+    // running in database mode silently drops the setting.
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+      startOnDemand: true,
+      idleTimeoutMs: 120000,
+    });
+
+    expect(normalized.startOnDemand).toBe(true);
+    expect(normalized.idleTimeoutMs).toBe(120000);
+    expect(normalized.options).toMatchObject({
+      startOnDemand: true,
+      idleTimeoutMs: 120000,
+    });
+  });
+
+  it('does not persist startOnDemand/idleTimeoutMs into options when disabled', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'npx',
+      args: ['-y', 'demo-server'],
+    });
+
+    expect(normalized.options).toBeUndefined();
+  });
+
+  it('normalizes openapi payloads and trims empty values', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'openapi',
+      headers: {},
+      url: 'https://example.com/old-sse',
+      openapi: {
+        version: ' 3.1.0 ',
+        url: ' ',
+        passthroughHeaders: [],
+      },
+      command: 'npx',
+      args: ['-y'],
+      env: {
+        ' API_KEY ': 'value',
+      },
+    });
+
+    expect(normalized.type).toBe('openapi');
+    expect(normalized).toHaveProperty('url', undefined);
+    expect(normalized).toHaveProperty('command', undefined);
+    expect(normalized).toHaveProperty('args', undefined);
+    expect(normalized).toHaveProperty('env', undefined);
+    expect(normalized).toHaveProperty('headers', undefined);
+    expect(normalized.openapi).toEqual({
+      version: '3.1.0',
+    });
+  });
+
+  it('keeps the specSecurity credential slot through openapi normalization (#1079)', () => {
+    const specSecurity = {
+      type: 'http' as const,
+      http: { scheme: 'basic' as const, credentials: 'admin:s3cret' },
+    };
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'openapi',
+      openapi: {
+        url: 'https://example.com/v3/api-docs',
+        security: { type: 'http', http: { scheme: 'bearer', credentials: 'api-token' } },
+        specSecurity,
+      },
+    });
+
+    expect(normalized.openapi?.specSecurity).toEqual(specSecurity);
+  });
+
+  it('preserves oauth redirectUri and revocationEndpoint through normalization', () => {
+    // These two fields are consumed downstream (redirectUri -> preferred redirect URI
+    // for DCR/authorization URLs; revocationEndpoint -> token revocation on disconnect)
+    // and must survive the oauth whitelist rather than being silently stripped on save.
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+      oauth: {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+        scopes: ['read', 'write'],
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        authorizationEndpoint: 'https://example.com/authorize',
+        tokenEndpoint: 'https://example.com/token',
+        resource: 'https://api.example.com',
+        redirectUri: 'https://example.com/mcp/callback',
+        revocationEndpoint: 'https://example.com/revoke',
+        dynamicRegistration: { enabled: true, issuer: 'https://auth.example.com' },
+      },
+    });
+
+    expect(normalized.oauth).toEqual({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+      scopes: ['read', 'write'],
+      accessToken: 'access-token',
+      refreshToken: 'refresh-token',
+      authorizationEndpoint: 'https://example.com/authorize',
+      tokenEndpoint: 'https://example.com/token',
+      resource: 'https://api.example.com',
+      redirectUri: 'https://example.com/mcp/callback',
+      revocationEndpoint: 'https://example.com/revoke',
+      dynamicRegistration: { enabled: true, issuer: 'https://auth.example.com' },
+    });
+  });
+
+  it('does not fabricate redirectUri or revocationEndpoint when oauth lacks them', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'sse',
+      url: 'https://example.com/sse',
+      oauth: {
+        clientId: 'client-id',
+        clientSecret: 'client-secret',
+      },
+    });
+
+    expect(normalized.oauth).not.toHaveProperty('redirectUri');
+    expect(normalized.oauth).not.toHaveProperty('revocationEndpoint');
+    expect(normalized.oauth).toMatchObject({
+      clientId: 'client-id',
+      clientSecret: 'client-secret',
+    });
+  });
+
+  it('preserves an explicitly empty oauth.scopes array on save (#1227)', () => {
+    // Unlike passthroughHeaders and similar fields, where "empty" and "unset" are the same
+    // thing, oauth.scopes distinguishes "server uses no scopes" ([]) from "not yet resolved"
+    // (absent) -- the generic normalizeStringArray helper collapses [] to undefined, which
+    // silently made "no scope" unconfigurable. normalizeOAuthScopes must not do that.
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'streamable-http',
+      url: 'https://mcp.pcloud.com/mcp',
+      oauth: {
+        clientId: 'client-id',
+        scopes: [],
+      },
+    });
+
+    expect(normalized.oauth).toHaveProperty('scopes', []);
+  });
+
+  it('still drops oauth.scopes when not configured at all', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+      oauth: {
+        clientId: 'client-id',
+      },
+    });
+
+    expect(normalized.oauth).not.toHaveProperty('scopes');
+  });
+});
+
+describe('stdio buffer persistence', () => {
+  it('preserves the buffer size alongside request options', () => {
+    expect(
+      normalizeServerConfigForPersistence({
+        command: 'node',
+        options: { timeout: 60000, maxBufferSize: 268435456 },
+      }).options,
+    ).toEqual({ timeout: 60000, maxBufferSize: 268435456 });
+  });
+  it.each([0, -1, 1.5, NaN, Infinity, -Infinity, Number.MAX_SAFE_INTEGER + 1, null, '1024'])(
+    'rejects invalid maxBufferSize %s',
+    (maxBufferSize) => {
+      expect(() =>
+        normalizeServerConfigForPersistence({
+          command: 'node',
+          options: { maxBufferSize: maxBufferSize as number },
+        }),
+      ).toThrow('positive safe integer');
+    },
+  );
+});
+
+it.each([undefined, false, true])('round-trips HTTP OAuth exception=%s', (value) => {
+  const config = normalizeServerConfigForPersistence({
+    type: 'streamable-http',
+    url: 'http://gitlab.example/mcp',
+    oauth: { allowInsecureTokenEndpoint: value },
+  });
+  expect(config.oauth?.allowInsecureTokenEndpoint).toBe(value);
+});

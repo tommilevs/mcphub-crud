@@ -1,0 +1,71 @@
+---
+title: "Smart Routing"
+description: "Intelligent tool discovery using vector semantic search."
+---
+
+Smart Routing is MCPHub's intelligent tool discovery system that uses vector semantic search to automatically find the most relevant tools for any given task.
+
+### HTTP Endpoint
+
+- **Endpoint**: `http://localhost:3000/mcp/$smart`
+- **Method**: `POST`
+
+### SSE Endpoint (Deprecated)
+
+- **Endpoint**: `http://localhost:3000/sse/$smart`
+- **Method**: `GET`
+
+### How it Works
+
+1.  **Tool Indexing**: All MCP tools are automatically converted to vector embeddings and stored in PostgreSQL with pgvector.
+2.  **Semantic Search**: User queries are converted to vectors and matched against tool embeddings using cosine similarity.
+3.  **Intelligent Filtering**: Dynamic thresholds ensure relevant results without noise.
+4.  **Precise Execution**: Found tools can be directly executed with proper parameter validation.
+
+### Setup Requirements
+
+- PostgreSQL with pgvector extension
+- LLM Provider (OpenAI or compatible) API key
+- Enable Smart Routing in MCPHub settings
+
+## Diagnostics & Maintenance API
+
+The following admin endpoints live under the authenticated Dashboard API and
+require a valid Dashboard session (JWT) or a system-level all-access bearer key
+(`Authorization: Bearer mcphub_...`), like any other `/api/*` route. Both are
+additionally **admin-only**: an authenticated non-admin identity receives
+`403 Admin privileges required`.
+
+### Index Status & Performance
+
+Returns Smart Routing configuration, database connection state, vector store
+size (tool/server row counts, distinct servers, dimensions), per-model and
+per-server statistics, sync freshness, and index coverage.
+
+```bash
+curl http://localhost:3000/api/smart-routing/performance \
+  -H "Authorization: Bearer YOUR_JWT_OR_BEARER_KEY"
+```
+
+### Reindex
+
+Force a full rebuild of the vector index: `vector_embeddings` is cleared first,
+then embeddings are regenerated for every enabled server. Runs synchronously
+and returns a summary; per-server progress is streamed over SSE
+`embedding-sync-progress` events.
+
+Servers that declare a personal credential template are never connected
+globally, so they are reached on behalf of the users who bound credentials (the
+server owner first) and the union of the tools those users can see is indexed.
+A server nobody bound credentials for is reported as skipped with a reason in
+the response `results`.
+
+Only one pass runs at a time: a call made while another pass is in flight is
+rejected with `409 A reindex pass is already running`. The
+`GET /api/smart-routing/performance` payload exposes the same state as
+`reindexing`, so a dashboard can disable its button while a pass is running.
+
+```bash
+curl -X POST http://localhost:3000/api/smart-routing/reindex \
+  -H "Authorization: Bearer YOUR_JWT_OR_BEARER_KEY"
+```

@@ -1,0 +1,381 @@
+import React, { useMemo, useState, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
+import { Plus, RefreshCw, Search, Upload, FileCode, AlertCircle, X } from 'lucide-react';
+import { Server } from '@/types';
+import ServerCard from '@/components/ServerCard';
+import AddServerForm from '@/components/AddServerForm';
+import EditServerForm from '@/components/EditServerForm';
+import McpbUploadForm from '@/components/McpbUploadForm';
+import JSONImportForm from '@/components/JSONImportForm';
+import Pagination from '@/components/ui/Pagination';
+import { useServerData } from '@/hooks/useServerData';
+import { useCostData } from '@/hooks/useCostData';
+import { selectServerPage, getServerFilterCounts, type ServerFilter } from '@/utils/serverFilters';
+import { resolveDuplicateResponse } from '@/utils/serverDuplicate';
+
+const ServersPage: React.FC = () => {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const {
+    servers,
+    allServers,
+    error,
+    setError,
+    isLoading,
+    currentPage,
+    serversPerPage,
+    setCurrentPage,
+    setServersPerPage,
+    handleServerAdd,
+    handleServerEdit,
+    handleServerRemove,
+    handleServerToggle,
+    handleServerVisibilityChange,
+    handleServerReload,
+    handleServerReinstall,
+    handleServerOAuthDisconnect,
+    triggerRefresh,
+  } = useServerData({ refreshOnMount: true });
+
+  const { serverCosts, refetch: refetchCost } = useCostData();
+
+  // Re-fetch context footprint whenever server data changes (toggle, reload, edit).
+  useEffect(() => {
+    refetchCost();
+  }, [servers, refetchCost]);
+
+  const [editingServer, setEditingServer] = useState<Server | null>(null);
+  const [duplicateServer, setDuplicateServer] = useState<Server | null>(null);
+  const [duplicatingServer, setDuplicatingServer] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [showMcpbUpload, setShowMcpbUpload] = useState(false);
+  const [showJsonImport, setShowJsonImport] = useState(false);
+  const [filter, setFilter] = useState<ServerFilter>('all');
+  const [search, setSearch] = useState('');
+
+  const counts = useMemo(() => getServerFilterCounts(allServers), [allServers]);
+
+  // Filter against the full list and paginate the filtered result client-side,
+  // so status filters reach servers that live on other pagination pages.
+  const { servers: visibleServers, pagination: clientPagination } = useMemo(
+    () => selectServerPage(allServers, filter, search, currentPage, serversPerPage),
+    [allServers, filter, search, currentPage, serversPerPage],
+  );
+
+  // Sync currentPage when client-side pagination clamps it (filter/search narrows results).
+  useEffect(() => {
+    if (clientPagination.page !== currentPage) {
+      setCurrentPage(clientPagination.page);
+    }
+  }, [clientPagination.page, currentPage, setCurrentPage]);
+
+  // Edit opens the modal from a `GET /servers/<name>` response, so it has the
+  // same interleave race the Duplicate B1 guard fixes: click Edit on A, then
+  // click Edit on B while A's request is still in flight - A's late response
+  // would otherwise overwrite `editingServer` after B's already opened, and
+  // `EditServerForm.handleSubmit` would `PUT` B's form values onto A (silent
+  // cross-server write, same causal mechanism as the Duplicate race).
+  //
+  // Fix: same B1 pattern - a monotonically increasing request id that is never
+  // reset. Each accepted click bumps it; the response is only committed if its
+  // id is still the latest, so a superseded/stale response is dropped. The
+  // commit check is a plain equality comparison (the `resolveDuplicateResponse`
+  // helper is left to the Duplicate flow, whose busy-clear `finally` is the
+  // only consumer of the 'commit' | 'stale' wording). Edit has no busy
+  // indicator, so there is no spinner state to guard here. The ref is separate
+  // from `duplicateRequestId` on purpose: the two flows are unrelated, and
+  // sharing one counter would let a click in one flow discard the other's
+  // in-flight response.
+  const editRequestId = useRef(0); // bumped on every accepted click
+  const handleEditClick = async (server: Server) => {
+    const requestId = ++editRequestId.current;
+    const fullServerData = await handleServerEdit(server);
+    // Drop a stale response: a newer click superseded this request, so
+    // committing it would open the modal for the wrong server.
+    if (requestId !== editRequestId.current) return;
+    if (fullServerData) setEditingServer(fullServerData);
+  };
+
+  // Duplicate pre-fills the add form, so it needs the same full stored
+  // configuration the edit flow loads - the card only carries the list
+  // projection, which has no env/headers/credential template (#1187).
+  //
+  // B1: guard against interleaved clicks. A slow `GET /servers/A` can still be
+  // in flight when the user clicks Duplicate on B (the `duplicatingServer`
+  // guard only blocks re-clicking the *same* name). Without a guard the two
+  // responses would race and the stale one could overwrite the prefill after
+  // the modal already opened, so the form would show one server while
+  // `handleSubmit` re-attaches another server's capability overrides to the
+  // payload (silent cross-server data corruption).
+  //
+  // Fix: a monotonically increasing request id (never reset). Each accepted
+  // click bumps it; the response is only committed if its request id is still
+  // the latest (any superseded/stale response is dropped). The `finally` also
+  // only clears the busy indicator when this request is still the latest, so a
+  // superseded request's late return can no longer clear the newer request's
+  // spinner early. Because the id is monotonic and never reset, the winning
+  // request always satisfies `requestId === duplicateRequestId.current` in both
+  // the commit check and the `finally`, so the busy indicator is always cleared.
+  const duplicateRequestId = useRef(0); // bumped on every accepted click
+  const handleDuplicateClick = async (server: Server) => {
+    // Ignore repeat clicks while this server's stored config is still loading,
+    // so a slow request cannot fire twice.
+    if (duplicatingServer === server.name) return;
+    const requestId = ++duplicateRequestId.current;
+    setDuplicatingServer(server.name);
+    try {
+      const fullServerData = await handleServerEdit(server);
+      // Drop a stale response: a newer click superseded this request, so
+      // committing it would overwrite the prefill with the wrong server.
+      if (resolveDuplicateResponse(requestId, duplicateRequestId.current) === 'stale') return;
+      if (fullServerData) setDuplicateServer(fullServerData);
+    } finally {
+      // Only clear the busy indicator when this request is still the latest;
+      // a superseded request must not erase the newer request's spinner. On the
+      // winning path `resolveDuplicateResponse` returns 'commit'
+      // (`requestId === duplicateRequestId.current` holds), so the busy
+      // indicator is always cleared here.
+      if (resolveDuplicateResponse(requestId, duplicateRequestId.current) === 'commit') {
+        setDuplicatingServer(null);
+      }
+    }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      triggerRefresh();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  return (
+    <div>
+      {/* Header */}
+      <div className="flex items-end justify-between gap-4 mb-6">
+        <div>
+          <h1 className="hub-h1">{t('pages.servers.title')}</h1>
+          <p className="hub-sub">
+            <span className="hub-num">{counts.all}</span> {t('nav.servers').toLowerCase()} ·{' '}
+            <span className="hub-num">{counts.online}</span> {t('status.online')} ·{' '}
+            <span className="hub-num">{counts.issues}</span>{' '}
+            {t('common.inactive') || 'issues'}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <button className="hub-btn" onClick={() => navigate('/market')}>
+            <Plus size={13} /> {t('nav.market')}
+          </button>
+          <button className="hub-btn" onClick={() => setShowJsonImport(true)}>
+            <FileCode size={13} /> {t('jsonImport.button')}
+          </button>
+          <button className="hub-btn" onClick={() => setShowMcpbUpload(true)}>
+            <Upload size={13} /> {t('mcpb.upload')}
+          </button>
+          <button
+            className="hub-btn"
+            onClick={handleRefresh}
+            disabled={isRefreshing}
+            aria-label={t('common.refresh')}
+          >
+            <RefreshCw size={13} className={isRefreshing ? 'animate-spin' : ''} />
+            {t('common.refresh')}
+          </button>
+          <AddServerForm
+            onAdd={handleServerAdd}
+            duplicateSource={duplicateServer}
+            onDuplicateCancel={() => setDuplicateServer(null)}
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div
+          className="hub-card flex items-center justify-between gap-3 mb-4"
+          style={{
+            padding: '10px 14px',
+            borderColor: 'oklch(0.85 0.1 25)',
+            background: 'oklch(0.97 0.03 25)',
+            color: 'oklch(0.4 0.18 25)',
+          }}
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <AlertCircle size={14} className="flex-shrink-0" />
+            <span className="truncate text-[13px]">{error}</span>
+          </div>
+          <button
+            className="hub-icon-btn sm"
+            onClick={() => setError(null)}
+            aria-label={t('app.closeButton')}
+          >
+            <X size={13} />
+          </button>
+        </div>
+      )}
+
+      {/* Toolbar */}
+      <div className="flex items-center gap-2 mb-4 flex-wrap">
+        <div
+          className="hub-card flex items-center"
+          style={{ padding: 2, borderRadius: 7, background: 'var(--hub-surface)' }}
+        >
+          {(
+            [
+              ['all', t('common.all') || 'All', counts.all],
+              ['online', t('status.online'), counts.online],
+              ['issues', t('common.inactive') || 'Issues', counts.issues],
+              ['disabled', t('pages.dashboard.disabledServers') || 'Disabled', counts.disabled],
+            ] as [ServerFilter, string, number][]
+          ).map(([k, l, n]) => (
+            <button
+              key={k}
+              onClick={() => setFilter(k)}
+              className="inline-flex items-center gap-1.5 px-3 text-[12px]"
+              style={{
+                height: 24,
+                borderRadius: 5,
+                background: filter === k ? 'var(--hub-bg-2)' : 'transparent',
+                color: filter === k ? 'var(--hub-ink)' : 'var(--hub-ink-3)',
+                border: '1px solid ' + (filter === k ? 'var(--hub-line)' : 'transparent'),
+              }}
+            >
+              {l}
+              <span className="hub-mono" style={{ fontSize: 11, color: 'var(--hub-ink-3)' }}>
+                {n}
+              </span>
+            </button>
+          ))}
+        </div>
+
+        <div
+          className="hub-card flex items-center gap-2 px-2.5 flex-1"
+          style={{ height: 30, background: 'var(--hub-surface)', maxWidth: 360 }}
+        >
+          <Search size={13} style={{ color: 'var(--hub-ink-3)' }} />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="flex-1 bg-transparent outline-none text-[13px]"
+            style={{ color: 'var(--hub-ink)' }}
+            placeholder={t('market.searchPlaceholder') || 'Search…'}
+          />
+          {search && (
+            <button onClick={() => setSearch('')} className="hub-icon-btn sm">
+              <X size={11} />
+            </button>
+          )}
+        </div>
+
+        <div className="ml-auto hub-mono text-[12px]" style={{ color: 'var(--hub-ink-3)' }}>
+          {clientPagination.total}/{allServers.length}
+        </div>
+      </div>
+
+      {/* List */}
+      {isLoading && servers.length === 0 ? (
+        <div className="hub-card p-6 flex items-center justify-center">
+          <div className="flex flex-col items-center gap-2">
+            <RefreshCw size={20} className="animate-spin" style={{ color: 'var(--hub-ink-3)' }} />
+            <p style={{ color: 'var(--hub-ink-3)' }}>{t('app.loading')}</p>
+          </div>
+        </div>
+      ) : visibleServers.length === 0 ? (
+        <div className="hub-card p-10 text-center" style={{ color: 'var(--hub-ink-3)' }}>
+          <p>{servers.length === 0 ? t('app.noServers') : t('market.noServers')}</p>
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-col">
+            {visibleServers.map((server) => (
+              <ServerCard
+                key={server.name}
+                server={server}
+                cost={serverCosts.find((c) => c.name === server.name)}
+                onRemove={handleServerRemove}
+                onEdit={handleEditClick}
+                onDuplicate={handleDuplicateClick}
+                isDuplicating={duplicatingServer === server.name}
+                onToggle={handleServerToggle}
+                onVisibilityChange={handleServerVisibilityChange}
+                onRefresh={triggerRefresh}
+                onReload={handleServerReload}
+                onReinstall={handleServerReinstall}
+                onOAuthDisconnect={handleServerOAuthDisconnect}
+              />
+            ))}
+          </div>
+
+          <div className="flex items-center mt-4 text-[12px]" style={{ color: 'var(--hub-ink-3)' }}>
+            <div className="flex-[2]">
+              {t('common.showing', {
+                start: (clientPagination.page - 1) * clientPagination.limit + 1,
+                end: Math.min(clientPagination.page * clientPagination.limit, clientPagination.total),
+                total: clientPagination.total,
+              })}
+            </div>
+            <div className="flex-[4] flex justify-center">
+              {clientPagination.totalPages > 1 && (
+                <Pagination
+                  currentPage={clientPagination.page}
+                  totalPages={clientPagination.totalPages}
+                  onPageChange={setCurrentPage}
+                  disabled={isLoading}
+                />
+              )}
+            </div>
+            <div className="flex-[2] flex items-center justify-end gap-2">
+              <label htmlFor="perPage">{t('common.itemsPerPage')}:</label>
+              <select
+                id="perPage"
+                value={serversPerPage}
+                onChange={(e) => setServersPerPage(Number(e.target.value))}
+                disabled={isLoading}
+                className="hub-input"
+                style={{ height: 26, width: 70, padding: '0 6px', fontSize: 12 }}
+              >
+                <option value={5}>5</option>
+                <option value={10}>10</option>
+                <option value={20}>20</option>
+                <option value={50}>50</option>
+              </select>
+            </div>
+          </div>
+        </>
+      )}
+
+      {editingServer && (
+        <EditServerForm
+          server={editingServer}
+          onEdit={() => {
+            setEditingServer(null);
+            triggerRefresh();
+          }}
+          onCancel={() => setEditingServer(null)}
+        />
+      )}
+      {showMcpbUpload && (
+        <McpbUploadForm
+          onSuccess={() => {
+            setShowMcpbUpload(false);
+            triggerRefresh();
+          }}
+          onCancel={() => setShowMcpbUpload(false)}
+        />
+      )}
+      {showJsonImport && (
+        <JSONImportForm
+          onSuccess={() => {
+            setShowJsonImport(false);
+            triggerRefresh();
+          }}
+          onCancel={() => setShowJsonImport(false)}
+        />
+      )}
+    </div>
+  );
+};
+
+export default ServersPage;

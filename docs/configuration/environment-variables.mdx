@@ -1,0 +1,249 @@
+---
+title: 'Environment Variables'
+description: 'Configure MCPHub using environment variables'
+---
+
+MCPHub reads the following environment variables at startup. The authoritative list is whatever appears under `process.env.*` in `src/`; this page summarizes everything currently read by the code on `main`.
+
+## Core application
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `3000` | HTTP server port. |
+| `BASE_PATH` | `''` | Mount-point prefix when MCPHub is served under a sub-path (e.g. `/mcphub`). |
+| `SMART_ROUTING_PATH` | `$smart` | Smart Routing path segment, e.g. `my_smart` for `/mcp/my_smart`. Use 1–64 ASCII letters, digits, hyphens or underscores. Restart required. The legacy `$smart` endpoint remains available. Server/group names and group IDs must not conflict with this value. |
+| `DEFAULT_REQUEST_TIMEOUT` | `60000` | Default request timeout (ms) for upstream MCP server requests when a server does not set `options.timeout`. |
+| `INIT_TIMEOUT` | `300000` | Initial timeout (ms) used when starting upstream MCP servers. |
+| `STARTUP_CONNECT_CONCURRENCY` | `0` | How many upstream servers may connect at once during startup. `0` (or unset) connects them all in parallel. On deployments with many `stdio` servers, a bound keeps them from competing for CPU, network and disk hard enough to exhaust `INIT_TIMEOUT`. Time spent queueing does not count against a server's timeout. |
+| `READONLY` | `false` | Reject mutating dashboard API requests. `GET` and `${basePath}/tools/*` remain allowed. |
+| `DISABLE_WEB` | `false` | Skip serving the bundled dashboard. The API and MCP transport routes still run. |
+| `TRUST_PROXY` | auto | Express `trust proxy` setting. Accepts `true`, `false`, a hop count (`1`, `2`, …), or names like `loopback,linklocal,uniquelocal`. Defaults to `1` inside Docker/Kubernetes, `false` otherwise. |
+| `MCPHUB_SETTING_PATH` | `mcp_settings.json` | Override the path of the settings file used by file-mode storage. |
+| `INSTALL_BASE_URL` | `http://localhost:3000` | Public installation base URL used when `systemConfig.install.baseUrl` is unset. The dashboard/API setting still takes precedence; this env var is useful for declarative Docker/Kubernetes deployments and OAuth callback URLs. |
+| `NODE_ENV` | `development` | `development` / `production` / `test`. |
+| `ENABLE_METRICS` | `false` | Enable the root `/metrics` Prometheus endpoint. |
+| `METRICS_TOKEN` | unset | Dedicated bearer token for metrics scraping. Without it, an enabled endpoint is public; restrict network access. |
+| `DEBUG` | `false` | Set to `true` to enable verbose startup logging for frontend-path discovery. |
+
+
+### Custom Smart Routing URL
+
+For example, with `PORT=6001`, `BASE_PATH=/mcp_manage` and `SMART_ROUTING_PATH=my_smart`, connect using Streamable HTTP at `http://localhost:6001/mcp_manage/mcp/my_smart`. Append `/<group>` to restrict Smart Routing to a group, or prepend `/<user>` before `/mcp` for a user-scoped route. The same alias also works under `/sse` for legacy clients.
+
+The configured segment is reserved for Smart Routing. Startup rejects existing server/group name or group ID conflicts, and configuration writes reject new conflicts. Change the segment or rename the conflicting target first. Changing the segment requires a restart and updating clients using the previous custom URL; `$smart` remains available for compatibility, including CLI calls. This setting does not change authentication or permissions.
+
+## Authentication
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ADMIN_PASSWORD` | random (`admin123` in `pnpm dev`) | Password seeded for the bootstrap `admin` user when no users exist yet. If unset, `pnpm dev` uses `admin123`; other starts generate a 24-character random password and print it to the logs. |
+| `JWT_SECRET` | random per-process | Secret used to sign JWTs issued by `/api/auth/login`. See the warning below — this **must** be set explicitly in any non-development deployment. |
+
+<Warning>
+  **`JWT_SECRET` must be set to a persistent, high-entropy value (≥ 32 random bytes) in staging and production.** If it is left unset, MCPHub generates a new random secret on every process start, which means: every restart invalidates all outstanding sessions and bearer tokens; horizontally-scaled instances cannot share sessions because each replica signs with its own secret; and CI / container restarts silently log everyone out. Generate one with `openssl rand -hex 32` and store it in your secret manager. Treat it like any other long-lived cryptographic key — rotation requires invalidating outstanding JWTs.
+</Warning>
+
+### Better Auth (optional social login)
+
+Better Auth is initialized once at process startup in `src/betterAuth.ts`. Because of that, changing any Better Auth setting still requires a restart.
+
+For non-secret Better Auth settings, MCPHub resolves values in this order:
+
+1. `BETTER_AUTH_*` environment variables
+2. `systemConfig.auth.betterAuth` (from `mcp_settings.json` or the database-backed system config)
+3. Built-in defaults
+
+Provider client credentials remain environment-variable only.
+
+<Note>
+  Better Auth currently requires PostgreSQL-backed storage in MCPHub. In practice that means `DB_URL` must be configured; file-only mode does not support Better Auth sessions.
+</Note>
+
+| Variable | Description |
+| --- | --- |
+| `BETTER_AUTH_ENABLED` | Master switch for Better Auth. Better Auth is still disabled automatically when MCPHub is not in database mode or when no provider has the required credentials. |
+| `BETTER_AUTH_URL` | Public base URL used to build Better Auth redirect URIs. Takes precedence over `systemConfig.auth.betterAuth.baseUrl` (configurable in Settings → Better Auth) and `systemConfig.install.baseUrl`. Its origin is also auto-added to the trusted origin list. |
+| `BETTER_AUTH_BASE_PATH` | Mount path for the Better Auth handler. Defaults to `/api/auth/better`. |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | Optional additional origins allowed to start Better Auth login flows. Accepts a comma-separated list, whitespace-separated list, or JSON array. When omitted, MCPHub still auto-trusts the origins from `BETTER_AUTH_URL` and `systemConfig.install.baseUrl`. |
+| `BETTER_AUTH_DISABLE_PASSWORD_LOGIN` | Turn off username/password login (`POST /api/auth/login` and the login form) while at least one SSO provider is enabled (and was enabled at startup). Overrides the stored `disablePasswordLogin` setting in both directions, so `false` is also the recovery switch when the identity provider is unavailable. Defaults to `false`. |
+| `BETTER_AUTH_GOOGLE_ENABLED` | Enable or disable the Google provider after credentials are present. Defaults to `true`. |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google OAuth app credentials. |
+| `BETTER_AUTH_GITHUB_ENABLED` | Enable or disable the GitHub provider after credentials are present. Defaults to `true`. |
+| `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET` | GitHub OAuth app credentials. |
+| `BETTER_AUTH_OIDC_ENABLED` | Enable or disable the generic OIDC provider. Defaults to `false`. |
+| `BETTER_AUTH_OIDC_PROVIDER_ID` | Provider identifier passed to Better Auth's generic OAuth plugin. Defaults to `oidc`. |
+| `BETTER_AUTH_OIDC_DISCOVERY_URL` | Discovery URL for a local OIDC issuer (for example Keycloak, Authentik, or Dex). |
+| `OIDC_DISCOVERY_URL` | Legacy alias for `BETTER_AUTH_OIDC_DISCOVERY_URL`. It is also still useful for `${OIDC_DISCOVERY_URL}` interpolation inside `mcp_settings.json`. |
+| `BETTER_AUTH_OIDC_SCOPES` | Optional requested scopes for the local OIDC provider. Accepts a comma-separated list, whitespace-separated list, or JSON array. Defaults to `openid profile email`. |
+| `BETTER_AUTH_OIDC_PKCE` | Enable or disable PKCE for the local OIDC provider. Defaults to `true`. |
+| `BETTER_AUTH_OIDC_PROMPT` | Optional `prompt` parameter for the local OIDC provider (`login`, `consent`, `select_account`, etc.). |
+| `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET` | Client credentials for a local OIDC provider such as Keycloak, Authentik, or Dex. |
+
+You can still store the non-secret Better Auth settings in `systemConfig.auth.betterAuth`, but `BETTER_AUTH_*` variables now override those values at startup. A full env-only local OIDC example looks like this:
+
+```env
+BETTER_AUTH_ENABLED=true
+BETTER_AUTH_URL=https://mcphub.example.com
+BETTER_AUTH_BASE_PATH=/api/auth/better
+BETTER_AUTH_TRUSTED_ORIGINS=https://dashboard.example.com,https://admin.example.com
+
+BETTER_AUTH_OIDC_ENABLED=true
+BETTER_AUTH_OIDC_PROVIDER_ID=local-oidc
+BETTER_AUTH_OIDC_DISCOVERY_URL=https://auth.example.com/.well-known/openid-configuration
+BETTER_AUTH_OIDC_SCOPES=openid,profile,email
+BETTER_AUTH_OIDC_PKCE=true
+BETTER_AUTH_OIDC_PROMPT=login
+OIDC_CLIENT_ID=your-oidc-client-id
+OIDC_CLIENT_SECRET=your-oidc-client-secret
+```
+
+### Forward auth
+
+Forward auth trusts a JWT issued to users by an upstream gateway and verifies it against the identity provider's JWKS. See [Authentication → Forward auth](/features/authentication#forward-auth-jwks-verified-gateway-identity) for the behavior. Values resolve in this order: `FORWARD_AUTH_*` environment variables, then `systemConfig.auth.forwardAuth`, then built-in defaults. Settings are read per request, so no restart is needed.
+
+| Variable | Description |
+| --- | --- |
+| `FORWARD_AUTH_ENABLED` | Enable forward auth. Defaults to `false`. |
+| `FORWARD_AUTH_MODE` | Verification mode. Only `jwks` is supported. |
+| `FORWARD_AUTH_JWKS_URI` | JWKS endpoint of the identity provider. Must be `https` (plain `http` only for `localhost`). Required. |
+| `FORWARD_AUTH_ISSUER` | Expected `iss` claim. Required. |
+| `FORWARD_AUTH_AUDIENCE` | Accepted `aud` value(s). Accepts a comma-separated list or JSON array; values may contain spaces (for example `My API`). Required. |
+| `FORWARD_AUTH_ALGORITHMS` | Allowed asymmetric algorithms. Defaults to `RS256,ES256`. `HS*` and `none` are never accepted. |
+| `FORWARD_AUTH_USERNAME_CLAIM` | Claim used for the username of newly created users. Defaults to `preferred_username`. |
+| `FORWARD_AUTH_EMAIL_CLAIM` | Claim used for the email of newly created users. Defaults to `email`. |
+| `FORWARD_AUTH_AUTO_CREATE` | Create a non-admin local user for a new identity. Defaults to `true`. |
+
+## Storage
+
+MCPHub picks file or database storage at boot:
+
+```
+useDatabase = (USE_DB === 'true') OR (USE_DB unset AND DB_URL is set)
+```
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `USE_DB` | unset | Force database mode (`true`) or file mode (`false`). |
+| `DB_URL` | unset | PostgreSQL connection URL. Required for database mode. |
+| `DB_POOL_SIZE` | `10` | Maximum connections **per pool**. Applied independently to the TypeORM pool and to the Better Auth pool, so it is not a process-wide cap — see the note below. |
+| `DB_POOL_IDLE_TIMEOUT` | `30000` | Idle pool connection timeout (ms). |
+| `DB_CONNECTION_TIMEOUT` | `60000` | Initial connect timeout (ms). |
+| `DB_CONNECTION_RETRY_DELAY` | `3000` | Base delay between automatic reconnection attempts (ms). |
+| `DB_MAX_CONNECTION_RETRIES` | `5` | Maximum automatic reconnection attempts. |
+| `DB_DESTROY_TIMEOUT` | `15000` | Timeout (ms) for tearing down the old pool during reconnection. Prevents a connection stuck in `idle in transaction` from wedging the service (#1205). |
+| `DB_STATEMENT_TIMEOUT` | `0` | Per-connection `statement_timeout` (ms) sent to PostgreSQL; `0` keeps the PostgreSQL default (disabled). |
+| `DB_IDLE_IN_TRANSACTION_TIMEOUT` | `0` | Per-connection `idle_in_transaction_session_timeout` (ms) sent to PostgreSQL; `0` keeps the PostgreSQL default (disabled). |
+| `DB_ENABLE_HEALTH_CHECK` | `true` | Run periodic DB health probes (consumed by `/health`). |
+| `DB_HEALTH_CHECK_INTERVAL` | `30000` | Health-probe interval (ms). |
+| `DB_HEALTH_CHECK_QUERY_TIMEOUT` | `5000` | Timeout (ms) for the `SELECT 1` health probe. |
+
+<Note>
+  **`DB_POOL_SIZE` is a per-pool limit.** MCPHub opens one pool for TypeORM and, when Better Auth is enabled, a second one for Better Auth, each sized to `DB_POOL_SIZE`. When both are in use, budget roughly **2 × `DB_POOL_SIZE`** PostgreSQL connections per replica (for example `DB_POOL_SIZE=20` → about 40), plus headroom for other clients and ops tooling against the same database.
+
+  This is the combined *configured* pool capacity, not a strict process-wide cap. During an automatic reconnection, the old pool is torn down with `DB_DESTROY_TIMEOUT`; if that teardown times out, connections from the old pool may linger briefly while the new pool is already open.
+</Note>
+
+See [Database Configuration](/configuration/database-configuration) for end-to-end setup.
+
+## Smart Routing & embeddings
+
+Smart Routing performs vector search over upstream tools to surface only the few most relevant tools for a given query. It requires Postgres + pgvector and an embedding endpoint.
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `SMART_ROUTING_ENABLED` | `false` | Canonical master switch for Smart Routing. `ENABLE_SMART_ROUTING` is accepted as a legacy alias; when both are set, this variable takes precedence. |
+| `SMART_ROUTING_EMBEDDING_PROVIDER` | `openai` | Embedding provider. Currently `openai` or `azure_openai`. |
+| `SMART_ROUTING_EMBEDDING_ENCODING_FORMAT` | provider default | Override the `encoding_format` passed to the embedding API. |
+| `SMART_ROUTING_BASE_PACING_DELAY_MS` | `0` | Base delay (ms) applied between embedding requests to avoid rate limits. |
+| `SMART_ROUTING_PROGRESSIVE_DISCLOSURE` | unset | When set, expose progressively-disclosed tool metadata (see Smart Routing docs). |
+| `SMART_ROUTING_SERVER_DESCRIPTION_MODE` | `names` | Control how `search_tools` lists available servers: `names` for server names only, `full` to include server descriptions/instructions when available. |
+| `EMBEDDING_MODEL` | `text-embedding-3-small` | Embedding model name. `OPENAI_API_EMBEDDING_MODEL` is accepted as a legacy alias; when both are set, this variable takes precedence. |
+| `EMBEDDING_DIMENSIONS` | unset | Optional output dimensionality for providers that support it. When unset, the provider's model default is used. |
+| `EMBEDDING_DIMENSIONS_API_PASSTHROUGH` | `false` | When `true`, always forward `embeddingDimensions` to the provider as the `dimensions` request parameter. By default MCPHub only forwards `dimensions` for models known to support Matryoshka (MRL) representations (`text-embedding-3-*`, `gemini-embedding-*`); many open models/backends (Qwen3-Embedding, BGE, vLLM/sglang) reject the parameter outright (issue #1131). Enable only for other MRL-capable models. |
+| `EMBEDDING_MAX_TOKENS` | per-model | Override token truncation limit before embedding. Useful to match a local inference server's batch size. |
+| `SMART_ROUTING_EMBEDDING_QUERY_PREFIX` | empty | Text prepended to `search_tools` queries before embedding, for asymmetric retrieval models trained with task prefixes (e.g. `task: search result \| query: ` for EmbeddingGemma). Used verbatim, including the trailing space. |
+| `SMART_ROUTING_EMBEDDING_DOCUMENT_PREFIX` | empty | Text prepended to tool and server documents before embedding (e.g. `title: none \| text: ` for EmbeddingGemma). Changing it re-embeds every server. |
+| `SMART_ROUTING_SIMILARITY_THRESHOLD` | unset | Minimum query-to-tool similarity (0-1) for a `search_tools` hit. Unset keeps the query-length heuristic (0.2 / 0.3 / 0.4). |
+| `SMART_ROUTING_FULL_SCHEMA_TOP_N` | unset | Only the first N `search_tools` hits carry their full definition; the rest carry name, description and score, and `describe_tool` is listed to fetch them. Unset returns every hit in full. Ignored with Progressive Disclosure. |
+| `SMART_ROUTING_TOOL_DEFINITION_FIELDS` | `title,annotations` | Comma-separated optional tool fields that full `search_tools` hits and `describe_tool` carry next to name, description and `inputSchema`: `title`, `annotations`, `outputSchema`, `execution`, `icons`, `_meta`. `none` sends none of them. |
+
+### OpenAI
+
+| Variable | Description |
+| --- | --- |
+| `OPENAI_API_KEY` | API key. |
+| `OPENAI_API_BASE_URL` | Override the base URL (set this for any OpenAI-compatible endpoint, e.g. LocalAI). |
+
+### Azure OpenAI
+
+| Variable | Description |
+| --- | --- |
+| `AZURE_OPENAI_API_KEY` | API key. |
+| `AZURE_OPENAI_ENDPOINT` | Resource endpoint (e.g. `https://my-resource.openai.azure.com`). |
+| `AZURE_OPENAI_API_VERSION` | API version (e.g. `2024-02-01`). |
+| `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` | Deployment name. |
+| `AZURE_OPENAI_EMBEDDING_MODEL` | The underlying OpenAI model the deployment maps to (e.g. `text-embedding-3-small`). Used for tokenizer and limit selection. |
+
+<Note>
+  **Environment variables win over the dashboard.** Every setting above overrides the matching field saved in the dashboard. Resolution order is **environment variable → dashboard setting → built-in default**, so a stale value left in `.env` silently shadows a key you just pasted into the UI — embeddings then fail with an authentication error while the form still shows the new key (issue #642).
+
+  The dashboard now reports this: affected fields carry a warning naming the environment variable that is actually in use. To switch to the dashboard value, remove the variable from the environment and restart.
+
+  `Smart Routing → Enabled` and `DB URL` follow the same order but are reflected directly by the UI instead of a warning — the toggle mirrors the env var, and the URL field renders a `${DB_URL}` placeholder.
+</Note>
+
+## MCPRouter (optional upstream catalog)
+
+| Variable | Description |
+| --- | --- |
+| `MCPROUTER_API_KEY` | API key for the MCPRouter cloud catalog. |
+| `MCPROUTER_API_BASE` | Override the API base URL (default `https://api.mcprouter.to/v1`). |
+| `MCPROUTER_REFERER` | Optional `Referer` header sent on MCPRouter requests. |
+| `MCPROUTER_TITLE` | Optional `Title` header sent on MCPRouter requests. |
+
+## Tool call guard (optional)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `TOOL_CALL_GUARD_ENABLED` | `false` | When set to exactly `true`, `tools/call` requests are inspected before being forwarded. Calls whose arguments contain high-confidence command-injection / reverse-shell patterns or cloud instance-metadata (credential-theft) targets are rejected fail-closed. Benign arguments are unaffected. Any other value leaves the guard off. |
+
+## Configuration examples
+
+### Development
+
+```env
+NODE_ENV=development
+PORT=3000
+JWT_SECRET=dev-secret-key
+```
+
+### Production with database + Smart Routing
+
+```env
+NODE_ENV=production
+PORT=3000
+BASE_PATH=
+JWT_SECRET=replace-with-32+-random-bytes
+
+USE_DB=true
+DB_URL=postgresql://mcphub:secret@db:5432/mcphub
+
+SMART_ROUTING_ENABLED=true
+OPENAI_API_KEY=sk-...
+EMBEDDING_MODEL=text-embedding-3-small
+```
+
+## Loading order
+
+At startup MCPHub reads one file, `.env` in the working directory. `.env.local` and `.env.{NODE_ENV}` (e.g. `.env.production`) are not read.
+
+A variable already set in the process environment (your shell, Docker `-e` / `env_file`, a Kubernetes manifest) takes precedence; `.env` never overrides it.
+
+Values in `.env` are used as written: `${VAR}` references inside `.env` are not expanded. `${VAR}` expansion is available in `mcp_settings.json` instead; see [MCP Settings](/configuration/mcp-settings).
+
+## Security best practices
+
+1. Never commit secrets — `.env*` files are gitignored by default; keep it that way.
+2. Always set `JWT_SECRET` explicitly in production.
+3. Rotate bearer keys (`/api/auth/keys`) and OAuth client secrets periodically.
+4. Use Docker / Kubernetes secrets for container deployments instead of plain `-e`.

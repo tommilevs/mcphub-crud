@@ -1,0 +1,166 @@
+import { revokeUserTokens } from '../models/OAuth.js';
+import { IUser } from '../types/index.js';
+import { getBearerKeyDao, getUserDao, getGroupDao, getServerDao } from '../dao/index.js';
+import { logger } from '../utils/logger.js';
+
+// Get all users
+export const getAllUsers = async (): Promise<IUser[]> => {
+  const userDao = getUserDao();
+  return await userDao.findAll();
+};
+
+// Get user by username
+export const getUserByUsername = async (username: string): Promise<IUser | undefined> => {
+  const userDao = getUserDao();
+  const user = await userDao.findByUsername(username);
+  return user || undefined;
+};
+
+/** Usernames reserved for system use (case-insensitive). */
+const RESERVED_USERNAMES = ['system', 'admin', 'guest', 'root'];
+
+/**
+ * Check if a username is reserved for system use.
+ * Returns the reason string if reserved, or null if allowed.
+ */
+export const checkReservedUsername = (username: string): string | null => {
+  const lower = username.toLowerCase();
+  if (RESERVED_USERNAMES.includes(lower)) {
+    return `Username "${username}" is reserved and cannot be used`;
+  }
+  return null;
+};
+
+// Create a new user
+export const createNewUser = async (
+  username: string,
+  password: string,
+  isAdmin: boolean = false,
+  email?: string,
+): Promise<IUser | null> => {
+  try {
+    const reservedError = checkReservedUsername(username);
+    if (reservedError) {
+      logger.warn(`User creation blocked: ${reservedError}`);
+      return null;
+    }
+
+    const userDao = getUserDao();
+    const existingUser = await userDao.findByUsername(username);
+    if (existingUser) {
+      return null; // User already exists
+    }
+
+    return await userDao.createWithHashedPassword(username, password, isAdmin, email || undefined);
+  } catch (error) {
+    logger.error('Failed to create user:', error);
+    return null;
+  }
+};
+
+// Update user information
+export const updateUser = async (
+  username: string,
+  data: { isAdmin?: boolean; newPassword?: string; email?: string },
+): Promise<IUser | null> => {
+  try {
+    const userDao = getUserDao();
+    const user = await userDao.findByUsername(username);
+
+    if (!user) {
+      return null;
+    }
+
+    // Update admin status if provided
+    if (data.isAdmin !== undefined) {
+      const result = await userDao.update(username, { isAdmin: data.isAdmin });
+      if (!result) {
+        return null;
+      }
+    }
+
+    // Update email if provided
+    if (data.email !== undefined) {
+      const result = await userDao.update(username, { email: data.email || null });
+      if (!result) {
+        return null;
+      }
+    }
+
+    // Update password if provided
+    if (data.newPassword) {
+      const success = await userDao.updatePassword(username, data.newPassword);
+      if (!success) {
+        return null;
+      }
+    }
+
+    // Return updated user
+    return await userDao.findByUsername(username);
+  } catch (error) {
+    logger.error('Failed to update user:', error);
+    return null;
+  }
+};
+
+// Delete a user
+export const deleteUser = async (username: string): Promise<boolean> => {
+  try {
+    const userDao = getUserDao();
+
+    // Cannot delete the last admin user
+    const users = await userDao.findAll();
+    const adminUsers = users.filter((user) => user.isAdmin);
+    const userToDelete = users.find((user) => user.username === username);
+
+    if (userToDelete?.isAdmin && adminUsers.length === 1) {
+      return false; // Cannot delete the last admin
+    }
+
+    if (userToDelete) {
+      await getBearerKeyDao().deleteByOwner(username);
+      await revokeUserTokens(username);
+      const groupDao = getGroupDao();
+      for (const group of await groupDao.findAll()) {
+        if (group.sharedWithUsers?.includes(username)) {
+          await groupDao.update(group.id, {
+            sharedWithUsers: group.sharedWithUsers.filter((name) => name !== username),
+          });
+        }
+      }
+      const serverDao = getServerDao();
+      for (const server of await serverDao.findAll()) {
+        if (server.sharedWithUsers?.includes(username)) {
+          const sharedWithUsers = server.sharedWithUsers.filter((name) => name !== username);
+          await serverDao.update(server.name, { sharedWithUsers });
+          const { updateServerInfoVisibility } = await import('./mcpService.js');
+          updateServerInfoVisibility(server.name, server.visibility, sharedWithUsers);
+        }
+      }
+    }
+    return userToDelete ? await userDao.delete(username) : false;
+  } catch (error) {
+    logger.error('Failed to delete user:', error);
+    return false;
+  }
+};
+
+// Check if user has admin permissions
+export const isUserAdmin = async (username: string): Promise<boolean> => {
+  const userDao = getUserDao();
+  const user = await userDao.findByUsername(username);
+  return user?.isAdmin || false;
+};
+
+// Get user count
+export const getUserCount = async (): Promise<number> => {
+  const userDao = getUserDao();
+  return await userDao.count();
+};
+
+// Get admin count
+export const getAdminCount = async (): Promise<number> => {
+  const userDao = getUserDao();
+  const admins = await userDao.findAdmins();
+  return admins.length;
+};

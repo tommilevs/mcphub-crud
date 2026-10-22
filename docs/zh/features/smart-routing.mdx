@@ -1,0 +1,701 @@
+---
+title: '智能路由'
+description: '使用向量语义搜索的 AI 工具发现系统'
+---
+
+## 概述
+
+智能路由是 MCPHub 的智能工具发现系统，它使用向量语义搜索来自动找到与任何给定任务最相关的工具。AI 客户端无需手动指定使用哪些工具，只需描述他们想要完成的任务，智能路由就会识别并提供对最合适工具的访问。
+
+## 智能路由的工作原理
+
+### 1. 工具索引
+
+当服务器启动时，智能路由会自动：
+
+- 从 MCP 服务器发现所有可用工具
+- 提取工具元数据（名称、描述、参数）
+- 将工具信息转换为向量嵌入
+- 使用 pgvector 将嵌入存储在 PostgreSQL 中
+
+### 2. 语义搜索
+
+当进行查询时：
+
+- 用户查询被转换为向量嵌入
+- 相似性搜索使用余弦相似度找到匹配的工具
+- 动态阈值过滤掉不相关的结果
+- 结果按相关性得分排序
+
+### 3. 智能过滤
+
+智能路由应用多个过滤器：
+
+- **相关性阈值**：只返回高于相似性阈值的工具
+- **上下文感知**：考虑对话上下文
+- **工具可用性**：确保工具当前可访问
+- **权限过滤**：尊重用户访问权限
+
+### 4. 工具执行
+
+找到的工具可以直接执行：
+
+- 参数验证确保正确的工具使用
+- 错误处理提供有用的反馈
+- 响应格式保持一致性
+- 日志记录跟踪工具使用情况进行分析
+
+## 前置条件
+
+智能路由需要比基础 MCPHub 使用更多的设置：
+
+### 必需组件
+
+1. **带有 pgvector 的 PostgreSQL**：用于嵌入存储的向量数据库
+2. **嵌入服务**：OpenAI API 或兼容服务
+3. **环境配置**：正确的配置变量
+
+## 使用智能路由
+
+### 智能路由端点
+
+通过特殊的 `$smart` 端点访问智能路由：
+
+<Tabs>
+  <Tab title="HTTP MCP">
+    ```
+    # 搜索所有服务器
+    http://localhost:3000/mcp/$smart
+    
+    # 在特定分组内搜索
+    http://localhost:3000/mcp/$smart/{group}
+    ```
+  </Tab>
+
+  <Tab title="SSE (Legacy)">
+    ```
+    # 搜索所有服务器
+    http://localhost:3000/sse/$smart
+    
+    # 在特定分组内搜索
+    http://localhost:3000/sse/$smart/{group}
+    ```
+  </Tab>
+</Tabs>
+
+### 分组范围的智能路由
+
+智能路由支持分组范围的搜索，允许您将工具发现限制在特定分组内的服务器：
+
+<AccordionGroup>
+  <Accordion title="使用分组范围的智能路由">
+    将您的 AI 客户端连接到特定分组的智能路由端点：
+    
+    ```
+    http://localhost:3000/mcp/$smart/production
+    ```
+    
+    此端点只会搜索属于 "production" 分组的服务器中的工具。
+    
+    **优势：**
+    - **聚焦结果**：只返回相关服务器的工具
+    - **更好的性能**：减少搜索空间以加快查询速度
+    - **环境隔离**：将开发、预发布和生产工具分开
+    - **访问控制**：根据用户权限限制工具发现
+  </Accordion>
+
+  <Accordion title="工作原理">
+    当使用 `$smart/{group}` 时：
+    
+    1. 系统识别指定的分组
+    2. 获取属于该分组的所有服务器
+    3. 将工具搜索过滤到仅限那些服务器
+    4. 返回限定在该分组服务器范围内的结果
+    
+    如果分组不存在或没有服务器，搜索将不返回任何结果。
+  </Accordion>
+</AccordionGroup>
+
+### 固定工具
+
+`$smart/{group}` 端点只列出元工具，因此即使是模型几乎每次会话都会调用的工具，也要先经过一次 `search_tools` 往返。在分组的服务器条目上固定这些工具后，端点会在元工具旁列出它们的完整定义：
+
+```json
+{
+  "name": "production",
+  "servers": [{ "name": "time", "tools": "all", "pinnedTools": ["get_current_time"] }]
+}
+```
+
+在控制台中编辑分组，展开服务器，然后点击已选工具旁的图钉图标。仅在启用智能路由时显示该图标。
+
+- 固定使用不带前缀的工具名，与 `tools` 选择相同。只有分组已选择且已启用的工具才会生效，其余固定会被忽略。
+- 固定工具的列出方式与直接的 `/mcp/{group}` 端点完全相同（使用服务器的对外名称和自定义描述），并可直接按该名称调用。它仍保留在搜索索引中，`search_tools`、`describe_tool` 和 `call_tool` 照常可用。
+- 全局 `$smart` 端点没有分组，从不列出固定工具。没有固定工具的分组与之前一样只列出元工具。
+- 如果固定工具列出的名称与元工具名称（`search_tools`、`describe_tool`、`call_tool`，例如别名 `describe` + 分隔符 `_` + 工具 `tool`）相同，则在任何模式下都不会列出：对这些名称的调用始终交给元工具处理。
+- 分组显示的智能路由占用包含其固定工具的定义成本。
+- 在控制台中或通过 `PUT /api/groups/:id/server-configs/:serverName/tools` 取消选择某个工具时，也会移除它的固定。
+- 在 `$smart/{group}` 上，对声明支持 MCP Apps 的客户端，固定工具会保留其 MCP Apps 元数据（`_meta.ui`），因此其小部件可以渲染，该服务器的 `ui://` 资源和仅限 Apps 的辅助工具也可从小部件访问；不支持 MCP Apps 的客户端仍会去除这些元数据。只有固定工具才带有小部件：通过 `search_tools` 和 `call_tool` 调用的工具没有可供宿主关联小部件的独立描述，因此请固定需要小部件的工具。全局 `$smart` 端点始终不是 MCP Apps 路由。
+
+<Warning>
+通过 `call_tool` 调用时，所有工具共享客户端的同一个审批决定。固定工具以自己的名称列出，逐个审批工具的客户端会对其应用单独的规则——固定会写入数据的工具前请先确认这一点。
+</Warning>
+
+### 渐进式披露模式
+
+渐进式披露是一个优化功能，可以减少使用智能路由时的 Token 消耗。启用后，工具发现工作流从 2 步变为 3 步。
+
+<AccordionGroup>
+  <Accordion title="什么是渐进式披露？">
+    默认情况下，智能路由在 `search_tools` 结果中返回完整的工具信息，包括完整的参数模式。当处理具有复杂输入模式的工具时，这会消耗大量 Token。
+    
+    **渐进式披露** 改变了这种行为：
+    - `search_tools` 只返回工具名称和描述（最少信息）
+    - 新的 `describe_tool` 端点按需提供完整的参数模式
+    - `call_tool` 像以前一样执行工具
+    
+    这种方法特别适用于：
+    - 处理具有复杂模式的大量工具
+    - Token 使用优化很重要的场景
+    - AI 客户端需要浏览多个工具后再选择
+  </Accordion>
+
+  <Accordion title="启用渐进式披露">
+    通过设置页面或环境变量启用渐进式披露：
+    
+    **通过设置界面：**
+    1. 导航到 设置 → 智能路由
+    2. 启用"渐进式披露"开关
+    3. 更改立即生效
+    
+    **通过环境变量：**
+    ```bash
+    SMART_ROUTING_PROGRESSIVE_DISCLOSURE=true
+    ```
+  </Accordion>
+
+  <Accordion title="在 search_tools 中包含服务器描述">
+    默认情况下，`search_tools` 只会在工具描述中列出服务器名称。若要同时显示服务器描述（或上游返回的 instructions），请设置：
+
+    ```bash
+    SMART_ROUTING_SERVER_DESCRIPTION_MODE=full
+    ```
+
+    使用 `names`（默认值）可保持原来的紧凑列表。
+
+    该列表列出 `search_tools` 实际搜索的服务器：已启用且已连接或按需启动的服务器。按需启动的服务器未连接时仍会列出，无论是因空闲而关闭还是启动失败，因为 `call_tool` 会启动它；其他连接失败的服务器在重新连接之前不会列出。上游 instructions 只在连接时获得，因此在 `full` 模式下，尚未连接过的服务器只显示其配置的描述，或仅显示名称。
+  </Accordion>
+
+  <Accordion title="嵌入任务前缀">
+    非对称检索模型在训练时对查询和文档使用不同的任务前缀，直接嵌入原始文本时效果明显变差。可在 设置 → 智能路由 中或通过环境变量设置模型所需的前缀：
+
+    ```bash
+    # EmbeddingGemma
+    SMART_ROUTING_EMBEDDING_QUERY_PREFIX="task: search result | query: "
+    SMART_ROUTING_EMBEDDING_DOCUMENT_PREFIX="title: none | text: "
+    ```
+
+    两者默认均为空，即与以前一样嵌入原始文本。前缀按原样使用，请保留末尾空格。修改文档前缀会重新生成所有服务器的工具嵌入；修改查询前缀在下一次搜索时生效。
+
+    前缀会改变相似度分数（以 EmbeddingGemma 为例，弱匹配下降得比强匹配更多），因此基于原始文本调好的阈值在启用前缀后可能需要重新校准（参见下方的 **搜索结果**；每个结果都会返回 `score`）。前缀也计入嵌入的 Token 上限（`EMBEDDING_MAX_TOKENS` 或模型默认值）：前缀会被保留，工具文本会相应提前截断。
+  </Accordion>
+
+  <Accordion title="搜索结果：分数、阈值与 Schema 预算">
+    每个 `search_tools` 结果都带有 `score`：查询与工具之间的余弦相似度（0-1，保留两位小数），也就是与阈值比较的值。结果按相关性排序，排序时还会考虑工具所在服务器与查询的匹配程度。
+
+    ```bash
+    # 结果的最低相似度（0-1）。未设置时按查询长度决定：
+    # 短查询 0.2，长查询或包含 "specific"/"exact" 的查询 0.4，其余 0.3。
+    SMART_ROUTING_SIMILARITY_THRESHOLD=0.45
+
+    # 只有前 N 个结果带完整定义（inputSchema 等）；其余结果只有名称、描述和分数，
+    # 并会列出 describe_tool 以获取其 schema。未设置时所有结果都返回完整定义。启用渐进式披露时忽略。
+    SMART_ROUTING_FULL_SCHEMA_TOP_N=3
+
+    # 完整结果（以及 describe_tool）在名称、描述和 inputSchema 之外附带的可选工具字段：
+    # title、annotations、outputSchema、execution、icons、_meta。"none" 表示都不附带。默认：title,annotations。
+    SMART_ROUTING_TOOL_DEFINITION_FIELDS=title,annotations
+    ```
+
+    三者也可以在 设置 → 智能路由 → 搜索结果 中设置，且都不会触发重新嵌入。默认不附带的字段主要供客户端而非模型使用，而且可能很大：上游服务器可能为每个工具附带 base64 格式的 `icons` 或很长的 `outputSchema`，放在搜索结果里只会消耗 Token。`inputSchema` 始终返回，并去掉其中的 `$schema` 键。当没有工具达到阈值时，响应会明确说明，给出阈值并列出已搜索的服务器，让模型可以告诉用户该能力不可用，而不是去调用最接近但无关的工具。
+  </Accordion>
+
+  <Accordion title="标准模式（默认）">
+    当渐进式披露**禁用**（默认）时，智能路由提供两个工具：
+    
+    **工作流：** `search_tools` → `call_tool`
+    
+    | 工具 | 用途 |
+    |------|------|
+    | `search_tools` | 按查询查找工具，返回包含 `inputSchema` 的完整工具信息 |
+    | `call_tool` | 使用提供的参数执行工具 |
+    
+    这种模式更简单，但由于搜索结果中包含完整模式，会使用更多 Token。`SMART_ROUTING_FULL_SCHEMA_TOP_N` 可以限制这部分开销：只有前 N 个结果带 schema，其余结果通过列出的 `describe_tool` 获取。
+  </Accordion>
+
+  <Accordion title="渐进式披露模式">
+    当渐进式披露**启用**时，智能路由提供三个工具：
+    
+    **工作流：** `search_tools` → `describe_tool` → `call_tool`
+    
+    | 工具 | 用途 |
+    |------|------|
+    | `search_tools` | 按查询查找工具，只返回名称和描述 |
+    | `describe_tool` | 获取特定工具的完整模式（新增） |
+    | `call_tool` | 使用提供的参数执行工具 |
+    
+    **示例工作流：**
+    1. AI 使用查询 "文件操作" 调用 `search_tools`
+    2. 结果显示工具名称和描述（最少 Token）
+    3. AI 为特定工具调用 `describe_tool` 获取完整的 `inputSchema`
+    4. AI 使用正确的参数调用 `call_tool`
+    
+    这种模式通过仅在需要时获取完整模式来减少 Token 使用。
+  </Accordion>
+
+  <Accordion title="响应格式对比">
+    **标准模式 search_tools 响应：**
+    ```json
+    {
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "读取文件内容",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "path": { "type": "string", "description": "要读取的文件路径" },
+              "encoding": { "type": "string", "default": "utf-8" }
+            },
+            "required": ["path"]
+          },
+          "score": 0.71
+        }
+      ]
+    }
+    ```
+    
+    **渐进式披露模式 search_tools 响应：**
+    ```json
+    {
+      "tools": [
+        {
+          "name": "read_file",
+          "description": "读取文件内容",
+          "score": 0.71
+        }
+      ],
+      "metadata": {
+        "progressiveDisclosure": true,
+        "guideline": "使用 describe_tool 获取完整的参数模式后再调用。"
+      }
+    }
+    ```
+    
+    **describe_tool 响应：**
+    ```json
+    {
+      "tool": {
+        "name": "read_file",
+        "description": "读取文件内容",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "要读取的文件路径" },
+            "encoding": { "type": "string", "default": "utf-8" }
+          },
+          "required": ["path"]
+        }
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+{/* ## 性能优化
+
+### 嵌入缓存
+
+智能路由缓存嵌入以提高性能：
+
+```bash
+# 配置缓存设置
+EMBEDDING_CACHE_TTL=3600        # 缓存 1 小时
+EMBEDDING_CACHE_SIZE=10000      # 最多缓存 10k 个嵌入
+EMBEDDING_CACHE_CLEANUP=300     # 每 5 分钟清理一次
+```
+
+### 批处理
+
+工具批量索引以提高效率：
+
+```bash
+# 嵌入生成的批大小
+EMBEDDING_BATCH_SIZE=100
+
+# 并发嵌入请求
+EMBEDDING_CONCURRENCY=5
+
+# 索引更新频率
+INDEX_UPDATE_INTERVAL=3600      # 每小时重新索引
+```
+
+### 数据库优化
+
+为向量操作优化 PostgreSQL：
+
+```sql
+-- 创建索引以获得更好的性能
+CREATE INDEX ON tool_embeddings USING hnsw (embedding vector_cosine_ops);
+
+-- 调整 PostgreSQL 设置
+ALTER SYSTEM SET shared_preload_libraries = 'vector';
+ALTER SYSTEM SET max_connections = 200;
+ALTER SYSTEM SET shared_buffers = '256MB';
+ALTER SYSTEM SET effective_cache_size = '1GB';
+```
+
+## 监控和分析
+
+### 智能路由指标
+
+监控智能路由性能：
+
+```bash
+# 获取智能路由统计信息
+curl http://localhost:3000/api/smart-routing/stats \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+响应包括：
+
+- 查询计数和频率
+- 平均响应时间
+- 嵌入缓存命中率
+- 最受欢迎的工具
+- 查询模式
+
+### 工具使用分析
+
+跟踪哪些工具被发现和使用：
+
+```bash
+# 获取工具使用分析
+curl http://localhost:3000/api/smart-routing/analytics \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+指标包括：
+
+- 工具发现率
+- 执行成功率
+- 用户满意度评分
+- 查询到执行的转换率
+
+### 性能监控
+
+监控系统性能：
+
+```bash
+# 数据库性能
+curl http://localhost:3000/api/smart-routing/db-stats \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+# 嵌入服务状态
+curl http://localhost:3000/api/smart-routing/embedding-stats \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+## 高级功能
+
+### 嵌入模型选择
+
+不同的嵌入模型产生不同的向量维度。根据您的性能和精度需求选择：
+
+| 模型 | 维度 | 索引类型 | 说明 |
+|------|------|----------|------|
+| `text-embedding-3-small` | 1536 | HNSW | **推荐** - 质量和性能的最佳平衡 |
+| `text-embedding-3-large` | 3072 | HNSW (halfvec) | 更高质量，需要 pgvector ≥ 0.7.0 |
+| `bge-m3` | 1024 | HNSW | 开源替代方案 |
+| `gemini-embedding-001` | 3072 | HNSW (halfvec) | Google Gemini — 免费额度（100 RPM），兼容 OpenAI 接口，需要 pgvector ≥ 0.7.0 |
+
+<Info>
+  **HNSW 是推荐的索引类型**
+  
+  MCPHub 默认使用 HNSW 索引，因为：
+  - 比 IVFFlat 有更好的查询性能
+  - 可以在没有数据的情况下立即创建
+  - 随着数据分布变化更加稳健
+</Info>
+
+<Warning>
+  **向量维度限制（pgvector 0.7.0+）**
+  
+  - `vector` 类型：最多 **2,000 维**（HNSW 或 IVFFlat）
+  - `halfvec` 类型：最多 **4,000 维**（自动用于高维嵌入）
+  
+  对于 3072 维的模型（`text-embedding-3-large`、`gemini-embedding-001`）：
+  - 需要 pgvector ≥ 0.7.0 以支持 halfvec
+  - MCPHub 自动使用 halfvec 类型转换以获得最佳索引
+  - 旧版 pgvector 仍可工作，但没有索引优化
+  
+  **建议：**
+  1. 升级到 pgvector 0.7.0+ 以获得最佳高维嵌入支持
+  2. 或使用 `text-embedding-3-small`（1536 维）以获得更广泛的兼容性
+</Warning>
+
+```bash
+# 大多数部署的推荐配置
+EMBEDDING_MODEL=text-embedding-3-small
+# 可选：支持自定义维度的提供方（例如 768）
+EMBEDDING_DIMENSIONS=768
+
+# 仅已知支持 Matryoshka（MRL）的模型会自动收到 `dimensions` 参数
+# （text-embedding-3-*、gemini-embedding-*）。非 MRL 模型/后端
+# （Qwen3-Embedding、BGE、vLLM/sglang 等）会直接拒绝该参数（issue #1131）。
+# 如使用其它支持 MRL 的模型，可通过以下变量强制转发：
+# EMBEDDING_DIMENSIONS_API_PASSTHROUGH=true
+
+# 更高质量（需要 pgvector >= 0.7.0 以获得最佳索引）
+EMBEDDING_MODEL=text-embedding-3-large
+
+# 通过 OpenAI 兼容接口使用 Google Gemini（免费额度：100 RPM，需 pgvector ≥ 0.7.0）
+OPENAI_API_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
+OPENAI_API_KEY=your-google-ai-studio-api-key
+EMBEDDING_MODEL=gemini-embedding-001
+EMBEDDING_DIMENSIONS=768
+```
+
+<Tip>
+  **Google Gemini 免费额度**
+
+  `gemini-embedding-001` 可通过 Google 的 OpenAI 兼容接口
+  `https://generativelanguage.googleapis.com/v1beta/openai` 使用。
+  只需通过标准的 `llmProviderBaseUrl` 设置即可接入，无需任何额外配置，
+  仅需设置 Base URL、API Key 和模型名称。
+  Google 提供慷慨的**免费额度（100 RPM）**，非常适合自托管或低流量部署。
+</Tip>
+
+<Note>
+  **环境变量优先于面板配置。** 上述任何智能路由配置都会覆盖 Dashboard 中保存的同名字段，解析顺序为 **环境变量 → 面板配置 → 内置默认值**。因此 `.env` 里遗留的变量会覆盖你在界面上保存的值，而且这种失败是静默的：面板显示你填写的值，运行时却一直使用环境变量（issue #642）。受影响字段现在会显示警告，并指出实际生效的变量名。
+
+  `启用` 开关与 `DB URL` 同样遵循该顺序，但面板会直接反映环境变量的结果而不显示警告：开关跟随环境变量，URL 字段显示 `${DB_URL}` 占位符。
+</Note>
+
+### 自定义嵌入
+
+使用自定义嵌入模型：
+
+```bash
+# Hugging Face 模型
+EMBEDDING_SERVICE=huggingface
+HUGGINGFACE_MODEL=sentence-transformers/all-MiniLM-L6-v2
+HUGGINGFACE_API_KEY=your_api_key
+
+# 本地嵌入服务
+EMBEDDING_SERVICE=local
+EMBEDDING_SERVICE_URL=http://localhost:8080/embeddings
+```
+
+### 查询增强
+
+增强查询以获得更好的结果：
+
+```json
+{
+  "queryEnhancement": {
+    "enabled": true,
+    "expandAcronyms": true,
+    "addSynonyms": true,
+    "contextualExpansion": true
+  }
+}
+```
+
+### 结果过滤
+
+基于条件过滤结果：
+
+```json
+{
+  "resultFiltering": {
+    "minRelevanceScore": 0.7,
+    "maxResults": 10,
+    "preferredServers": ["fetch", "playwright"],
+    "excludeServers": ["deprecated-server"]
+  }
+}
+```
+
+### 反馈学习
+
+基于用户反馈改进结果：
+
+```bash
+# 对搜索结果提供反馈
+curl -X POST http://localhost:3000/api/smart-routing/feedback \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "queryId": "search-123",
+    "toolName": "fetch_html",
+    "rating": 5,
+    "successful": true,
+    "comments": "完美适合这个任务的工具"
+  }'
+``` */}
+
+## 故障排除
+
+<AccordionGroup>
+  <Accordion title="数据库连接问题">
+    **症状：**
+    - 智能路由不可用
+    - 数据库连接错误
+    - 嵌入存储失败
+
+    **解决方案：**
+    1. 验证 PostgreSQL 是否正在运行
+    2. 检查 DB_URL 格式
+    3. 确保安装了 pgvector 扩展
+    4. 手动测试连接：
+    ```bash
+    psql $DB_URL -c "SELECT 1;"
+    ```
+
+  </Accordion>
+
+  <Accordion title="嵌入服务问题">
+    **症状：**
+    - 工具索引失败
+    - 查询处理错误
+    - API 速率限制错误
+
+    **解决方案：**
+    1. 验证 API 密钥有效性
+    2. 检查网络连接
+    3. 监控速率限制
+    4. 测试嵌入服务：
+    ```bash
+    curl -X POST https://api.openai.com/v1/embeddings \
+      -H "Authorization: Bearer $OPENAI_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"input": "test", "model": "text-embedding-3-small"}'
+    ```
+
+  </Accordion>
+
+  <Accordion title="搜索结果不佳">
+    **症状：**
+    - 返回不相关的工具
+    - 相关性得分低
+    - 缺少预期的工具
+
+    **解决方案：**
+    1. 调整相似性阈值（`SMART_ROUTING_SIMILARITY_THRESHOLD`），可参考每个结果的 `score` 选择数值
+    2. 使用更好的描述重新索引工具
+    3. 使用更具体的查询
+    4. 检查工具元数据质量
+    ```bash
+    # 重新索引所有工具（全量强制：先清空 vector_embeddings，再对全部已启用服务器重新生成嵌入；
+    # 需要个人凭据的服务器会以已绑定凭据的用户身份（所有者优先）重建，并索引其可见工具的并集；
+    # 同步执行，逐台进度通过 SSE embedding-sync-progress 事件推送）
+    curl -X POST http://localhost:3000/api/smart-routing/reindex \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN"
+    ```
+
+  </Accordion>
+
+  <Accordion title="性能问题">
+    **症状：**
+    - 查询响应缓慢
+    - 数据库负载高
+    - 内存使用激增
+
+    **解决方案：**
+    1. 优化数据库配置
+    2. 增加缓存大小
+    3. 减少批处理大小
+    4. 监控系统资源
+    ```bash
+    # 查看向量库状态与性能指标（配置、数据库连接状态、行数、按模型/服务器统计、同步新鲜度、索引覆盖率）
+    curl http://localhost:3000/api/smart-routing/performance \
+      -H "Authorization: Bearer YOUR_JWT_TOKEN"
+    ```
+
+  </Accordion>
+
+  <Accordion title="密钥已在面板填对，仍然报鉴权失败">
+    **症状：**
+    - 工具索引失败，返回鉴权错误（401/403）
+    - 面板里保存的密钥是有效的，但请求仍被拒绝
+
+    **原因：** 环境变量的优先级高于面板配置，因此你保存的密钥从未被使用（issue #642）。新版本会在对应字段下方显示警告，并指出实际生效的变量名。
+
+    **解决方案：**
+    1. 检查 `.env*` 文件、shell 配置以及容器/服务定义中的 `OPENAI_API_KEY` / `AZURE_OPENAI_API_KEY`
+    2. 移除遗留变量并重启；若提供商或模型也发生变化，请重新索引
+    3. 确认实际生效的密钥是否可用：
+
+    ```bash
+    curl -X POST "${OPENAI_API_BASE_URL:-https://api.openai.com/v1}/embeddings" \
+      -H "Authorization: Bearer $OPENAI_API_KEY" \
+      -H "Content-Type: application/json" \
+      -d '{"input": "test", "model": "text-embedding-3-small"}'
+    ```
+
+  </Accordion>
+</AccordionGroup>
+
+## 最佳实践
+
+### 查询编写
+
+<Tip>
+  **要具体描述**：在查询中使用具体、描述性的语言以获得更好的工具匹配。
+</Tip>
+
+<Tip>
+  **包含上下文**：提供有关您的任务或领域的相关上下文以获得更准确的结果。
+</Tip>
+
+<Tip>**使用自然语言**：像向人类描述任务一样编写查询。</Tip>
+
+### 工具描述
+
+<Warning>
+  **质量元数据**：确保 MCP 服务器提供高质量的工具描述和元数据。
+</Warning>
+
+<Warning>**定期更新**：随着功能的发展保持工具描述的最新状态。</Warning>
+
+<Warning>
+  **一致的命名**：在工具和服务器中使用一致的命名约定。
+</Warning>
+
+### 系统维护
+
+<Info>**定期重新索引**：定期重新索引工具以确保嵌入质量。</Info>
+
+<Info>**监控性能**：跟踪查询模式并根据使用情况进行优化。</Info>
+
+<Info>
+  **更新模型**：随着新嵌入模型的出现，考虑更新到更新的模型。
+</Info>
+
+## 下一步
+
+<CardGroup cols={2}>
+  <Card title="身份验证" icon="shield" href="/zh/features/authentication">
+    用户管理和访问控制
+  </Card>
+  <Card title="监控" icon="chart-line" href="/zh/features/monitoring">
+    系统监控和分析
+  </Card>
+  <Card title="API 参考" icon="code" href="/zh/api-reference/smart-routing">
+    完整的智能路由 API 文档
+  </Card>
+  <Card title="配置" icon="cog" href="/zh/configuration/environment-variables">
+    高级配置选项
+  </Card>
+</CardGroup>

@@ -1,0 +1,470 @@
+---
+title: '身份认证与安全'
+description: '为 MCPHub 配置身份认证和安全设置'
+---
+
+## 自助注册
+
+管理员可在「设置 → 安全」中开启「允许自助注册」，默认关闭。开启后，登录页显示「创建账号」入口。
+自助注册始终创建普通用户，不能授予管理员权限。即使原账号已删除，仍被资源所有权、共享名单、认证状态或用户配置引用的用户名也不能通过自助注册领取。密码至少八位，且包含字母、数字和特殊字符。
+
+该配置保存在 `mcp_settings.json` 的 `systemConfig.auth.allowRegistration`，支持文件和数据库存储，无需重启。
+当生效的 SSO 配置禁用密码登录时，后端同时拒绝本地注册，登录页隐藏注册入口。已有账号仍然保留。
+
+## 概述
+
+MCPHub 提供灵活的身份认证机制来保护您的 MCP 服务器管理平台。系统支持多种身份认证方法和基于角色的访问控制。
+
+## 本地用户与凭据失效
+
+Dashboard JWT 和 MCPHub 内置 OAuth 授权绑定签发时的用户密码哈希。删除本地用户或修改密码后，旧凭据失效；重建同名用户不会恢复旧凭据。JWT 请求使用用户当前的管理员权限。删除用户还会清理 OAuth token、处理实例内待兑换的授权码，以及服务器和组的共享名单。
+
+从没有会话版本的旧凭据升级后，需要重新登录并重新连接 OAuth 客户端。数据库模式会通过正常的启动 schema 同步为 `oauth_tokens` 添加可空的 `session_version` 列。升级时应重启所有副本。
+
+`POST /api/auth/register` 遵循上文默认关闭的自助注册策略，并始终创建普通用户。角色分配请使用管理员用户管理 API。
+
+内置 OAuth token 可用于 MCP 传输接口及 `/oauth/userinfo`，不能访问 `/api/*` 管理接口。管理操作请使用 Dashboard JWT、Better Auth session、已配置的 forward auth 或系统级全访问 bearer key。
+
+## Better Auth（GitHub / Google / 本地 OIDC）
+
+MCPHub 可以通过 Better Auth 为 Dashboard 提供第三方登录。当前支持：
+
+- GitHub
+- Google
+- 本地 OIDC Provider（例如 Keycloak、Authentik、Dex）
+
+启用条件：
+
+1. 配置 `DB_URL`（Better Auth 当前依赖 PostgreSQL，会话不支持纯文件模式）
+2. 配置 Better Auth 启动参数并重启 MCPHub
+3. 为对应登录方式提供客户端凭据
+
+Better Auth 的非敏感配置现在既可以来自环境变量，也可以来自 `systemConfig.auth.betterAuth`（`mcp_settings.json` 或数据库系统配置）。优先级如下：
+
+1. `BETTER_AUTH_*` 环境变量
+2. `systemConfig.auth.betterAuth`
+3. 默认值
+
+常用环境变量包括：
+
+- `BETTER_AUTH_ENABLED`
+- `BETTER_AUTH_URL`
+- `BETTER_AUTH_BASE_PATH`
+- `BETTER_AUTH_TRUSTED_ORIGINS`
+- `BETTER_AUTH_DISABLE_PASSWORD_LOGIN`（参见下文“仅允许 SSO 登录”）
+- `BETTER_AUTH_GOOGLE_ENABLED` + `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`
+- `BETTER_AUTH_GITHUB_ENABLED` + `GITHUB_CLIENT_ID` / `GITHUB_CLIENT_SECRET`
+- `BETTER_AUTH_OIDC_ENABLED`
+- `BETTER_AUTH_OIDC_PROVIDER_ID`
+- `BETTER_AUTH_OIDC_DISCOVERY_URL`（兼容别名：`OIDC_DISCOVERY_URL`）
+- `BETTER_AUTH_OIDC_SCOPES`
+- `BETTER_AUTH_OIDC_PKCE`
+- `BETTER_AUTH_OIDC_PROMPT`
+- `OIDC_CLIENT_ID` / `OIDC_CLIENT_SECRET`
+
+本地 OIDC 登录也可以继续在 `systemConfig.auth.betterAuth.providers.oidc` 中配置：
+
+- `enabled`
+- `providerId`
+- `discoveryUrl`
+- 可选的 `scopes`、`pkce`、`prompt`
+
+`discoveryUrl` 应指向 OIDC Provider 的 `/.well-known/openid-configuration`。如果仍然使用配置文件插值，`OIDC_DISCOVERY_URL` 也会继续生效。
+
+如果 Dashboard 通过不同的公网来源发起登录，请设置 `BETTER_AUTH_TRUSTED_ORIGINS`（或 `systemConfig.auth.betterAuth.trustedOrigins`）来允许该来源。如果没有显式配置 `trustedOrigins`，MCPHub 会自动信任 `BETTER_AUTH_URL` 和 `systemConfig.install.baseUrl` 的来源。
+
+当 OIDC Provider 可用时，登录页会显示“使用 OIDC 登录”按钮。
+
+默认挂载路径是 `${BASE_PATH}/api/auth/better`；如果需要改路径，可以使用 `BETTER_AUTH_BASE_PATH`，或者在 `systemConfig.auth.betterAuth.basePath` 中提供后备值。
+
+### 本地用户映射规则
+
+Better Auth 登录成功后，MCPHub 会把会话映射回本地用户：
+
+- 优先使用 `email`
+- 其次使用 `name`
+- 最后回退到 provider 返回的 `id`
+
+如果本地不存在对应 `username`，MCPHub 会自动创建一个**非管理员**用户。
+
+> OIDC / GitHub / Google 登录都不会自动授予管理员权限。只有本地已存在同名且 `isAdmin=true` 的用户，映射后才会拥有管理员权限。
+
+### 仅允许 SSO 登录
+
+如需只允许通过 SSO 提供商登录，可在 设置 → Better Auth 中开启 **禁用密码登录**，或设置 `systemConfig.auth.betterAuth.disablePasswordLogin: true`。此时登录页只显示提供商按钮，`POST /api/auth/login` 返回 `403`。与其他 Better Auth 设置不同，它无需重启即可生效。
+
+- **不会锁死：** 仅在至少有一个提供商真正可用（Better Auth 已开启、数据库模式、凭据齐全），且在 MCPHub 启动时已启用时生效，因为提供商的登录路由只在启动时创建；否则密码登录保持可用：新启用提供商后，需要重启 MCPHub 才会生效。
+- **恢复：** `BETTER_AUTH_DISABLE_PASSWORD_LOGIN` 在两个方向上都优先于已保存的设置。如果身份提供商不可用，将其设为 `false` 并重启，即可重新使用本地密码登录。为此请给本地管理员保留一个强密码。
+- **脚本和 CLI** 在禁用期间无法使用密码登录。请使用访问类型为 `all` 的系统级 Bearer 密钥，它可以访问管理 API（CLI 使用 `mcphub config set-token <key> --bearer`）。
+- 之前通过密码登录签发的令牌在过期前仍然有效。修改本地密码仍然可用，因此可以轮换用于恢复的密码。
+
+## 转发认证（基于 JWKS 验证的网关身份）
+
+当 MCPHub 部署在已完成用户认证的 API 网关或身份感知代理之后时，转发认证允许 MCPHub 信任网关传来的 JWT，用户无需再次登录。MCPHub 会使用身份提供方的 JWKS 自行验证令牌，因此 MCPHub 仍然是安全边界。转发认证**默认关闭**，同时作用于仪表盘 API 和 MCP 传输路由（`/mcp/*`、`/sse/*` 及其用户级路由）。
+
+```json
+"systemConfig": {
+  "auth": {
+    "forwardAuth": {
+      "enabled": true,
+      "mode": "jwks",
+      "jwks": {
+        "uri": "https://idp.example.com/.well-known/jwks.json",
+        "issuer": "https://idp.example.com/",
+        "audience": "mcphub",
+        "algorithms": ["RS256", "ES256"]
+      },
+      "usernameClaim": "preferred_username",
+      "emailClaim": "email",
+      "autoCreate": true
+    }
+  }
+}
+```
+
+JWT 从配置的 Bearer 请求头中读取（默认为 `Authorization: Bearer <jwt>`）。
+
+**验证**
+
+- 令牌使用 `jwks.uri` 进行验证。密钥会被缓存，遇到未知 `kid` 时会重新获取，因此身份提供方轮换密钥无需重启。
+- 始终校验 `iss`、`aud` 和 `exp`；`sub` 与 `exp` 为必需声明。允许 30 秒的时钟偏差。
+- 仅接受非对称算法（`RS*`、`PS*`、`ES*`、`EdDSA`；默认 `RS256` 和 `ES256`）。配置 `HS*` 或 `none` 会使转发认证被禁用。
+- `jwks.uri` 必须使用 `https`（仅 `localhost` 允许 `http`）。`issuer` 和 `audience` 为必填项。配置不完整或无效时，转发认证保持禁用并记录错误日志。
+
+**请求处理**
+
+- 转发认证先于 Bearer 密钥、OAuth 令牌、Better Auth 会话和仪表盘 JWT 进行检查。
+- 非 JWT 令牌，或 `iss` 不是所配置签发方的令牌会被忽略，其他认证方式照常执行。
+- 来自所配置签发方但验证失败（签名错误、已过期、受众错误、算法不允许）或无法映射到用户的令牌会返回 `401`，MCPHub **不会回退**到其他认证方式。
+
+**身份映射**
+
+- 身份由（`iss`、`sub`）确定，以 `forward-auth:` 命名空间存储在用户的 `ssoUserId` 中，与 Better Auth 身份相互隔离。Better Auth 登录不会接管转发认证用户，反之亦然。
+- 首次出现时，MCPHub 会创建一个**非管理员**本地用户。用户名取自 `usernameClaim`，其次为 `emailClaim`，最后为 `sub`。
+- **不会**通过用户名或邮箱关联已有账户。如果用户名或邮箱已属于其他账户（包括 `admin`），请求会返回 `401`。
+- 绑定后，即使用户在身份提供方处改名，本地用户名也不会改变，因为服务器、分组和密钥都引用用户名。
+- 管理员身份始终取自本地用户记录，JWT 中的角色声明会被忽略。
+- 设置 `autoCreate: false` 时，只接受已绑定本地用户的身份。由于不会关联已有账户，这实际上会拒绝所有新身份。
+
+转发认证配置在每次请求时读取，修改后无需重启。每个字段都可以通过环境变量覆盖，参见[环境变量](/zh/configuration/environment-variables)。
+
+## 身份认证方法
+
+### 基于环境变量的认证
+
+使用环境变量配置基础认证：
+
+```bash
+# 基础认证凭据
+AUTH_USERNAME=admin
+AUTH_PASSWORD=your-secure-password
+
+# JWT 设置
+JWT_SECRET=your-jwt-secret-key
+```
+
+### 数据库认证
+
+对于生产环境部署，启用基于数据库的用户管理：
+
+```json
+{
+  "auth": {
+    "provider": "database",
+    "database": {
+      "url": "postgresql://user:pass@localhost:5432/mcphub",
+      "userTable": "users"
+    }
+  }
+}
+```
+
+## 用户管理
+
+### 创建用户
+
+通过管理界面或 API 创建用户：
+
+```bash
+# 通过 API
+curl -X POST http://localhost:3000/api/auth/users \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{
+    "username": "newuser",
+    "email": "user@example.com",
+    "password": "securepassword",
+    "role": "user"
+  }'
+```
+
+### 用户角色
+
+MCPHub 支持基于角色的访问控制：
+
+- **管理员**: 完整系统访问权限、用户管理、服务器配置
+- **管理者**: 服务器管理、组管理、监控
+- **用户**: 在分配组内的基本服务器访问权限
+- **查看者**: 对分配资源的只读访问权限
+
+## 基于组的访问控制
+
+### 将用户分配到组
+
+```bash
+# 添加用户到组
+curl -X POST http://localhost:3000/api/groups/{groupId}/users \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"userId": "user123"}'
+```
+
+### 组权限
+
+配置组级别权限：
+
+```json
+{
+  "groupId": "dev-team",
+  "permissions": {
+    "servers": ["read", "write", "execute"],
+    "tools": ["read", "execute"],
+    "logs": ["read"],
+    "config": ["read"]
+  }
+}
+```
+
+## API 认证
+
+### JWT 令牌认证
+
+```javascript
+// 获取认证令牌
+const response = await fetch('/api/auth/login', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    username: 'your-username',
+    password: 'your-password',
+  }),
+});
+
+const { token } = await response.json();
+
+// 在后续请求中使用令牌
+const protectedResponse = await fetch('/api/servers', {
+  headers: {
+    Authorization: `Bearer ${token}`,
+  },
+});
+```
+
+### API 密钥认证
+
+为系统集成生成 API 密钥：
+
+```bash
+# 生成新的 API 密钥
+curl -X POST http://localhost:3000/api/auth/api-keys \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "name": "Integration Key",
+    "permissions": ["servers:read", "servers:write"],
+    "expiresAt": "2024-12-31T23:59:59.000Z"
+  }'
+```
+
+## 安全设置
+
+### HTTPS 配置
+
+为生产环境启用 HTTPS：
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name mcphub.example.com;
+
+    ssl_certificate /path/to/certificate.crt;
+    ssl_certificate_key /path/to/private.key;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+### 会话安全
+
+配置安全的会话设置：
+
+```javascript
+// 会话配置
+{
+  "session": {
+    "secret": "your-session-secret",
+    "secure": true,  // 生产环境中需要 HTTPS
+    "httpOnly": true,
+    "maxAge": 86400000,  // 24 小时
+    "sameSite": "strict"
+  }
+}
+```
+
+### 速率限制
+
+实施 API 速率限制：
+
+```javascript
+{
+  "rateLimit": {
+    "windowMs": 900000,  // 15 分钟
+    "max": 100,  // 每个 IP 限制 100 个请求
+    "message": "请求过于频繁，请稍后再试",
+    "standardHeaders": true,
+    "legacyHeaders": false
+  }
+}
+```
+
+## 多因素认证 (MFA)
+
+### 启用 TOTP
+
+为管理员帐户启用基于时间的一次性密码：
+
+```bash
+# 启用 MFA
+curl -X POST http://localhost:3000/api/auth/mfa/enable \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{
+    "type": "totp",
+    "appName": "MCPHub"
+  }'
+```
+
+### 验证 MFA 代码
+
+```javascript
+// 登录时验证 MFA
+const loginResponse = await fetch('/api/auth/login', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    username: 'admin',
+    password: 'password',
+    mfaCode: '123456', // 来自认证器应用的 6 位数字
+  }),
+});
+```
+
+## 审计日志
+
+### 启用审计日志
+
+跟踪所有认证和授权事件：
+
+```json
+{
+  "audit": {
+    "enabled": true,
+    "logLevel": "info",
+    "events": [
+      "login",
+      "logout",
+      "password_change",
+      "role_change",
+      "permission_change",
+      "server_access",
+      "config_change"
+    ],
+    "storage": {
+      "type": "database",
+      "retention": "90d"
+    }
+  }
+}
+```
+
+### 查看审计日志
+
+```bash
+# 获取审计日志
+curl -X GET "http://localhost:3000/api/audit/logs?startDate=2024-01-01&endDate=2024-01-31" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+## 密码策略
+
+### 配置密码要求
+
+```json
+{
+  "passwordPolicy": {
+    "minLength": 12,
+    "requireUppercase": true,
+    "requireLowercase": true,
+    "requireNumbers": true,
+    "requireSpecialChars": true,
+    "preventCommonPasswords": true,
+    "preventReuse": 5, // 防止重复使用最近 5 个密码
+    "maxAge": 7776000 // 90 天后过期
+  }
+}
+```
+
+## 故障排除
+
+### 常见认证问题
+
+1. **JWT 令牌过期**
+
+   ```bash
+   # 检查令牌有效期
+   curl -X GET http://localhost:3000/api/auth/verify \
+     -H "Authorization: Bearer $TOKEN"
+   ```
+
+2. **权限被拒绝**
+
+   ```bash
+   # 检查用户权限
+   curl -X GET http://localhost:3000/api/auth/permissions \
+     -H "Authorization: Bearer $TOKEN"
+   ```
+
+3. **会话问题**
+   - 清除浏览器 cookies
+   - 检查会话配置
+   - 验证服务器时间同步
+
+### 调试认证流程
+
+启用调试日志：
+
+```bash
+# 设置环境变量
+export DEBUG=auth:*
+export LOG_LEVEL=debug
+
+# 启动服务器
+npm start
+```
+
+## 安全最佳实践
+
+1. **定期更新凭据**: 定期轮换 JWT 密钥和 API 密钥
+2. **最小权限原则**: 只授予用户执行其任务所需的最小权限
+3. **监控异常活动**: 设置警报以检测可疑的登录模式
+4. **备份配置**: 定期备份认证配置和用户数据
+5. **安全更新**: 保持 MCPHub 和依赖项的最新状态
+
+更多安全配置选项，请参阅 [环境变量配置](/zh/configuration/environment-variables) 和 [Docker 设置](/zh/configuration/docker-setup) 文档。

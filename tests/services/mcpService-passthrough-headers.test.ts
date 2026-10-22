@@ -1,0 +1,354 @@
+import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { SSEClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import fs from 'node:fs';
+import { argumentCredentialBindings } from '../../src/utils/credentialTemplate.js';
+import { logger } from '../../src/utils/logger.js';
+import type { ServerConfig } from '../../src/types/index.js';
+
+const mockBaseFetch = jest.fn(
+  async (_url: string | URL, _init?: RequestInit) =>
+    ({
+      ok: true,
+      status: 200,
+      headers: new Headers(),
+      body: {
+        cancel: jest.fn(),
+      },
+    }) as any,
+);
+
+jest.mock('../../src/services/oauthService.js', () => ({
+  initializeAllOAuthClients: jest.fn(),
+}));
+
+jest.mock('../../src/services/mcpOAuthProvider.js', () => ({
+  createOAuthProvider: jest.fn(async () => undefined),
+}));
+
+jest.mock('../../src/services/groupService.js', () => ({
+  getServersInGroup: jest.fn(),
+  getServerConfigInGroup: jest.fn(),
+}));
+
+jest.mock('../../src/services/sseService.js', () => ({
+  getGroup: jest.fn(() => ''),
+}));
+
+jest.mock('../../src/services/vectorSearchService.js', () => ({
+  removeServerToolEmbeddings: jest.fn(),
+  saveToolsAsVectorEmbeddings: jest.fn(),
+}));
+
+jest.mock('../../src/services/services.js', () => ({
+  getDataService: jest.fn(() => ({
+    filterData: (data: any) => data,
+  })),
+}));
+
+jest.mock('../../src/services/smartRoutingService.js', () => ({
+  initSmartRoutingService: jest.fn(),
+  getSmartRoutingTools: jest.fn(),
+  handleSearchToolsRequest: jest.fn(),
+  handleDescribeToolRequest: jest.fn(),
+  isSmartRoutingGroup: jest.fn(() => false),
+}));
+
+jest.mock('../../src/services/activityLoggingService.js', () => ({
+  getActivityLoggingService: jest.fn(() => ({
+    logToolCall: jest.fn(),
+  })),
+}));
+
+jest.mock('../../src/services/keepAliveService.js', () => ({
+  setupClientKeepAlive: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../../src/services/proxy.js', () => ({
+  createFetchWithProxy: jest.fn(() => mockBaseFetch),
+  getProxyConfigFromEnv: jest.fn(() => undefined),
+}));
+
+jest.mock('../../src/dao/index.js', () => ({
+  getServerDao: jest.fn(() => ({
+    findAll: jest.fn(async () => []),
+    findById: jest.fn(async () => null),
+  })),
+  getSystemConfigDao: jest.fn(() => ({
+    get: jest.fn(async () => ({})),
+  })),
+  getBuiltinPromptDao: jest.fn(() => ({
+    findEnabled: jest.fn(async () => []),
+  })),
+  getBuiltinResourceDao: jest.fn(() => ({
+    findEnabled: jest.fn(async () => []),
+  })),
+}));
+
+jest.mock('../../src/config/index.js', () => ({
+  expandEnvVars: jest.fn((value: string) => value),
+  replaceEnvVars: jest.fn((value: any) => value),
+  getNameSeparator: jest.fn(() => '-'),
+  default: {
+    mcpHubName: 'test-hub',
+    mcpHubVersion: '1.0.0',
+    initTimeout: 60000,
+  },
+}));
+
+jest.mock('@modelcontextprotocol/client', () => ({
+  ...jest.requireActual('@modelcontextprotocol/client'),
+  SSEClientTransport: jest.fn().mockImplementation((url: URL, options: any) => ({
+    url,
+    options,
+  })),
+  StreamableHTTPClientTransport: jest.fn().mockImplementation((url: URL, options: any) => ({
+    url,
+    options,
+  })),
+}));
+
+jest.mock('@modelcontextprotocol/client/stdio', () => ({
+  StdioClientTransport: jest.fn(),
+}));
+import { RequestContextService } from '../../src/services/requestContextService.js';
+import {
+  createRequestContextAwareFetch,
+  createTransportFromConfig,
+} from '../../src/services/mcpService.js';
+
+describe('MCP Service - passthrough headers for upstream MCP transports', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    RequestContextService.getInstance().clearRequestContext();
+  });
+
+  afterEach(() => {
+    RequestContextService.getInstance().clearRequestContext();
+  });
+
+  it('substitutes args credentials after proxy cleaning without logging or modifying the value', async () => {
+    const config: ServerConfig = {
+      type: 'stdio',
+      command: 'node',
+      args: ['--key={{args.KEY}}', 'prefix;{{args.KEY}}'],
+      credentialTemplate: [{ target: 'args', name: 'KEY' }],
+      proxy: { enabled: true, configPath: '/test-proxy.conf' },
+    };
+    const secret = '  "opaque" $HOME ;& {{args.KEY}}  ';
+    argumentCredentialBindings.set(config, { KEY: secret });
+    const exists = fs.existsSync;
+    const check = jest
+      .spyOn(fs, 'existsSync')
+      .mockImplementation(
+        (file) => file === '/usr/bin/proxychains4' || file === '/test-proxy.conf' || exists(file),
+      );
+    const warn = jest.spyOn(logger, 'warn');
+    try {
+      await createTransportFromConfig('args-proxy', config);
+      expect(StdioClientTransport).toHaveBeenCalledWith(
+        expect.objectContaining({
+          command: '/usr/bin/proxychains4',
+          args: ['-f', '/test-proxy.conf', 'node', `--key=${secret}`, `prefix${secret}`],
+        }),
+      );
+      expect(JSON.stringify(warn.mock.calls)).not.toContain('opaque');
+      expect(config.args).toEqual(['--key={{args.KEY}}', 'prefix;{{args.KEY}}']);
+    } finally {
+      check.mockRestore();
+      warn.mockRestore();
+    }
+  });
+
+  it('should merge request-context passthrough headers into streamable-http requests', async () => {
+    await createTransportFromConfig('demo-streamable', {
+      type: 'streamable-http',
+      url: 'https://example.com/mcp',
+      headers: {
+        Authorization: 'Bearer static-token',
+        'X-Static': 'static-value',
+      },
+      passthroughHeaders: ['Authorization', 'X-Custom-User-Id'],
+    });
+
+    const options = (StreamableHTTPClientTransport as jest.Mock).mock.calls[0][1];
+
+    await RequestContextService.getInstance().runWithCustomRequestContext(
+      {
+        headers: {
+          authorization: 'Bearer user-token',
+          'x-custom-user-id': 'user-42',
+        },
+      },
+      async () => {
+        await options.fetch('https://example.com/mcp', {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer static-token',
+            'X-Static': 'static-value',
+            'Content-Type': 'application/json',
+          },
+        });
+      },
+    );
+
+    expect(mockBaseFetch).toHaveBeenCalledWith(
+      'https://example.com/mcp',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Authorization: 'Bearer static-token',
+          'X-Custom-User-Id': 'user-42',
+          'X-Static': 'static-value',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+  });
+
+  it.each([
+    new Headers({ Authorization: 'Bearer static-token' }),
+    [['authorization', 'Bearer static-token']],
+    { authorization: 'Bearer static-token' },
+  ] satisfies HeadersInit[])(
+    'preserves upstream authorization without forwarding caller credentials for %p',
+    async (headers) => {
+      const fetch = createRequestContextAwareFetch(mockBaseFetch, ['Authorization']);
+      await RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: { authorization: 'Bearer user-token' } },
+        () => fetch('https://example.com/mcp', { headers }),
+      );
+      const sentHeaders = new Headers(mockBaseFetch.mock.calls[0][1]?.headers);
+      expect(sentHeaders.get('authorization')).toBe('Bearer static-token');
+    },
+  );
+
+  it('blocks caller credentials from existing configs while forwarding business headers', async () => {
+    const names = [
+      'Authorization',
+      'COOKIE',
+      'proxy-authorization',
+      'x-auth-token',
+      'x-api-key',
+      'X-Tenant',
+    ];
+    const fetch = createRequestContextAwareFetch(mockBaseFetch, names);
+    await RequestContextService.getInstance().runWithCustomRequestContext(
+      { headers: Object.fromEntries(names.map((name) => [name.toLowerCase(), 'secret'])) },
+      () => fetch('https://example.com/mcp'),
+    );
+    expect(new Headers(mockBaseFetch.mock.calls[0][1]?.headers).get('x-tenant')).toBe('secret');
+    for (const name of names.slice(0, -1)) {
+      expect(new Headers(mockBaseFetch.mock.calls[0][1]?.headers).has(name)).toBe(false);
+    }
+  });
+
+  it('should expose passthrough-aware fetch for SSE connect and message requests', async () => {
+    await createTransportFromConfig('demo-sse', {
+      type: 'sse',
+      url: 'https://example.com/sse',
+      headers: {
+        'X-Static': 'static-value',
+      },
+      passthroughHeaders: ['Authorization', 'X-Custom-User-Id'],
+    });
+
+    const options = (SSEClientTransport as jest.Mock).mock.calls[0][1];
+
+    await RequestContextService.getInstance().runWithCustomRequestContext(
+      {
+        headers: {
+          authorization: 'Bearer user-token',
+          'x-custom-user-id': 'user-99',
+        },
+      },
+      async () => {
+        await options.eventSourceInit.fetch('https://example.com/sse', {
+          method: 'GET',
+          headers: {
+            Accept: 'text/event-stream',
+            'X-Static': 'static-value',
+          },
+        });
+
+        await options.fetch('https://example.com/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+      },
+    );
+
+    expect(mockBaseFetch).toHaveBeenNthCalledWith(
+      1,
+      'https://example.com/sse',
+      expect.objectContaining({
+        method: 'GET',
+        headers: expect.objectContaining({
+          'X-Custom-User-Id': 'user-99',
+          'X-Static': 'static-value',
+          Accept: 'text/event-stream',
+        }),
+      }),
+    );
+
+    expect(mockBaseFetch).toHaveBeenNthCalledWith(
+      2,
+      'https://example.com/messages',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          'X-Custom-User-Id': 'user-99',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+  });
+
+  it('should use the current process working directory for stdio transports', async () => {
+    (StdioClientTransport as jest.Mock).mockImplementation(() => ({
+      stderr: {
+        on: jest.fn(),
+      },
+    }));
+
+    await createTransportFromConfig('demo-stdio', {
+      command: 'npx',
+      args: ['@playwright/mcp'],
+      env: {
+        DEMO_VAR: 'demo',
+      },
+    });
+
+    expect(StdioClientTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: process.cwd(),
+        command: 'npx',
+        args: ['@playwright/mcp'],
+        env: expect.objectContaining({
+          DEMO_VAR: 'demo',
+        }),
+        stderr: 'pipe',
+      }),
+    );
+  });
+
+  it('should create a stdio transport when command arguments are omitted', async () => {
+    (StdioClientTransport as jest.Mock).mockImplementation(() => ({
+      stderr: {
+        on: jest.fn(),
+      },
+    }));
+
+    await createTransportFromConfig('demo-stdio-without-args', {
+      command: '/usr/bin/some-tool',
+    });
+
+    expect(StdioClientTransport).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: '/usr/bin/some-tool',
+        args: [],
+      }),
+    );
+  });
+});

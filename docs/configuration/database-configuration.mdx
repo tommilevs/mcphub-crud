@@ -1,0 +1,339 @@
+---
+title: 'Database Configuration'
+description: 'Configuring MCPHub to use a PostgreSQL database as an alternative to the mcp_settings.json file.'
+---
+
+# Database Configuration for MCPHub
+
+## Overview
+
+MCPHub supports storing configuration data in a PostgreSQL database as an alternative to the `mcp_settings.json` file. Database mode provides enhanced persistence and scalability for production environments and enterprise deployments.
+
+## Why Use Database Configuration?
+
+**Core Benefits:**
+- ✅ **Better Persistence** - Configuration stored in a professional database with transaction support and data integrity
+- ✅ **High Availability** - Leverage database replication and failover capabilities
+- ✅ **Enterprise Ready** - Meets enterprise data management and compliance requirements
+- ✅ **Backup & Recovery** - Use mature database backup tools and strategies
+
+## Environment Variables
+
+### Required for Database Mode
+
+```bash
+# Database connection URL (PostgreSQL)
+# Simply setting DB_URL will automatically enable database mode
+DB_URL=postgresql://user:password@localhost:5432/mcphub
+
+# Or explicitly control with USE_DB (overrides auto-detection)
+# USE_DB=true
+```
+
+<Note>
+**Simplified Configuration**: You only need to set `DB_URL` to enable database mode. MCPHub will automatically detect and enable database mode when `DB_URL` is present. Use `USE_DB=false` to explicitly disable database mode even when `DB_URL` is set.
+</Note>
+
+## Setup Instructions
+
+### 1. Using Docker
+
+#### Option A: Using External Database
+
+If you already have a PostgreSQL database:
+
+```bash
+docker run -d \
+  -p 3000:3000 \
+  -v ./mcp_settings.json:/app/mcp_settings.json \
+  -e DB_URL="postgresql://user:password@your-db-host:5432/mcphub" \
+  samanhappy/mcphub
+```
+
+#### Option B: Using PostgreSQL as a separate service
+
+Create a `docker-compose.yml`:
+
+```yaml
+version: '3.8'
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_DB: mcphub
+      POSTGRES_USER: mcphub
+      POSTGRES_PASSWORD: your_secure_password
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+
+  mcphub:
+    image: samanhappy/mcphub:latest
+    environment:
+      USE_DB: "true"
+      DB_URL: "postgresql://mcphub:your_secure_password@postgres:5432/mcphub"
+      PORT: 3000
+    ports:
+      - "3000:3000"
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:
+```
+
+Run with:
+```bash
+docker-compose up -d
+```
+
+### 2. Manual Setup
+
+#### Step 1: Setup PostgreSQL Database
+
+```bash
+# Install PostgreSQL (if not already installed)
+sudo apt-get install postgresql postgresql-contrib
+
+# Create database and user
+sudo -u postgres psql <<EOF
+CREATE DATABASE mcphub;
+CREATE USER mcphub WITH ENCRYPTED PASSWORD 'your_password';
+GRANT ALL PRIVILEGES ON DATABASE mcphub TO mcphub;
+EOF
+```
+
+#### Step 2: Install MCPHub
+
+```bash
+npm install -g @samanhappy/mcphub
+```
+
+#### Step 3: Set Environment Variables
+
+Create a `.env` file:
+
+```bash
+# Simply set DB_URL to enable database mode (USE_DB is auto-detected)
+DB_URL=postgresql://mcphub:your_password@localhost:5432/mcphub
+PORT=3000
+```
+
+#### Step 4: Run Migration (Optional)
+
+If you have an existing `mcp_settings.json` file, migrate it:
+
+```bash
+# Run migration script
+npx tsx src/scripts/migrate-to-database.ts
+```
+
+Or let MCPHub auto-migrate on first startup.
+
+#### Step 5: Start MCPHub
+
+```bash
+mcphub
+```
+
+## Migration from File-Based to Database
+
+MCPHub provides automatic migration on first startup when database mode is enabled. However, you can also run the migration manually.
+
+### Automatic Migration
+
+When you start MCPHub with `USE_DB=true` for the first time:
+
+1. MCPHub connects to the database
+2. Checks if any users exist in the database
+3. If no users found, automatically migrates from `mcp_settings.json`
+4. Creates all tables and imports all data
+
+### Manual Migration
+
+Run the migration script:
+
+```bash
+# Using npx
+npx tsx src/scripts/migrate-to-database.ts
+
+# Or using Node
+node dist/scripts/migrate-to-database.js
+```
+
+The migration will:
+- ✅ Create database tables if they don't exist
+- ✅ Import all users with hashed passwords
+- ✅ Import all MCP server configurations
+- ✅ Import all groups
+- ✅ Import system configuration
+- ✅ Import user-specific configurations
+- ✅ Skip existing records (safe to run multiple times)
+
+## Configuration After Migration
+
+Once running in database mode, all configuration changes are stored in the database:
+
+- User management via `/api/users`
+- Server management via `/api/servers`
+- Group management via `/api/groups`
+- System settings via `/api/system/config`
+
+The web dashboard works exactly the same way, but now stores changes in the database instead of the file.
+
+`mcp_settings.json` is used as a one-time seed when database mode is initialized. After the initial migration, PostgreSQL is the authoritative configuration source; later edits to `mcp_settings.json` are not imported automatically. Use the dashboard, API, or CLI to manage configuration in database mode, or opt into the startup sync below.
+
+## Declarative servers and groups (GitOps)
+
+Set `MCPHUB_SETTINGS_SYNC=upsert` in database mode to reconcile `mcpServers` and `groups` from `mcp_settings.json` on every startup. `MCPHUB_SETTING_PATH` can point to a read-only ConfigMap mount. Update the file and restart MCPHub to apply changes; there is no file watcher or SIGHUP handler.
+
+```bash
+USE_DB=true
+MCPHUB_SETTINGS_SYNC=upsert
+MCPHUB_SETTING_PATH=/etc/mcphub/mcp_settings.json
+```
+
+- Entries match by their globally unique names. Existing IDs are retained. The file wins even when the same-name entry was created or edited through the dashboard.
+- The entire declared entry controls its configuration: omitted optional fields are cleared or reset to defaults. Servers default to enabled and private. Group memberships, aliases, selections, and pinned tools come from the declaration.
+- On adoption, an omitted `owner` clears the existing owner, including a non-admin owner. Declare `owner` explicitly to retain ownership. Omitted `sharedWithUsers` is cleared as well. Review these fields before enabling sync on an existing deployment.
+- In `upsert` mode, entries absent from the file remain untouched. Removing or renaming an entry does not delete the old database entry.
+- In `upsert` mode, only server/group declarations are reconciled. Users, bearer keys, MCPHub OAuth clients/tokens, personal credential bindings, system configuration, and other runtime data remain in the database. The existing first-boot seed migration still applies on an empty user table.
+- Upstream OAuth tokens and pending authorization supplied in the file are ignored by sync. Existing upstream OAuth state (including dynamically registered client credentials) is retained while the connection target and OAuth declaration are unchanged. Changes to either clear the old state and may require authorization again. A nullable internal `settingsSyncHash` column on servers detects declaration changes, including removed OAuth fields and expanded environment values, without storing resolved secrets. Fingerprints use PBKDF2-SHA256 with 600,000 iterations and a random salt per server; the existing salt is reused on subsequent startups.
+- On first adoption for an existing server, OAuth state is retained only if the target matches and every explicitly declared OAuth field matches its stored value. Undeclared discovered OAuth fields are retained until the declaration changes.
+- Environment placeholders remain unexpanded in persisted declarations and use the existing runtime expansion. JSON must be valid; duplicate group names, malformed declarations, missing files, unsupported sync modes, or database errors fail startup. Server/group writes are applied in one transaction.
+
+Leave `MCPHUB_SETTINGS_SYNC` unset to retain the existing one-time seed behavior. This switch applies only in database mode. Sync never writes back to the settings file, including during the initial seed in this mode.
+
+### Pruning managed entries
+
+Set `MCPHUB_SETTINGS_SYNC=prune` to upsert declarations and delete previously managed servers/groups that are no longer declared. This is opt-in; `upsert` and the unset mode retain their existing behavior.
+
+- Both sync modes mark declared entries as internally managed, including same-name entries adopted from the dashboard. Dashboard edits do not release that ownership. Unmanaged entries remain untouched, so this is not a full database mirror.
+- Omit `mcpServers` or `groups` to leave that collection unpruned. Explicit `mcpServers: {}` or `groups: []` prunes all managed entries in that collection. Renaming a managed entry creates the new entry and deletes the old one, including its runtime credentials.
+- Servers synced by older versions are recognized by their existing declaration fingerprint. Older groups have no ownership marker: declare them once with either sync mode before removing them. Historical groups already removed from the file require manual deletion.
+- Pruning removes personal credential bindings and server/tool embeddings for deleted servers, and removes their references from retained, undeclared groups. A declared group referencing a server being pruned fails startup instead of silently changing its declaration. Users, bearer-key scopes, MCPHub OAuth clients/tokens, and system configuration are not pruned.
+- All upserts, deletions, reference updates, and credential/embedding cleanup share one transaction. Invalid declarations or database failures roll back that transaction and fail startup. Missing optional vector storage is skipped. Sync still runs only at startup and never writes to the settings file.
+
+Review the complete configuration before enabling `prune`: deletion is permanent, and re-adding a server does not restore its credentials.
+
+## Database Schema
+
+MCPHub creates the following tables:
+
+- **users** - User accounts and authentication
+- **servers** - MCP server configurations
+- **groups** - Server groups
+- **system_config** - System-wide settings
+- **user_configs** - User-specific settings
+- **vector_embeddings** - Vector search data (for smart routing)
+
+## Backup and Restore
+
+### Backup
+
+```bash
+# PostgreSQL backup
+pg_dump -U mcphub mcphub > mcphub_backup.sql
+
+# Or using Docker
+docker exec postgres pg_dump -U mcphub mcphub > mcphub_backup.sql
+```
+
+### Restore
+
+```bash
+# PostgreSQL restore
+psql -U mcphub mcphub < mcphub_backup.sql
+
+# Or using Docker
+docker exec -i postgres psql -U mcphub mcphub < mcphub_backup.sql
+```
+
+## Switching Back to File-Based Config
+
+If you need to switch back to file-based configuration:
+
+1. Set `USE_DB=false` or remove `DB_URL` and `USE_DB` environment variables
+2. Restart MCPHub
+3. MCPHub will use `mcp_settings.json` again
+
+Note: Changes made in database mode won't be reflected in the file unless you manually export them.
+
+## Troubleshooting
+
+### Connection Refused
+
+```
+Error: connect ECONNREFUSED 127.0.0.1:5432
+```
+
+**Solution:** Check that PostgreSQL is running and accessible:
+```bash
+# Check PostgreSQL status
+sudo systemctl status postgresql
+
+# Or for Docker
+docker ps | grep postgres
+```
+
+### Authentication Failed
+
+```
+Error: password authentication failed for user "mcphub"
+```
+
+**Solution:** Verify database credentials in `DB_URL` environment variable.
+
+### Migration Failed
+
+```
+❌ Migration failed: ...
+```
+
+**Solution:** 
+1. Check that `mcp_settings.json` exists and is valid JSON
+2. Verify database connection
+3. Check logs for specific error messages
+4. Ensure database user has CREATE TABLE permissions
+
+### Tables Already Exist
+
+Database tables are automatically created if they don't exist. If you get errors about existing tables, check:
+1. Whether a previous migration partially completed
+2. Manual table creation conflicts
+3. Run with `synchronize: false` in database config if needed
+
+## Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DB_URL` | Yes* | - | Full PostgreSQL connection URL. Setting this automatically enables database mode |
+| `USE_DB` | No | auto | Explicitly enable/disable database mode. If not set, auto-detected based on `DB_URL` presence |
+| `MCPHUB_SETTING_PATH` | No | - | Path to mcp_settings.json (for migration) |
+
+*Required for database mode. Simply setting `DB_URL` enables database mode automatically
+
+## Security Considerations
+
+1. **Database Credentials:** Store database credentials securely, use environment variables or secrets management
+2. **Network Access:** Restrict database access to MCPHub instances only
+3. **Encryption:** Use SSL/TLS for database connections in production:
+   ```bash
+   DB_URL=postgresql://user:password@host:5432/mcphub?sslmode=require
+   ```
+4. **Backup:** Regularly backup your database
+5. **Access Control:** Use strong database passwords and limit user permissions
+
+## Performance
+
+Database mode offers better performance for:
+- Multiple concurrent users
+- Frequent configuration changes
+- Large number of servers/groups
+
+File mode may be faster for:
+- Single user setups
+- Read-heavy workloads with infrequent changes
+- Development/testing environments

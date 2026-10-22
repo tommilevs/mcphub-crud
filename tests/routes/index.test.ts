@@ -1,0 +1,472 @@
+import express from 'express';
+import { jest } from '@jest/globals';
+
+const routeHandler = jest.fn();
+const uploadMiddleware = jest.fn();
+const authMiddleware = jest.fn((_req, _res, next) => next());
+
+jest.mock('../../src/controllers/personalOAuthController.js', () => ({ managePersonalOAuth: routeHandler }));
+
+jest.mock('../../src/controllers/serverController.js', () => ({
+  getAllServers: routeHandler,
+  getAllSettings: routeHandler,
+  getServerConfig: routeHandler,
+  getServerShareCandidates: routeHandler,
+  createServer: routeHandler,
+  batchCreateServers: routeHandler,
+  previewOpenApiToolStatsHandler: routeHandler,
+  updateServer: routeHandler,
+  deleteServer: routeHandler,
+  toggleServer: routeHandler,
+  reloadServer: routeHandler,
+  reinstallServerHandler: routeHandler,
+  disconnectServerOAuth: routeHandler,
+  clearCache: routeHandler,
+  toggleTool: routeHandler,
+  updateToolDescription: routeHandler,
+  resetToolDescription: routeHandler,
+  updateToolHiddenParams: routeHandler,
+  togglePrompt: routeHandler,
+  updatePromptDescription: routeHandler,
+  resetPromptDescription: routeHandler,
+  toggleResource: routeHandler,
+  updateResourceDescription: routeHandler,
+  resetResourceDescription: routeHandler,
+  updateSystemConfig: routeHandler,
+}));
+
+jest.mock('../../src/controllers/groupController.js', () => ({
+  getGroups: routeHandler,
+  getGroupShareCandidates: routeHandler,
+  getGroup: routeHandler,
+  createNewGroup: routeHandler,
+  batchCreateGroups: routeHandler,
+  updateExistingGroup: routeHandler,
+  deleteExistingGroup: routeHandler,
+  addServerToExistingGroup: routeHandler,
+  removeServerFromExistingGroup: routeHandler,
+  getGroupServers: routeHandler,
+  updateGroupServersBatch: routeHandler,
+  getGroupServerConfigs: routeHandler,
+  getGroupServerConfig: routeHandler,
+  updateGroupServerTools: routeHandler,
+}));
+
+jest.mock('../../src/controllers/userController.js', () => ({
+  getUsers: routeHandler,
+  getUser: routeHandler,
+  createUser: routeHandler,
+  updateExistingUser: routeHandler,
+  deleteExistingUser: routeHandler,
+  getUserStats: routeHandler,
+}));
+
+jest.mock('../../src/controllers/marketController.js', () => ({
+  getAllMarketServers: routeHandler,
+  getMarketServer: routeHandler,
+  getAllMarketCategories: routeHandler,
+  getAllMarketTags: routeHandler,
+  searchMarketServersByQuery: routeHandler,
+  getMarketServersByCategory: routeHandler,
+  getMarketServersByTag: routeHandler,
+}));
+
+jest.mock('../../src/controllers/cloudController.js', () => ({
+  getAllCloudServers: routeHandler,
+  getCloudServer: routeHandler,
+  getAllCloudCategories: routeHandler,
+  getAllCloudTags: routeHandler,
+  searchCloudServersByQuery: routeHandler,
+  getCloudServersByCategory: routeHandler,
+  getCloudServersByTag: routeHandler,
+  getCloudServerToolsList: routeHandler,
+  callCloudTool: routeHandler,
+}));
+
+jest.mock('../../src/controllers/registryController.js', () => ({
+  getAllRegistryServers: routeHandler,
+  getRegistryServerVersions: routeHandler,
+  getRegistryServerVersion: routeHandler,
+}));
+
+jest.mock('../../src/controllers/authController.js', () => ({
+  login: routeHandler,
+  register: routeHandler,
+  getCurrentUser: routeHandler,
+  changePassword: routeHandler,
+}));
+
+jest.mock('../../src/controllers/logController.js', () => ({
+  getAllLogs: routeHandler,
+  clearLogs: routeHandler,
+  streamLogs: routeHandler,
+}));
+
+jest.mock('../../src/controllers/configController.js', () => ({
+  getRuntimeConfig: routeHandler,
+  getPublicConfig: routeHandler,
+  getMcpSettingsJson: routeHandler,
+}));
+
+jest.mock('../../src/controllers/toolController.js', () => ({
+  callTool: routeHandler,
+}));
+
+jest.mock('../../src/controllers/promptController.js', () => ({
+  getPrompt: routeHandler,
+}));
+
+jest.mock('../../src/controllers/builtinPromptController.js', () => ({
+  listBuiltinPrompts: routeHandler,
+  getBuiltinPrompt: routeHandler,
+  createBuiltinPrompt: routeHandler,
+  updateBuiltinPrompt: routeHandler,
+  deleteBuiltinPrompt: routeHandler,
+}));
+
+jest.mock('../../src/controllers/builtinResourceController.js', () => ({
+  listBuiltinResources: routeHandler,
+  getBuiltinResource: routeHandler,
+  createBuiltinResource: routeHandler,
+  updateBuiltinResource: routeHandler,
+  deleteBuiltinResource: routeHandler,
+  readResource: routeHandler,
+}));
+
+jest.mock('../../src/controllers/mcpbController.js', () => ({
+  uploadMcpbFile: routeHandler,
+  uploadMiddleware,
+}));
+
+jest.mock('../../src/controllers/metricsController.js', () => ({ metrics: routeHandler }));
+
+jest.mock('../../src/controllers/healthController.js', () => ({
+  healthCheck: routeHandler,
+}));
+
+jest.mock('../../src/controllers/betterAuthController.js', () => ({
+  getBetterAuthUser: routeHandler,
+}));
+
+jest.mock('../../src/controllers/openApiController.js', () => ({
+  getOpenAPISpec: routeHandler,
+  getOpenAPIServers: routeHandler,
+  getOpenAPIStats: routeHandler,
+  executeToolViaOpenAPI: routeHandler,
+  getGroupOpenAPISpec: routeHandler,
+}));
+
+jest.mock('../../src/controllers/oauthCallbackController.js', () => ({
+  handleOAuthCallback: routeHandler,
+}));
+
+jest.mock('../../src/controllers/oauthServerController.js', () => ({
+  getAuthorize: routeHandler,
+  postAuthorize: routeHandler,
+  postToken: routeHandler,
+  getUserInfo: routeHandler,
+  getMetadata: routeHandler,
+  getProtectedResourceMetadata: routeHandler,
+}));
+
+jest.mock('../../src/controllers/oauthClientController.js', () => ({
+  getAllClients: routeHandler,
+  getClient: routeHandler,
+  createClient: routeHandler,
+  updateClient: routeHandler,
+  deleteClient: routeHandler,
+  regenerateSecret: routeHandler,
+}));
+
+jest.mock('../../src/controllers/oauthDynamicRegistrationController.js', () => ({
+  registerClient: routeHandler,
+  getClientConfiguration: routeHandler,
+  updateClientConfiguration: routeHandler,
+  deleteClientRegistration: routeHandler,
+}));
+
+jest.mock('../../src/controllers/bearerKeyController.js', () => ({
+  getBearerKeys: routeHandler,
+  createBearerKey: routeHandler,
+  updateBearerKey: routeHandler,
+  deleteBearerKey: routeHandler,
+}));
+
+jest.mock('../../src/controllers/activityController.js', () => ({
+  checkActivityAvailable: routeHandler,
+  getActivities: routeHandler,
+  getActivityById: routeHandler,
+  getActivityStats: routeHandler,
+  getActivityFilterOptions: routeHandler,
+  deleteOldActivities: routeHandler,
+}));
+
+jest.mock('../../src/controllers/hostedInternalController.js', () => ({
+  receiveHostedInternalEvent: routeHandler,
+  getHostedInternalRuntimeCatalog: routeHandler,
+}));
+
+jest.mock('../../src/controllers/templateController.js', () => ({
+  exportConfigTemplate: routeHandler,
+  exportGroupAsTemplate: routeHandler,
+  importConfigTemplate: routeHandler,
+}));
+
+jest.mock('../../src/controllers/contextCostController.js', () => ({
+  getServerCostsHandler: routeHandler,
+  getGroupCostsHandler: routeHandler,
+}));
+
+jest.mock('../../src/controllers/smartRoutingController.js', () => ({
+  getSmartRoutingPerformance: routeHandler,
+  reindexSmartRouting: routeHandler,
+}));
+
+jest.mock('../../src/middlewares/auth.js', () => ({
+  auth: authMiddleware,
+}));
+
+const mockGetBetterAuthRuntimeConfig = jest.fn(() => ({
+  enabled: false,
+  basePath: '/better-auth',
+}));
+const mockSetMountedSsoProviders = jest.fn();
+
+jest.mock('../../src/services/betterAuthConfig.js', () => ({
+  getBetterAuthRuntimeConfig: mockGetBetterAuthRuntimeConfig,
+  setMountedSsoProviders: mockSetMountedSsoProviders,
+}));
+
+jest.mock('../../src/betterAuth.js', () => ({
+  auth: {},
+  ensureBetterAuthSchema: jest.fn(async () => undefined),
+  registeredSsoProviders: ['oidc'],
+}));
+
+jest.mock('better-auth/node', () => ({
+  toNodeHandler: jest.fn(() => jest.fn()),
+}));
+
+import {
+  authenticatedRouteRateLimiter,
+  hostedInternalEventRateLimiter,
+} from '../../src/utils/rateLimit.js';
+import { requireAdminMiddleware } from '../../src/utils/requireAdmin.js';
+import { initRoutes } from '../../src/routes/index.js';
+
+type ExpressLayer = {
+  handle?: ExpressLayerHandle;
+  name?: string;
+  route?: {
+    path: string | string[];
+    methods: Record<string, boolean>;
+    stack?: ExpressLayer[];
+  };
+};
+
+type ExpressLayerHandle = {
+  stack?: ExpressLayer[];
+};
+
+const findMountedRouter = (app: express.Application): ExpressLayerHandle => {
+  const appRouter = (app as express.Application & { _router?: { stack?: ExpressLayer[] } })._router;
+  const routerLayer = appRouter?.stack?.find(
+    (layer) => layer.name === 'router' && layer.handle?.stack,
+  );
+
+  if (!routerLayer?.handle?.stack) {
+    throw new Error('Expected initRoutes to mount an API router');
+  }
+
+  return routerLayer.handle;
+};
+
+const routerContainsRoute = (
+  routerHandle: ExpressLayerHandle,
+  method: string,
+  path: string,
+): boolean =>
+  routerHandle.stack?.some(
+    (layer) =>
+      (Array.isArray(layer.route?.path)
+        ? layer.route.path.includes(path)
+        : layer.route?.path === path) && Boolean(layer.route?.methods[method.toLowerCase()]),
+  ) ?? false;
+
+const findAppRoute = (
+  app: express.Application,
+  method: string,
+  path: string,
+): ExpressLayer | undefined => {
+  const appRouter = (app as express.Application & { _router?: { stack?: ExpressLayer[] } })._router;
+
+  return appRouter?.stack?.find(
+    (layer) =>
+      (Array.isArray(layer.route?.path)
+        ? layer.route.path.includes(path)
+        : layer.route?.path === path) && Boolean(layer.route?.methods[method.toLowerCase()]),
+  );
+};
+
+describe('initRoutes authenticated API rate limiting', () => {
+  it('mounts sensitive API routes behind the authenticated rate limiter', async () => {
+    const app = express();
+
+    await initRoutes(app);
+
+    const apiRouter = findMountedRouter(app);
+    const protectedRouter = apiRouter.stack?.find(
+      (layer) => layer.name === 'router' && layer.handle?.stack,
+    )?.handle;
+
+    expect(protectedRouter).toBeDefined();
+    const authenticatedLimiterIndex =
+      protectedRouter?.stack?.findIndex(
+        (layer) => layer.handle === authenticatedRouteRateLimiter,
+      ) ?? -1;
+
+    expect(authenticatedLimiterIndex).toBeGreaterThanOrEqual(0);
+    expect(routerContainsRoute(protectedRouter!, 'get', '/servers/:name/share-candidates')).toBe(
+      true,
+    );
+    expect(routerContainsRoute(protectedRouter!, 'get', '/servers/:name')).toBe(true);
+    expect(routerContainsRoute(protectedRouter!, 'post', '/servers/:name/oauth/disconnect')).toBe(
+      true,
+    );
+    expect(routerContainsRoute(protectedRouter!, 'put', '/oauth/clients/:clientId')).toBe(true);
+    expect(routerContainsRoute(protectedRouter!, 'delete', '/oauth/clients/:clientId')).toBe(true);
+  });
+
+  it('gates MCPB upload behind the admin middleware before multer stages the body', async () => {
+    const app = express();
+
+    await initRoutes(app);
+
+    const apiRouter = findMountedRouter(app);
+    const protectedRouter = apiRouter.stack?.find(
+      (layer) => layer.name === 'router' && layer.handle?.stack,
+    )?.handle;
+
+    const uploadRoute = protectedRouter?.stack?.find(
+      (layer) => layer.route?.path === '/mcpb/upload',
+    );
+    const handles = uploadRoute?.route?.stack?.map((layer) => layer.handle) ?? [];
+
+    // requireAdminMiddleware must run first (rejecting non-admins with 403
+    // before `uploadMiddleware`/multer writes the request body to disk), with
+    // the handler last. This is the pre-body authorization gate for
+    // GHSA-xf2m-3c3x-53vp.
+    expect(handles[0]).toBe(requireAdminMiddleware);
+    expect(handles[1]).toBe(uploadMiddleware);
+    expect(handles[2]).toBe(routeHandler);
+    expect(handles).toHaveLength(3);
+  });
+
+  it('matches public auth routes before the shared authenticated rate limiter', async () => {
+    const app = express();
+
+    await initRoutes(app);
+
+    const apiRouter = findMountedRouter(app);
+    const stack = apiRouter.stack ?? [];
+
+    // The authenticated sub-router carries a path-less rate limiter, so anything
+    // mounted after it on the API router would be counted against the shared
+    // authenticated-route budget - including public routes that carry their own
+    // limiter, such as POST /api/auth/login.
+    const authenticatedRouterIndex = stack.findIndex(
+      (layer) => layer.name === 'router' && layer.handle?.stack,
+    );
+    expect(authenticatedRouterIndex).toBeGreaterThanOrEqual(0);
+
+    for (const [method, path] of [
+      ['post', '/auth/login'],
+      ['post', '/auth/register'],
+    ] as const) {
+      const routeIndex = stack.findIndex(
+        (layer) => layer.route?.path === path && Boolean(layer.route.methods[method]),
+      );
+
+      expect(routeIndex).toBeGreaterThanOrEqual(0);
+      expect(routeIndex).toBeLessThan(authenticatedRouterIndex);
+    }
+  });
+
+  it('mounts the hosted internal webhook ingress behind its dedicated rate limiter', async () => {
+    const app = express();
+
+    await initRoutes(app);
+
+    const internalRoute = findAppRoute(app, 'post', '/internal/v1/events');
+
+    expect(internalRoute).toBeDefined();
+    expect(internalRoute?.route?.stack?.map((layer) => layer.handle)).toContain(
+      hostedInternalEventRateLimiter,
+    );
+    expect(internalRoute?.route?.stack?.map((layer) => layer.handle)).not.toContain(
+      authenticatedRouteRateLimiter,
+    );
+  });
+
+  it('mounts the hosted runtime catalog ingress behind its dedicated rate limiter', async () => {
+    const app = express();
+
+    await initRoutes(app);
+
+    const internalRoute = findAppRoute(app, 'get', '/internal/v1/hosted/runtime-catalog');
+
+    expect(internalRoute).toBeDefined();
+    expect(internalRoute?.route?.stack?.map((layer) => layer.handle)).toContain(
+      hostedInternalEventRateLimiter,
+    );
+    expect(internalRoute?.route?.stack?.map((layer) => layer.handle)).not.toContain(
+      authenticatedRouteRateLimiter,
+    );
+  });
+
+  it('mounts generated OpenAPI specs as JSON and YAML endpoints', async () => {
+    const app = express();
+
+    await initRoutes(app);
+
+    expect(findAppRoute(app, 'get', '/api/openapi.json')).toBeDefined();
+    expect(findAppRoute(app, 'get', '/api/openapi.yaml')).toBeDefined();
+    expect(findAppRoute(app, 'get', '/api/:name/openapi.json')).toBeDefined();
+    expect(findAppRoute(app, 'get', '/api/:name/openapi.yaml')).toBeDefined();
+  });
+
+  it('records the Better Auth providers as mounted once their handler is mounted', async () => {
+    mockGetBetterAuthRuntimeConfig.mockReturnValueOnce({
+      enabled: true,
+      basePath: '/api/auth/better',
+    });
+    // initRoutes never mounts Better Auth under a test runner
+    const { JEST_WORKER_ID, NODE_ENV } = process.env;
+    delete process.env.JEST_WORKER_ID;
+    process.env.NODE_ENV = 'production';
+    try {
+      await initRoutes(express());
+    } finally {
+      process.env.JEST_WORKER_ID = JEST_WORKER_ID;
+      process.env.NODE_ENV = NODE_ENV;
+    }
+
+    expect(mockSetMountedSsoProviders).toHaveBeenCalledWith(['oidc']);
+  });
+});
+
+it('registers root and path-aware resource metadata before the dashboard', async () => {
+  const app = express();
+  await initRoutes(app);
+  expect(findAppRoute(app, 'get', '/.well-known/oauth-protected-resource')).toBeDefined();
+  expect(
+    findAppRoute(app, 'get', '/.well-known/oauth-protected-resource/:resourcePath(*)'),
+  ).toBeDefined();
+});
+
+
+it('registers metrics at the root independently of dashboard API authentication', async () => {
+  const app = express();
+  await initRoutes(app);
+  expect(findAppRoute(app, 'get', '/metrics')).toBeDefined();
+});

@@ -1,0 +1,1206 @@
+import { UserContextService } from '../../src/services/userContextService.js';
+import { recordListFreshness, invalidateListFreshness } from '../../src/utils/listFreshness.js';
+import { Client } from '@modelcontextprotocol/client';
+
+const createMockClient = () => ({
+  connect: jest.fn().mockResolvedValue(undefined),
+  close: jest.fn(),
+  getServerCapabilities: jest.fn(() => ({ tools: {}, resources: {}, prompts: {} })),
+  getServerVersion: jest.fn(() => ({ name: 'apps-upstream', version: '1.0.0' })),
+  getInstructions: jest.fn(),
+  listTools: jest.fn(),
+  listPrompts: jest.fn(),
+  listResources: jest.fn(),
+  listResourceTemplates: jest.fn(),
+  readResource: jest.fn(),
+  callTool: jest.fn(),
+});
+
+const mockClient = createMockClient();
+const mockOpenApiClient = {
+  initialize: jest.fn().mockResolvedValue(undefined),
+  getTools: jest.fn(),
+  callTool: jest.fn(),
+};
+
+jest.mock('../../src/clients/openapi.js', () => ({
+  OpenAPIClient: jest.fn().mockImplementation(() => mockOpenApiClient),
+}));
+
+// Most tests only ever deal with one upstream server, so every constructed
+// Client shares the single `mockClient` above by default. A handful of new
+// multi-server-group tests need each upstream to behave independently (e.g.
+// one server owns a ui:// resource and the other doesn't); those tests
+// register a dedicated mock here, keyed by server name, which takes
+// precedence over the shared default.
+const mockClientsByServer = new Map<string, ReturnType<typeof createMockClient>>();
+
+jest.mock('@modelcontextprotocol/client', () => ({
+  ...jest.requireActual('@modelcontextprotocol/client'),
+  Client: jest.fn().mockImplementation((clientInfo: { name: string }) => {
+    const serverName = clientInfo.name.replace(/^mcp-client-/, '');
+    return mockClientsByServer.get(serverName) ?? mockClient;
+  }),
+  SSEClientTransport: jest.fn(),
+  StreamableHTTPClientTransport: jest.fn(),
+}));
+
+jest.mock('@modelcontextprotocol/client/stdio', () => ({
+  StdioClientTransport: jest.fn().mockImplementation(() => ({
+    close: jest.fn(),
+  })),
+}));
+
+jest.mock('../../src/services/oauthService.js', () => ({
+  initializeAllOAuthClients: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../../src/services/mcpOAuthProvider.js', () => ({
+  createOAuthProvider: jest.fn(async () => undefined),
+}));
+
+const mockGetServerConfigsInGroup = jest.fn();
+
+jest.mock('../../src/services/groupService.js', () => ({
+  getServersInGroup: jest.fn(),
+  getServerConfigInGroup: jest.fn(),
+  getServerConfigsInGroup: mockGetServerConfigsInGroup,
+  // Real implementation: getFilteredServerInfosForGroup uses this to turn a
+  // group's stored server list (strings or per-server config objects) into
+  // normalized IGroupServerConfig entries.
+  normalizeGroupServers: (servers: Array<string | { name: string }>) =>
+    servers.map((server) =>
+      typeof server === 'string'
+        ? { name: server, tools: 'all', prompts: 'all', resources: 'all' }
+        : { tools: 'all', prompts: 'all', resources: 'all', ...server },
+    ),
+}));
+
+jest.mock('../../src/services/sseService.js', () => ({
+  getGroup: jest.fn((sessionId: string) => {
+    if (sessionId === 'apps-session' || sessionId === 'ordinary-session') return 'apps-server';
+    if (sessionId === 'aggregate-session') return 'pair';
+    if (sessionId === 'other-session') return 'other-server';
+    return '';
+  }),
+}));
+
+const mockSaveToolsAsVectorEmbeddings = jest.fn().mockResolvedValue(undefined);
+
+jest.mock('../../src/services/vectorSearchService.js', () => ({
+  removeServerToolEmbeddings: jest.fn().mockResolvedValue(undefined),
+  saveToolsAsVectorEmbeddings: mockSaveToolsAsVectorEmbeddings,
+}));
+
+jest.mock('../../src/services/services.js', () => ({
+  getDataService: jest.fn(() => ({
+    filterData: (data: any) => data,
+  })),
+}));
+
+jest.mock('../../src/services/smartRoutingService.js', () => ({
+  initSmartRoutingService: jest.fn(),
+  getSmartRoutingTools: jest.fn(),
+  handleSearchToolsRequest: jest.fn(),
+  handleDescribeToolRequest: jest.fn(),
+  isSmartRoutingGroup: jest.fn(() => false),
+}));
+
+jest.mock('../../src/services/activityLoggingService.js', () => ({
+  getActivityLoggingService: jest.fn(() => ({
+    logToolCall: jest.fn().mockResolvedValue(undefined),
+  })),
+}));
+
+jest.mock('../../src/services/hostedAuthService.js', () => ({
+  assertHostedToolAllowed: jest.fn(),
+  filterHostedTools: jest.fn((_auth, _serverName, tools) => tools),
+  reserveHostedToolCall: jest.fn().mockResolvedValue(null),
+  settleHostedToolCall: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../../src/services/keepAliveService.js', () => ({
+  setupClientKeepAlive: jest.fn().mockResolvedValue(undefined),
+}));
+
+jest.mock('../../src/services/proxy.js', () => ({
+  createFetchWithProxy: jest.fn(),
+  getProxyConfigFromEnv: jest.fn(() => undefined),
+}));
+
+const mockFindAll = jest.fn();
+const mockFindById = jest.fn();
+const mockUserFindByUsername = jest.fn(async () => ({
+  username: 'ttl-user',
+  password: 'unused',
+  isAdmin: false,
+}));
+const mockBearerFindById = jest.fn(async () => ({
+  id: 'test-key',
+  enabled: true,
+  accessType: 'all',
+}));
+const mockBuiltinPrompts = jest.fn(async () => [] as any[]);
+const mockBuiltinResources = jest.fn(async () => [] as any[]);
+const mockFindBuiltinResourceByUri = jest.fn();
+const mockGroupFindByName = jest.fn(async (_name: string) => null as any);
+
+jest.mock('../../src/dao/index.js', () => ({
+  getUserDao: jest.fn(() => ({ findByUsername: mockUserFindByUsername })),
+  getBearerKeyDao: jest.fn(() => ({ findById: mockBearerFindById })),
+  getServerDao: jest.fn(() => ({
+    findAll: mockFindAll,
+    findById: mockFindById,
+  })),
+  getGroupDao: jest.fn(() => ({
+    findByName: mockGroupFindByName,
+    findById: jest.fn(async () => null),
+  })),
+  getSystemConfigDao: jest.fn(() => ({
+    get: jest.fn(async () => ({})),
+  })),
+  getBuiltinPromptDao: jest.fn(() => ({
+    findEnabled: mockBuiltinPrompts,
+  })),
+  getBuiltinResourceDao: jest.fn(() => ({
+    findEnabled: mockBuiltinResources,
+    findByUri: mockFindBuiltinResourceByUri,
+  })),
+}));
+
+jest.mock('../../src/config/index.js', () => ({
+  expandEnvVars: jest.fn((value: string) => value),
+  replaceEnvVars: jest.fn((value: any) => value),
+  getNameSeparator: jest.fn(() => '::'),
+  default: {
+    mcpHubName: 'test-hub',
+    mcpHubVersion: '1.0.0',
+    initTimeout: 60000,
+  },
+}));
+import {
+  broadcastToolListChanged,
+  cleanupAllServers,
+  getMcpServer,
+  getServerByName,
+  handleCallToolRequest,
+  handleListToolsRequest,
+  handleListPromptsRequest,
+  handleListResourcesRequest,
+  handleListResourceTemplatesRequest,
+  handleReadResourceRequest,
+  initUpstreamServers,
+} from '../../src/services/mcpService.js';
+import { MCP_APPS_CAPABILITIES } from '../../src/utils/mcpApps.js';
+import { RequestContextService } from '../../src/services/requestContextService.js';
+
+const appsTools = [
+  {
+    name: 'open-dashboard',
+    title: 'Open dashboard',
+    description: 'Open the dashboard',
+    inputSchema: { type: 'object', $schema: 'https://json-schema.org/draft/2020-12/schema' },
+    outputSchema: { type: 'object' },
+    annotations: { readOnlyHint: true },
+    icons: [{ src: 'https://example.com/dashboard.svg' }],
+    _meta: {
+      ui: { resourceUri: 'ui://apps/dashboard.html' },
+      trace: 'keep-me',
+    },
+  },
+  {
+    name: 'poll-dashboard',
+    description: 'Refresh dashboard data',
+    inputSchema: { type: 'object' },
+    _meta: {
+      ui: { visibility: ['app'] },
+    },
+  },
+];
+
+const flushPromises = async () => {
+  await new Promise((resolve) => setImmediate(resolve));
+  await new Promise((resolve) => setImmediate(resolve));
+};
+
+const makeServerConfig = (name: string) => ({
+  name,
+  type: 'stdio' as const,
+  command: 'node',
+  args: [`${name}.js`],
+  enabled: true,
+});
+
+const markSessionAsAppsCapable = async (sessionId: string, group: string) => {
+  const server = await getMcpServer(sessionId, group);
+  (server as any)._clientCapabilities = MCP_APPS_CAPABILITIES;
+  return server;
+};
+
+describe('mcpService MCP Apps transparent proxy', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    cleanupAllServers();
+    mockClientsByServer.clear();
+    mockFindAll.mockResolvedValue([makeServerConfig('apps-server')]);
+    mockFindById.mockImplementation(async (name: string) => makeServerConfig(name));
+    mockGetServerConfigsInGroup.mockResolvedValue([]);
+    mockGroupFindByName.mockImplementation(async () => null);
+    mockFindBuiltinResourceByUri.mockResolvedValue(undefined);
+    mockBearerFindById.mockResolvedValue({ id: 'test-key', enabled: true, accessType: 'all' });
+    mockBuiltinPrompts.mockResolvedValue([]);
+    mockBuiltinResources.mockResolvedValue([]);
+    mockClient.listTools.mockResolvedValue({ tools: [...appsTools] });
+    mockClient.listPrompts.mockResolvedValue({ prompts: [] });
+    mockClient.listResources.mockResolvedValue({ resources: [] });
+    mockClient.listResourceTemplates.mockResolvedValue({ resourceTemplates: [] });
+    mockClient.readResource.mockResolvedValue({
+      contents: [
+        {
+          uri: 'ui://apps/dashboard.html',
+          mimeType: 'text/html;profile=mcp-app',
+          text: '<html></html>',
+          _meta: { ui: { csp: { connectDomains: [] } }, trace: 'keep-me' },
+        },
+      ],
+    });
+    mockClient.callTool.mockResolvedValue({
+      content: [{ type: 'text', text: 'ok' }],
+      isError: false,
+    });
+    mockOpenApiClient.getTools.mockReturnValue([
+      {
+        name: 'search-memories',
+        description: 'Search memories',
+        inputSchema: { type: 'object' },
+      },
+    ]);
+    mockOpenApiClient.callTool.mockResolvedValue({ memories: ['work style'] });
+  });
+
+  afterEach(() => {
+    cleanupAllServers();
+  });
+
+  it('preserves positive discovery expiry on modern lists and leaves legacy shapes unchanged', async () => {
+    for (const [method, field] of [
+      ['listTools', 'tools'],
+      ['listPrompts', 'prompts'],
+      ['listResources', 'resources'],
+    ] as const) {
+      const result = await mockClient[method]();
+      recordListFreshness(result[field], 60000, performance.now());
+      mockClient[method].mockResolvedValue(result);
+    }
+    await initUpstreamServers();
+    await flushPromises();
+    for (const handler of [
+      handleListToolsRequest,
+      handleListPromptsRequest,
+      handleListResourcesRequest,
+    ]) {
+      const result = await RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, group: 'apps-server' },
+        () => handler({}, { group: 'apps-server' }),
+      );
+      expect(result).toMatchObject({ cacheScope: 'private' });
+      expect(result.ttlMs).toBeGreaterThan(0);
+      expect(result.ttlMs).toBeLessThanOrEqual(5000);
+      expect(await handler({}, { sessionId: 'ordinary-session' })).not.toHaveProperty('ttlMs');
+    }
+  });
+
+  it('reprojects caller capabilities and forces zero after invalidation or a config change during projection', async () => {
+    const { tools } = await mockClient.listTools();
+    recordListFreshness(tools, 60000, performance.now());
+    await initUpstreamServers();
+    await flushPromises();
+    const list = (clientCapabilities = {}) =>
+      RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, clientCapabilities, group: 'apps-server' },
+        () => handleListToolsRequest({}, { group: 'apps-server' }),
+      );
+    const ordinary = await list();
+    const apps = await list(MCP_APPS_CAPABILITIES);
+    expect(ordinary.tools.some((tool: any) => tool.name.includes('poll-dashboard'))).toBe(false);
+    expect(apps.tools.some((tool: any) => tool.name.includes('poll-dashboard'))).toBe(true);
+    expect(ordinary.ttlMs).toBeGreaterThan(0);
+    expect(apps.ttlMs).toBeGreaterThan(0);
+    expect(apps.cacheScope).toBe('private');
+    mockFindById.mockImplementation(async (name: string) => {
+      const changed = {
+        ...makeServerConfig(name),
+        tools: { 'apps-server::open-dashboard': { enabled: false } },
+      };
+      mockFindAll.mockResolvedValue([changed]);
+      return changed;
+    });
+    expect((await list()).ttlMs).toBe(0);
+    invalidateListFreshness(tools);
+    expect((await list()).ttlMs).toBe(0);
+  });
+
+  it('bounds aggregate lists by a fresh empty peer and refuses unknown peers', async () => {
+    mockFindAll.mockResolvedValue([
+      makeServerConfig('apps-server'),
+      makeServerConfig('other-server'),
+    ]);
+    const other = createMockClient();
+    other.listTools.mockResolvedValue({ tools: [] });
+    other.listPrompts.mockResolvedValue({ prompts: [] });
+    other.listResources.mockResolvedValue({ resources: [] });
+    mockClientsByServer.set('other-server', other);
+    const { tools } = await mockClient.listTools();
+    recordListFreshness(tools, 60000, performance.now());
+    await initUpstreamServers();
+    await flushPromises();
+    const list = () =>
+      RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true },
+        () => handleListToolsRequest({}, {}),
+      );
+    expect((await list()).ttlMs).toBe(0);
+    const peer = getServerByName('other-server')!;
+    recordListFreshness(peer.tools, 2000, performance.now());
+    const result = await list();
+    expect(result.ttlMs).toBeGreaterThan(0);
+    expect(result.ttlMs).toBeLessThanOrEqual(2000);
+    recordListFreshness(peer.tools, 1, performance.now() - 100);
+    expect((await list()).ttlMs).toBe(0);
+  });
+
+  it('does not advertise positive freshness for built-in content', async () => {
+    const { prompts } = await mockClient.listPrompts();
+    const { resources } = await mockClient.listResources();
+    recordListFreshness(prompts, 60000, performance.now());
+    recordListFreshness(resources, 60000, performance.now());
+    mockBuiltinPrompts.mockResolvedValue([{ name: 'builtin', arguments: [] }]);
+    mockBuiltinResources.mockResolvedValue([{ uri: 'builtin://resource', name: 'Built-in' }]);
+    await initUpstreamServers();
+    await flushPromises();
+    for (const handler of [handleListPromptsRequest, handleListResourcesRequest]) {
+      const result = await RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, group: 'apps-server' },
+        () => handler({}, { group: 'apps-server' }),
+      );
+      expect(result.ttlMs).toBe(0);
+    }
+  });
+
+  it('keeps live template provenance revocable across awaited projection checks', async () => {
+    const templates = [{ uriTemplate: 'test://{id}', name: 'Template' }];
+    recordListFreshness(templates, 60000, performance.now());
+    mockClient.listResourceTemplates.mockResolvedValue({ resourceTemplates: templates });
+    await initUpstreamServers();
+    await flushPromises();
+    const list = () =>
+      RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, group: 'apps-server' },
+        () => handleListResourceTemplatesRequest({}, { group: 'apps-server' }),
+      );
+    expect((await list()).ttlMs).toBeGreaterThan(0);
+    mockFindAll.mockImplementationOnce(async () => [makeServerConfig('apps-server')]);
+    mockFindAll.mockImplementationOnce(async () => {
+      invalidateListFreshness(templates);
+      return [makeServerConfig('apps-server')];
+    });
+    expect((await list()).ttlMs).toBe(0);
+    mockClient.listResourceTemplates.mockRejectedValueOnce(new Error('upstream failed'));
+    expect((await list()).ttlMs).toBe(0);
+  });
+
+  it('does not certify a projection if the bearer key is revoked during the build', async () => {
+    const { tools } = await mockClient.listTools();
+    recordListFreshness(tools, 60000, performance.now());
+    await initUpstreamServers();
+    await flushPromises();
+    mockFindById.mockImplementation(async (name: string) => {
+      mockBearerFindById.mockResolvedValue({ id: 'test-key', enabled: false, accessType: 'all' });
+      return makeServerConfig(name);
+    });
+    const list = () =>
+      RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, keyId: 'test-key', group: 'apps-server' },
+        () => handleListToolsRequest({}, { group: 'apps-server' }),
+      );
+    expect((await list()).ttlMs).toBe(0);
+    expect((await list()).ttlMs).toBe(0);
+  });
+
+  it('does not certify a projection with a stale administrator context', async () => {
+    const { tools } = await mockClient.listTools();
+    recordListFreshness(tools, 60000, performance.now());
+    await initUpstreamServers();
+    await flushPromises();
+    const user = jest.spyOn(UserContextService.getInstance(), 'getCurrentUser').mockReturnValue({
+      username: 'ttl-user',
+      password: 'unused',
+      isAdmin: true,
+    });
+    try {
+      const result = await RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, group: 'apps-server' },
+        () => handleListToolsRequest({}, { group: 'apps-server' }),
+      );
+      expect(result.ttlMs).toBe(0);
+    } finally {
+      user.mockRestore();
+    }
+  });
+
+  it('emits private, immediately stale hints for every modern list', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+    for (const handler of [
+      handleListToolsRequest,
+      handleListPromptsRequest,
+      handleListResourcesRequest,
+      handleListResourceTemplatesRequest,
+    ]) {
+      const result = await RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, group: 'apps-server' },
+        () => handler({}, { group: 'apps-server' }),
+      );
+      expect(result).toMatchObject({ ttlMs: 0, cacheScope: 'private' });
+      const legacy = await handler({}, { sessionId: 'ordinary-session' });
+      expect(legacy).not.toHaveProperty('ttlMs');
+      expect(legacy).not.toHaveProperty('cacheScope');
+    }
+  });
+
+  it.each([60000, 0, undefined, -1, 1.5, Infinity, '60000'])(
+    'forwards only valid resource TTLs and never public scope (%s)',
+    async (ttlMs) => {
+      await initUpstreamServers();
+      await flushPromises();
+      mockClient.readResource.mockResolvedValue({
+        contents: [{ uri: 'ui://apps/dashboard.html', text: 'resource' }],
+        ttlMs,
+        cacheScope: 'public',
+        _meta: { trace: 'preserved' },
+      });
+      const result = await RequestContextService.getInstance().runWithCustomRequestContext(
+        {
+          headers: {},
+          stateless: true,
+          group: 'apps-server',
+          clientCapabilities: MCP_APPS_CAPABILITIES,
+        },
+        () =>
+          handleReadResourceRequest(
+            { params: { uri: 'ui://apps/dashboard.html' } },
+            { group: 'apps-server' },
+          ),
+      );
+      expect(result.cacheScope).toBe('private');
+      expect(result.ttlMs).toBeGreaterThanOrEqual(0);
+      expect(result.ttlMs).toBeLessThanOrEqual(ttlMs === 60000 ? 60000 : 0);
+      expect(result._meta).toEqual({ trace: 'preserved' });
+      expect(mockClient.readResource).toHaveBeenCalledWith(
+        { uri: 'ui://apps/dashboard.html' },
+        expect.objectContaining({ cacheMode: 'bypass' }),
+      );
+    },
+  );
+
+  it('subtracts elapsed read time without renewing upstream freshness', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+    mockClient.readResource.mockResolvedValue({
+      contents: [{ uri: 'ui://apps/dashboard.html', text: 'resource' }],
+      ttlMs: 100,
+      cacheScope: 'public',
+    });
+    const clock = jest
+      .spyOn(performance, 'now')
+      .mockReturnValueOnce(1000)
+      .mockReturnValueOnce(1040.2);
+    try {
+      const result = await RequestContextService.getInstance().runWithCustomRequestContext(
+        {
+          headers: {},
+          stateless: true,
+          group: 'apps-server',
+          clientCapabilities: MCP_APPS_CAPABILITIES,
+        },
+        () =>
+          handleReadResourceRequest(
+            { params: { uri: 'ui://apps/dashboard.html' } },
+            { group: 'apps-server' },
+          ),
+      );
+      expect(result).toMatchObject({ ttlMs: 59, cacheScope: 'private' });
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('preserves legacy resource hints and the existing upstream read path', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+    await markSessionAsAppsCapable('apps-session', 'apps-server');
+    const upstream = {
+      contents: [{ uri: 'ui://apps/dashboard.html', text: 'resource' }],
+      ttlMs: 60000,
+      cacheScope: 'public',
+    };
+    mockClient.readResource.mockResolvedValue(upstream);
+    expect(
+      await handleReadResourceRequest(
+        { params: { uri: 'ui://apps/dashboard.html' } },
+        { sessionId: 'apps-session' },
+      ),
+    ).toEqual(upstream);
+    expect(mockClient.readResource).toHaveBeenCalledWith({ uri: 'ui://apps/dashboard.html' });
+  });
+
+  it('advertises MCP Apps upstream and configures dynamic list refresh callbacks', async () => {
+    await initUpstreamServers();
+
+    expect(Client).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        capabilities: MCP_APPS_CAPABILITIES,
+        listChanged: expect.objectContaining({
+          tools: expect.objectContaining({ onChanged: expect.any(Function) }),
+          prompts: expect.objectContaining({ onChanged: expect.any(Function) }),
+          resources: expect.objectContaining({ onChanged: expect.any(Function) }),
+        }),
+      }),
+    );
+  });
+
+  it('hides app-only tools and strips Apps metadata on ordinary MCP routes', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+    await getMcpServer('ordinary-session', 'apps-server');
+
+    const result = await handleListToolsRequest({}, { sessionId: 'ordinary-session' });
+
+    expect(result.tools).toEqual([
+      expect.objectContaining({
+        name: 'apps-server::open-dashboard',
+        title: 'Open dashboard',
+        outputSchema: { type: 'object' },
+        annotations: { readOnlyHint: true },
+        icons: [{ src: 'https://example.com/dashboard.svg' }],
+        inputSchema: { type: 'object' },
+        _meta: { trace: 'keep-me' },
+      }),
+    ]);
+  });
+
+  it('uses per-request client capabilities on the stateless path', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+
+    const run = (clientCapabilities: unknown) =>
+      RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, group: 'apps-server', clientCapabilities } as any,
+        () =>
+          handleListToolsRequest({}, { sessionId: undefined as any, group: 'apps-server' } as any),
+      );
+
+    const enabled = await run(MCP_APPS_CAPABILITIES);
+    expect(enabled.tools.map((tool) => tool.name)).toEqual(['open-dashboard', 'poll-dashboard']);
+
+    const disabled = await run({});
+    expect(disabled.tools.map((tool) => tool.name)).toEqual(['apps-server::open-dashboard']);
+  });
+
+  it('passes complete Apps metadata and raw tool names on an eligible single-upstream route', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+    await markSessionAsAppsCapable('apps-session', 'apps-server');
+
+    const result = await handleListToolsRequest({}, { sessionId: 'apps-session' });
+
+    expect(result.tools.map((tool) => tool.name)).toEqual(['open-dashboard', 'poll-dashboard']);
+    expect(result.tools[0]._meta).toEqual(appsTools[0]._meta);
+  });
+
+  it.each(['direct', 'wrapped'])(
+    'accepts cached raw and qualified names without capabilities (%s)',
+    async (mode) => {
+      await initUpstreamServers();
+      await flushPromises();
+      await getMcpServer('ordinary-session', 'apps-server');
+
+      for (const name of ['open-dashboard', 'apps-server::open-dashboard']) {
+        const params =
+          mode === 'direct'
+            ? { name, arguments: {} }
+            : { name: 'call_tool', arguments: { toolName: name, arguments: {} } };
+        const result = await handleCallToolRequest({ params }, { sessionId: 'ordinary-session' });
+        expect(result.isError).toBe(false);
+        expect(mockClient.callTool).toHaveBeenLastCalledWith(
+          { name: 'open-dashboard', arguments: {} },
+          expect.anything(),
+        );
+      }
+
+      mockClient.callTool.mockClear();
+      for (const name of ['missing-tool', 'poll-dashboard']) {
+        const params =
+          mode === 'direct'
+            ? { name, arguments: {} }
+            : { name: 'call_tool', arguments: { toolName: name, arguments: {} } };
+        const result = await handleCallToolRequest({ params }, { sessionId: 'ordinary-session' });
+        expect(result.isError).toBe(true);
+      }
+      expect(mockClient.callTool).not.toHaveBeenCalled();
+    },
+  );
+
+  it('keeps group tool filtering when accepting raw names', async () => {
+    mockGroupFindByName.mockImplementation(async (name: string) =>
+      name === 'apps-server' ? { servers: [{ name: 'apps-server', tools: [] }] } : null,
+    );
+    await initUpstreamServers();
+    await flushPromises();
+    await getMcpServer('ordinary-session', 'apps-server');
+    for (const params of [
+      { name: 'open-dashboard', arguments: {} },
+      { name: 'call_tool', arguments: { toolName: 'open-dashboard', arguments: {} } },
+    ]) {
+      const result = await handleCallToolRequest({ params }, { sessionId: 'ordinary-session' });
+      expect(result.isError).toBe(true);
+    }
+    expect(mockClient.callTool).not.toHaveBeenCalled();
+  });
+
+  it('allows raw app-only calls only on an eligible Apps route', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+    await markSessionAsAppsCapable('apps-session', 'apps-server');
+
+    const appsResult = await handleCallToolRequest(
+      { params: { name: 'poll-dashboard', arguments: {} } },
+      { sessionId: 'apps-session' },
+    );
+    const ordinaryResult = await handleCallToolRequest(
+      { params: { name: 'apps-server::poll-dashboard', arguments: {} } },
+      { sessionId: 'ordinary-session' },
+    );
+
+    expect(appsResult.isError).toBe(false);
+    expect(mockClient.callTool).toHaveBeenCalledWith(
+      { name: 'poll-dashboard', arguments: {} },
+      expect.anything(),
+    );
+    expect(ordinaryResult.isError).toBe(true);
+    expect(ordinaryResult.content[0].text).toContain('only available to MCP Apps');
+  });
+
+  it('allows unlisted ui resources only on an eligible Apps route', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+    await markSessionAsAppsCapable('apps-session', 'apps-server');
+
+    const appsResult = await handleReadResourceRequest(
+      { params: { uri: 'ui://apps/dashboard.html' } },
+      { sessionId: 'apps-session' },
+    );
+    mockClient.readResource.mockClear();
+    const ordinaryResult = await handleReadResourceRequest(
+      { params: { uri: 'ui://apps/dashboard.html' } },
+      { sessionId: 'ordinary-session' },
+    );
+
+    expect(appsResult.contents[0]._meta).toEqual({
+      ui: { csp: { connectDomains: [] } },
+      trace: 'keep-me',
+    });
+    expect(ordinaryResult.contents[0].text).toContain('Resource not found');
+    expect(mockClient.readResource).not.toHaveBeenCalled();
+  });
+
+  it('strips Apps metadata when an ordinary route reads a listed resource', async () => {
+    mockClient.listResources.mockResolvedValue({
+      resources: [{ uri: 'ui://apps/dashboard.html', name: 'Dashboard' }],
+    });
+    await initUpstreamServers();
+    await flushPromises();
+
+    const result = await handleReadResourceRequest(
+      { params: { uri: 'ui://apps/dashboard.html' } },
+      { sessionId: 'ordinary-session' },
+    );
+
+    expect(result.contents[0]._meta).toEqual({ trace: 'keep-me' });
+  });
+
+  it('returns a readable error when an upstream resource response is malformed', async () => {
+    mockClient.listResources.mockResolvedValue({
+      resources: [{ uri: 'resource://apps/broken', name: 'Broken' }],
+    });
+    mockClient.readResource.mockResolvedValueOnce(undefined);
+    await initUpstreamServers();
+    await flushPromises();
+
+    const result = await handleReadResourceRequest(
+      { params: { uri: 'resource://apps/broken' } },
+      { sessionId: 'ordinary-session' },
+    );
+
+    expect(result.contents[0].text).toContain('Failed to read resource');
+  });
+
+  describe('multi-server Apps-enabled groups', () => {
+    // 'pair' is a real two-server group (apps-server + other-server), resolved
+    // through the group DAO the same way mcpService looks it up in production.
+    // Previously an Apps-enabled route required the group to resolve to
+    // exactly one connected server; groups with more than one server were
+    // silently treated as an ordinary (non-Apps) route. These tests cover the
+    // relaxed behavior: multiple connected servers keep Apps metadata and
+    // app-only tools, addressed by qualified name instead of a bare one.
+    const setUpPairGroup = () => {
+      mockFindAll.mockResolvedValue([
+        makeServerConfig('apps-server'),
+        makeServerConfig('other-server'),
+      ]);
+      mockGroupFindByName.mockImplementation(async (name: string) =>
+        name === 'pair' ? { servers: ['apps-server', 'other-server'] } : null,
+      );
+    };
+
+    it.each(['direct', 'wrapped'])(
+      'rejects ambiguous raw names without capabilities (%s)',
+      async (mode) => {
+        setUpPairGroup();
+        await initUpstreamServers();
+        await flushPromises();
+        await getMcpServer('aggregate-session', 'pair');
+        const params =
+          mode === 'direct'
+            ? { name: 'open-dashboard', arguments: {} }
+            : { name: 'call_tool', arguments: { toolName: 'open-dashboard', arguments: {} } };
+        const result = await handleCallToolRequest({ params }, { sessionId: 'aggregate-session' });
+        expect(result.isError).toBe(true);
+        expect(mockClient.callTool).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([false, true])(
+      'does not allow raw names when a configured peer is disabled (Apps=%s)',
+      async (appsCapable) => {
+        setUpPairGroup();
+        mockFindAll.mockResolvedValue([
+          makeServerConfig('apps-server'),
+          { ...makeServerConfig('other-server'), enabled: false },
+        ]);
+        await initUpstreamServers();
+        await flushPromises();
+        if (appsCapable) {
+          await markSessionAsAppsCapable('aggregate-session', 'pair');
+        } else {
+          await getMcpServer('aggregate-session', 'pair');
+        }
+
+        const list = await handleListToolsRequest({}, { sessionId: 'aggregate-session' });
+        expect(list.tools.map((tool) => tool.name)).toEqual(
+          appsCapable
+            ? ['apps-server::open-dashboard', 'apps-server::poll-dashboard']
+            : ['apps-server::open-dashboard'],
+        );
+        for (const params of [
+          { name: 'open-dashboard', arguments: {} },
+          { name: 'call_tool', arguments: { toolName: 'open-dashboard', arguments: {} } },
+        ]) {
+          const result = await handleCallToolRequest(
+            { params },
+            { sessionId: 'aggregate-session' },
+          );
+          expect(result.isError).toBe(true);
+        }
+        expect(mockClient.callTool).not.toHaveBeenCalled();
+      },
+    );
+
+    it('keeps qualified tool names and full Apps metadata on a multi-server Apps route', async () => {
+      setUpPairGroup();
+      await initUpstreamServers();
+      await flushPromises();
+      await markSessionAsAppsCapable('aggregate-session', 'pair');
+
+      const result = await handleListToolsRequest({}, { sessionId: 'aggregate-session' });
+
+      const dashboardTool = result.tools.find(
+        (tool: any) => tool.name === 'apps-server::open-dashboard',
+      );
+      const appOnlyTool = result.tools.find(
+        (tool: any) => tool.name === 'apps-server::poll-dashboard',
+      );
+      expect(dashboardTool._meta).toEqual(appsTools[0]._meta);
+      // App-only tools (visibility excludes 'model') stay visible here, unlike
+      // on an ordinary group route where they're hidden entirely.
+      expect(appOnlyTool).toBeDefined();
+    });
+
+    it('routes a qualified app-only tool call to the right server on a multi-server Apps route', async () => {
+      setUpPairGroup();
+      await initUpstreamServers();
+      await flushPromises();
+      await markSessionAsAppsCapable('aggregate-session', 'pair');
+
+      const result = await handleCallToolRequest(
+        { params: { name: 'apps-server::poll-dashboard', arguments: {} } },
+        { sessionId: 'aggregate-session' },
+      );
+
+      expect(result.isError).toBe(false);
+      expect(mockClient.callTool).toHaveBeenCalledWith(
+        { name: 'poll-dashboard', arguments: {} },
+        expect.anything(),
+      );
+    });
+
+    it('reads an unlisted ui:// resource by probing each connected server', async () => {
+      setUpPairGroup();
+      await initUpstreamServers();
+      await flushPromises();
+      await markSessionAsAppsCapable('aggregate-session', 'pair');
+
+      const result = await handleReadResourceRequest(
+        { params: { uri: 'ui://apps/dashboard.html' } },
+        { sessionId: 'aggregate-session' },
+      );
+
+      expect(result.contents[0]._meta).toEqual({
+        ui: { csp: { connectDomains: [] } },
+        trace: 'keep-me',
+      });
+    });
+
+    it('falls through to the next candidate when a server does not own the resource', async () => {
+      setUpPairGroup();
+      // apps-server (the shared default mock client, probed first since it's
+      // first in the group's server list) does not own this resource.
+      mockClient.readResource.mockRejectedValue(new Error('not found on this server'));
+
+      // other-server does own it.
+      const otherServerClient = createMockClient();
+      otherServerClient.listTools.mockResolvedValue({ tools: [] });
+      otherServerClient.listPrompts.mockResolvedValue({ prompts: [] });
+      otherServerClient.listResources.mockResolvedValue({ resources: [] });
+      otherServerClient.readResource.mockResolvedValue({
+        contents: [
+          {
+            uri: 'ui://apps/dashboard.html',
+            mimeType: 'text/html;profile=mcp-app',
+            text: '<html>from other-server</html>',
+            _meta: { ui: { csp: { connectDomains: [] } }, trace: 'keep-me' },
+          },
+        ],
+      });
+      mockClientsByServer.set('other-server', otherServerClient);
+
+      await initUpstreamServers();
+      await flushPromises();
+      await markSessionAsAppsCapable('aggregate-session', 'pair');
+
+      const result = await handleReadResourceRequest(
+        { params: { uri: 'ui://apps/dashboard.html' } },
+        { sessionId: 'aggregate-session' },
+      );
+
+      expect(mockClient.readResource).toHaveBeenCalledWith({ uri: 'ui://apps/dashboard.html' });
+      expect(otherServerClient.readResource).toHaveBeenCalledWith({
+        uri: 'ui://apps/dashboard.html',
+      });
+      expect(result.contents[0]._meta).toEqual({
+        ui: { csp: { connectDomains: [] } },
+        trace: 'keep-me',
+      });
+    });
+
+    it('reports resource not found when no connected server owns an unlisted ui:// resource', async () => {
+      setUpPairGroup();
+      const appsServerClient = createMockClient();
+      appsServerClient.listTools.mockResolvedValue({ tools: appsTools });
+      appsServerClient.listPrompts.mockResolvedValue({ prompts: [] });
+      appsServerClient.listResources.mockResolvedValue({ resources: [] });
+      appsServerClient.readResource.mockRejectedValue(new Error('nope'));
+      mockClientsByServer.set('apps-server', appsServerClient);
+
+      const otherServerClient = createMockClient();
+      otherServerClient.listTools.mockResolvedValue({ tools: [] });
+      otherServerClient.listPrompts.mockResolvedValue({ prompts: [] });
+      otherServerClient.listResources.mockResolvedValue({ resources: [] });
+      otherServerClient.readResource.mockRejectedValue(new Error('nope'));
+      mockClientsByServer.set('other-server', otherServerClient);
+
+      await initUpstreamServers();
+      await flushPromises();
+      await markSessionAsAppsCapable('aggregate-session', 'pair');
+
+      const result = await handleReadResourceRequest(
+        { params: { uri: 'ui://apps/missing.html' } },
+        { sessionId: 'aggregate-session' },
+      );
+
+      expect(result.contents[0].text).toContain('Resource not found');
+    });
+  });
+
+  describe('mixed MCP and OpenAPI Apps routes', () => {
+    const routes = [
+      { name: 'root', group: undefined },
+      { name: 'group', group: 'mixed' },
+    ];
+
+    const setUpMixedRoute = async () => {
+      const configs = [
+        makeServerConfig('apps-server'),
+        {
+          name: 'openapi-server',
+          type: 'openapi' as const,
+          enabled: true,
+          openapi: {
+            schema: {
+              openapi: '3.0.3',
+              info: { title: 'Memories', version: '1.0.0' },
+              paths: {},
+            },
+          },
+        },
+      ];
+      mockFindAll.mockResolvedValue(configs);
+      mockFindById.mockImplementation(async (name: string) =>
+        configs.find((config) => config.name === name),
+      );
+      mockGroupFindByName.mockImplementation(async (name: string) =>
+        name === 'mixed' ? { servers: ['apps-server', 'openapi-server'] } : null,
+      );
+      await initUpstreamServers();
+      await flushPromises();
+    };
+
+    const withAppsRoute = <T>(group: string | undefined, action: () => Promise<T>) =>
+      RequestContextService.getInstance().runWithCustomRequestContext(
+        { headers: {}, stateless: true, group, clientCapabilities: MCP_APPS_CAPABILITIES },
+        action,
+      );
+
+    it.each(routes)('keeps qualified tool names on a mixed $name Apps route', async ({ group }) => {
+      await setUpMixedRoute();
+
+      const result = await withAppsRoute(group, () => handleListToolsRequest({}, { group }));
+
+      expect(result.tools.map((tool) => tool.name)).toEqual([
+        'apps-server::open-dashboard',
+        'apps-server::poll-dashboard',
+        'openapi-server::search-memories',
+      ]);
+      expect(result.tools[0]._meta).toEqual(appsTools[0]._meta);
+      expect(getServerByName('openapi-server')?.openApiClient).toBe(mockOpenApiClient);
+      expect(getServerByName('openapi-server')?.client).toBeUndefined();
+    });
+
+    it.each(routes.flatMap((route) => ['direct', 'wrapped'].map((mode) => ({ ...route, mode }))))(
+      'dispatches qualified OpenAPI calls on a mixed $name Apps route ($mode)',
+      async ({ group, mode }) => {
+        await setUpMixedRoute();
+        const args = { query: 'work style' };
+        const params =
+          mode === 'direct'
+            ? { name: 'openapi-server::search-memories', arguments: args }
+            : {
+                name: 'call_tool',
+                arguments: { toolName: 'openapi-server::search-memories', arguments: args },
+              };
+
+        const result = await withAppsRoute(group, () =>
+          handleCallToolRequest({ params }, { group }),
+        );
+
+        expect(result.content).toEqual([
+          { type: 'text', text: JSON.stringify({ memories: ['work style'] }) },
+        ]);
+        expect(result.isError).not.toBe(true);
+        expect(mockOpenApiClient.callTool).toHaveBeenCalledWith(
+          'search-memories',
+          args,
+          undefined,
+          false,
+          undefined,
+        );
+        expect(mockClient.callTool).not.toHaveBeenCalled();
+
+        const mcpParams =
+          mode === 'direct'
+            ? { name: 'apps-server::poll-dashboard', arguments: {} }
+            : {
+                name: 'call_tool',
+                arguments: { toolName: 'apps-server::poll-dashboard', arguments: {} },
+              };
+        const mcpResult = await withAppsRoute(group, () =>
+          handleCallToolRequest({ params: mcpParams }, { group }),
+        );
+        expect(mcpResult.isError).toBe(false);
+        expect(mockClient.callTool).toHaveBeenCalledWith(
+          { name: 'poll-dashboard', arguments: {} },
+          expect.anything(),
+        );
+        expect(mockOpenApiClient.callTool).toHaveBeenCalledTimes(1);
+      },
+    );
+
+    it.each(routes.flatMap((route) => ['direct', 'wrapped'].map((mode) => ({ ...route, mode }))))(
+      'rejects raw names on a mixed $name Apps route ($mode)',
+      async ({ group, mode }) => {
+        await setUpMixedRoute();
+        const params =
+          mode === 'direct'
+            ? { name: 'open-dashboard', arguments: {} }
+            : { name: 'call_tool', arguments: { toolName: 'open-dashboard', arguments: {} } };
+
+        const result = await withAppsRoute(group, () =>
+          handleCallToolRequest({ params }, { group }),
+        );
+
+        expect(result.isError).toBe(true);
+        expect(mockClient.callTool).not.toHaveBeenCalled();
+        expect(mockOpenApiClient.callTool).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['direct', 'wrapped'])(
+      'resolves group aliases on a mixed Apps route (%s)',
+      async (mode) => {
+        await setUpMixedRoute();
+        mockGroupFindByName.mockImplementation(async (name: string) =>
+          name === 'mixed'
+            ? {
+                servers: [
+                  { name: 'apps-server', alias: 'apps' },
+                  { name: 'openapi-server', alias: 'memories' },
+                ],
+              }
+            : null,
+        );
+        const list = await withAppsRoute('mixed', () =>
+          handleListToolsRequest({}, { group: 'mixed' }),
+        );
+        expect(list.tools.map((tool) => tool.name)).toEqual([
+          'apps::open-dashboard',
+          'apps::poll-dashboard',
+          'memories::search-memories',
+        ]);
+        const args = { query: 'work style' };
+        const params =
+          mode === 'direct'
+            ? { name: 'memories::search-memories', arguments: args }
+            : {
+                name: 'call_tool',
+                arguments: { toolName: 'memories::search-memories', arguments: args },
+              };
+        const result = await withAppsRoute('mixed', () =>
+          handleCallToolRequest({ params }, { group: 'mixed' }),
+        );
+        expect(result.isError).not.toBe(true);
+        expect(mockOpenApiClient.callTool).toHaveBeenCalledWith(
+          'search-memories',
+          args,
+          undefined,
+          false,
+          undefined,
+        );
+        expect(mockClient.callTool).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['direct', 'wrapped'])(
+      'does not widen group tool selection on a mixed Apps route (%s)',
+      async (mode) => {
+        await setUpMixedRoute();
+        mockGroupFindByName.mockImplementation(async (name: string) =>
+          name === 'mixed'
+            ? { servers: ['apps-server', { name: 'openapi-server', tools: [] }] }
+            : null,
+        );
+        const list = await withAppsRoute('mixed', () =>
+          handleListToolsRequest({}, { group: 'mixed' }),
+        );
+        expect(list.tools.map((tool) => tool.name)).toEqual([
+          'apps-server::open-dashboard',
+          'apps-server::poll-dashboard',
+        ]);
+        const params =
+          mode === 'direct'
+            ? { name: 'openapi-server::search-memories', arguments: {} }
+            : {
+                name: 'call_tool',
+                arguments: { toolName: 'openapi-server::search-memories', arguments: {} },
+              };
+        const result = await withAppsRoute('mixed', () =>
+          handleCallToolRequest({ params }, { group: 'mixed' }),
+        );
+
+        expect(result.isError).toBe(true);
+        expect(mockClient.callTool).not.toHaveBeenCalled();
+        expect(mockOpenApiClient.callTool).not.toHaveBeenCalled();
+      },
+    );
+  });
+
+  it('does not read a listed resource through a different single-server route', async () => {
+    mockFindAll.mockResolvedValue([
+      makeServerConfig('apps-server'),
+      makeServerConfig('other-server'),
+    ]);
+    await initUpstreamServers();
+    await flushPromises();
+    getServerByName('apps-server')!.resources = [
+      { uri: 'resource://apps/private', name: 'Private' },
+    ];
+    getServerByName('other-server')!.resources = [];
+
+    const result = await handleReadResourceRequest(
+      { params: { uri: 'resource://apps/private' } },
+      { sessionId: 'other-session' },
+    );
+
+    expect(result.contents[0].text).toContain('Resource not found');
+    expect(mockClient.readResource).not.toHaveBeenCalled();
+  });
+
+  it('updates the cache when an upstream tools list changed callback fires', async () => {
+    await initUpstreamServers();
+    await flushPromises();
+    const [, clientOptions] = (Client as jest.Mock).mock.calls[0];
+
+    clientOptions.listChanged.tools.onChanged(null, [
+      {
+        name: 'new-tool',
+        description: 'New tool',
+        inputSchema: { type: 'object' },
+      },
+    ]);
+    await flushPromises();
+
+    expect(getServerByName('apps-server')?.tools).toEqual([
+      expect.objectContaining({ name: 'apps-server::new-tool' }),
+    ]);
+  });
+
+  it('does not report a successful list-change notification after delivery fails', async () => {
+    const downstreamServer = await getMcpServer('ordinary-session', 'apps-server');
+    jest
+      .spyOn(downstreamServer, 'sendToolListChanged')
+      .mockRejectedValueOnce(new Error('delivery failed'));
+    const logSpy = jest.spyOn(console, 'log').mockImplementation();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation();
+
+    broadcastToolListChanged();
+    await flushPromises();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Failed to send tool list changed notification:',
+      'delivery failed',
+    );
+    expect(logSpy).not.toHaveBeenCalledWith('tool list changed notification sent successfully');
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+});

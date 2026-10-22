@@ -1,0 +1,3175 @@
+import { validateAllowedCidrs } from '../utils/ssrf.js';
+import {
+  copyCredentialBindings,
+  deleteCredentialBindings,
+} from '../services/credentialBindingService.js';
+import { StdioOptionsError } from '../utils/stdioOptions.js';
+import { CredentialBindingError } from '../utils/credentialTemplate.js';
+import { isDeepStrictEqual } from 'node:util';
+import { Request, Response } from 'express';
+import {
+  ApiResponse,
+  AddServerRequest,
+  McpSettings,
+  BatchCreateServersRequest,
+  BatchCreateServersResponse,
+  BatchServerResult,
+  ServerConfig,
+  ServerInfo,
+} from '../types/index.js';
+import {
+  getServersInfo,
+  addServer,
+  addOrUpdateServer,
+  removeServer,
+  closeServer,
+  getServerByName,
+  notifyToolChanged,
+  broadcastToolListChanged,
+  broadcastPromptListChanged,
+  broadcastResourceListChanged,
+  syncToolEmbedding,
+  toggleServerStatus,
+  reconnectServer,
+  reinstallServer,
+  updateServerInfoVisibility,
+} from '../services/mcpService.js';
+import { clearAllCaches } from '../utils/cacheUtils.js';
+import {
+  removeServerToolEmbeddings,
+  syncAllServerToolsEmbeddings,
+} from '../services/vectorSearchService.js';
+import { createSafeJSON } from '../utils/serialization.js';
+import { getNameSeparator } from '../config/index.js';
+import { cloneDefaultOAuthServerConfig } from '../constants/oauthServerDefaults.js';
+import {
+  getBearerKeyDao,
+  getGroupDao,
+  getOAuthClientDao,
+  getOAuthTokenDao,
+  getServerDao,
+  getSystemConfigDao,
+  getUserConfigDao,
+  getUserDao,
+} from '../dao/DaoFactory.js';
+import { migrateLegacySmartRoutingConfig } from '../dao/SystemConfigDao.js';
+import { UserContextService } from '../services/userContextService.js';
+import { authorizationService } from '../services/authorizationService.js';
+import {
+  presentServerForPrincipal,
+  presentServerInfoForPrincipal,
+} from '../services/serverConfigPresenter.js';
+import { disconnectUpstreamOAuth } from '../services/upstreamOAuthDisconnectService.js';
+import type { UpstreamOAuthDisconnectScope } from '../services/upstreamOAuthDisconnectService.js';
+import { normalizeServerConfigForPersistence } from '../utils/serverConfigPersistence.js';
+import {
+  isPrivilegedServerConfig,
+  ServerConfigValidationError,
+} from '../utils/serverConfigValidation.js';
+import { validateServerName } from '../utils/serverNameValidation.js';
+import { setCachedSystemConfig } from '../utils/systemConfigCache.js';
+import { DEFAULT_INSTALL_BASE_URL, withResolvedInstallBaseUrl } from '../utils/installBaseUrl.js';
+import {
+  getSmartRoutingConfig,
+  parseBooleanEnvVar,
+  parseFullSchemaTopN,
+  parseSimilarityThreshold,
+  parseToolDefinitionFields,
+} from '../utils/smartRouting.js';
+import { TOOL_DEFINITION_FIELDS } from '../constants/smartRoutingDefaults.js';
+import { previewOpenApiToolStats } from '../services/openApiToolStatsService.js';
+import { logger } from '../utils/logger.js';
+import { findToolConfigKey, resolveRuntimeToolName } from '../utils/toolConfig.js';
+
+// Runtime names of a connected server's tools, to resolve which tool a request means
+const liveToolNames = (serverName: string): string[] =>
+  (getServerByName(serverName)?.tools ?? []).map((tool) => tool.name);
+
+type DescribableConfig = Record<
+  string,
+  { enabled: boolean; description?: string; hiddenParams?: string[] }
+>;
+type ServerRecord = ServerConfig & { name: string };
+
+type RequestUser = {
+  username: string;
+  isAdmin?: boolean;
+};
+
+const getRequestUser = (req: Request): RequestUser | null => {
+  return ((req as any).user as RequestUser | undefined) || null;
+};
+
+const canAccessServer = (user: RequestUser | null, server: ServerRecord): boolean => {
+  if (!user) {
+    return false;
+  }
+
+  if (user.isAdmin) {
+    return true;
+  }
+
+  return server.owner === user.username;
+};
+
+const loadAuthorizedServer = async (
+  req: Request,
+  res: Response,
+  serverName: string,
+): Promise<ServerRecord | null> => {
+  const serverDao = getServerDao();
+  const server = await serverDao.findById(serverName);
+
+  if (!server) {
+    res.status(404).json({
+      success: false,
+      message: 'Server not found',
+    });
+    return null;
+  }
+
+  if (!canAccessServer(getRequestUser(req), server)) {
+    res.status(403).json({
+      success: false,
+      message: 'Forbidden',
+    });
+    return null;
+  }
+
+  return server;
+};
+
+const ensureNonAdminCanManageConfig = (
+  req: Request,
+  res: Response,
+  config: ServerConfig,
+): boolean => {
+  const currentUser = getRequestUser(req);
+  if (currentUser?.isAdmin) {
+    return true;
+  }
+
+  if (isPrivilegedServerConfig(config)) {
+    res.status(403).json({
+      success: false,
+      message:
+        config.oauth?.allowInsecureTokenEndpoint === true
+          ? 'Only admins can create or modify servers allowing HTTP OAuth token endpoints'
+          : config.passthroughHeaders?.length || config.openapi?.passthroughHeaders?.length
+            ? 'Only admins can create or modify servers forwarding caller headers'
+            : 'Only admins can create or modify stdio-based servers',
+    });
+    return false;
+  }
+
+  return true;
+};
+
+const assignServerOwner = (req: Request, config: ServerConfig, existingOwner?: string): void => {
+  const currentUser = getRequestUser(req);
+  if (!currentUser) {
+    return;
+  }
+
+  if (currentUser.isAdmin) {
+    config.owner = config.owner || existingOwner || currentUser.username;
+    return;
+  }
+
+  config.owner = currentUser.username;
+};
+
+const clearDescriptionOverride = (
+  items: DescribableConfig,
+  itemName: string,
+): DescribableConfig => {
+  const nextItems = { ...items };
+  const itemConfig = nextItems[itemName];
+
+  if (!itemConfig) {
+    return nextItems;
+  }
+
+  const { description: _description, ...remainingConfig } = itemConfig;
+
+  // Keep the entry while it still says something: a disable or hidden parameters.
+  if (
+    remainingConfig.enabled === false ||
+    Object.keys(remainingConfig).some((key) => key !== 'enabled')
+  ) {
+    nextItems[itemName] = remainingConfig;
+  } else {
+    delete nextItems[itemName];
+  }
+
+  return nextItems;
+};
+
+const stripUndefinedDeep = (value: unknown): unknown => {
+  if (Array.isArray(value)) {
+    return value.map((item) => stripUndefinedDeep(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, nestedValue]) => nestedValue !== undefined)
+        .map(([key, nestedValue]) => [key, stripUndefinedDeep(nestedValue)]),
+    );
+  }
+
+  return value;
+};
+
+// Fields baked into the live MCP client/transport at connect time. Editing any
+// of these requires tearing down and re-establishing the runtime. Everything
+// else in ServerConfig (description, owner, visibility, sharedWithUsers,
+// `enabled`, and the tools/prompts/resources per-item overrides) is read-time
+// or access metadata that can be applied without a reconnect.
+const CONNECTION_RELEVANT_CONFIG_FIELDS = [
+  'type',
+  'url',
+  'command',
+  'args',
+  'env',
+  'headers',
+  'passthroughHeaders',
+  'options',
+  'oauth',
+  'openapi',
+  'perSessionClient',
+  'credentialTemplate',
+  'startOnDemand',
+  'idleTimeoutMs',
+  'enableKeepAlive',
+  'keepAliveInterval',
+  'proxy',
+] as const;
+
+type ConnectionRelevantServerConfig = Pick<
+  ServerConfig,
+  (typeof CONNECTION_RELEVANT_CONFIG_FIELDS)[number]
+>;
+
+const toConnectionRelevantConfig = (
+  config: ServerConfig | ServerRecord,
+): ConnectionRelevantServerConfig => {
+  const normalized = normalizeServerConfigForPersistence(config) as Record<string, unknown>;
+  const picked: Record<string, unknown> = {};
+  for (const field of CONNECTION_RELEVANT_CONFIG_FIELDS) {
+    // Database mode reads unset columns (e.g. `proxy`) back as null, while a
+    // request leaves them out; both mean "not set".
+    picked[field] = normalized[field] ?? undefined;
+  }
+  const comparable = stripUndefinedDeep(picked) as Record<string, unknown>;
+  // Treat the default request timeout (60000, the dashboard form default) as
+  // equivalent to "not set": an explicit 60000 stored via API/file import and an
+  // absent timeout resolve to the same effective connect timeout. Without this, a
+  // stored explicit 60000 (or the dashboard echoing 60000 back) would look like a
+  // connection change on unrelated edits and reload the runtime for nothing.
+  const options = comparable.options as { timeout?: number } | undefined;
+  if (options && options.timeout === 60000) {
+    delete options.timeout;
+    if (Object.keys(options).length === 0) {
+      delete comparable.options;
+    }
+  }
+  return comparable as ConnectionRelevantServerConfig;
+};
+
+// True when an edit touches at least one field the live connection depends on,
+// i.e. the runtime must be torn down and reconnected.
+const hasConnectionRelevantChange = (
+  existingServer: ServerRecord,
+  nextConfig: ServerConfig,
+): boolean =>
+  !isDeepStrictEqual(
+    toConnectionRelevantConfig(existingServer),
+    toConnectionRelevantConfig(nextConfig),
+  );
+
+export const getAllServers = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Parse pagination parameters from query string
+    const page = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : undefined;
+
+    // Validate pagination parameters
+    if (!Number.isInteger(page) || page < 1) {
+      res.status(400).json({
+        success: false,
+        message: 'Page number must be greater than 0',
+      });
+      return;
+    }
+
+    if (limit !== undefined && (!Number.isInteger(limit) || limit < 1 || limit > 1000)) {
+      res.status(400).json({
+        success: false,
+        message: 'Limit must be between 1 and 1000',
+      });
+      return;
+    }
+
+    // Get current user for filtering
+    const currentUser = UserContextService.getInstance().getCurrentUser();
+    const isAdmin = !currentUser || currentUser.isAdmin;
+
+    // Get servers info with pagination if limit is specified
+    let serversInfo: Omit<ServerInfo, 'client' | 'transport'>[];
+    let allServers: Omit<ServerInfo, 'client' | 'transport'>[] | undefined;
+    let pagination = undefined;
+
+    if (limit !== undefined) {
+      // Use DAO layer pagination with proper filtering
+      const serverDao = getServerDao();
+      const paginatedResult = isAdmin
+        ? await serverDao.findAllPaginated(page, limit)
+        : await serverDao.findVisibleToUserPaginated(currentUser!.username, page, limit);
+
+      // Get runtime info for paginated servers
+      serversInfo = await getServersInfo(page, limit, currentUser);
+      allServers = await getServersInfo(undefined, undefined, currentUser);
+
+      pagination = {
+        page: paginatedResult.page,
+        limit: paginatedResult.limit,
+        total: paginatedResult.total,
+        totalPages: paginatedResult.totalPages,
+        hasNextPage: paginatedResult.page < paginatedResult.totalPages,
+        hasPrevPage: paginatedResult.page > 1,
+      };
+    } else {
+      // No pagination, get all servers (will be filtered by mcpService)
+      serversInfo = await getServersInfo();
+    }
+
+    // #1036 Phase 1: withhold OAuth session-recovery fields from principals
+    // who may not read the full server configuration (defense in depth; the
+    // config block on list entries is already narrowed to safe metadata).
+    const presentedServersInfo = serversInfo.map((info) =>
+      presentServerInfoForPrincipal(info, currentUser),
+    );
+    const presentedAllServers = allServers?.map((info) =>
+      presentServerInfoForPrincipal(info, currentUser),
+    );
+
+    const response: ApiResponse & {
+      pagination?: typeof pagination;
+      allServers?: Omit<ServerInfo, 'client' | 'transport'>[];
+    } = {
+      success: true,
+      data: createSafeJSON(presentedServersInfo),
+      ...(presentedAllServers && { allServers: createSafeJSON(presentedAllServers) }),
+      ...(pagination && { pagination }),
+    };
+    res.json(response);
+  } catch (error) {
+    logger.error('Failed to get servers information:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get servers information',
+    });
+  }
+};
+
+export const getServerShareCandidates = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+    const server = await loadAuthorizedServer(req, res, name);
+    if (!server) {
+      return;
+    }
+
+    const users = await getUserDao().findAll();
+    // Treat a missing/empty owner as 'admin' so the candidate list is
+    // consistent before and after the first edit (which assigns the owner).
+    const effectiveOwner = server.owner?.trim() || 'admin';
+    const usernames = users
+      .map((user) => user.username)
+      .filter((username) => username !== effectiveOwner)
+      .sort((left, right) => left.localeCompare(right));
+
+    res.json({ success: true, data: usernames });
+  } catch (error) {
+    logger.error('Failed to get server share candidates:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get server share candidates',
+    });
+  }
+};
+
+export const getAllSettings = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const [
+      servers,
+      users,
+      groups,
+      systemConfigResult,
+      userConfigs,
+      oauthClients,
+      oauthTokens,
+      bearerKeys,
+    ] = await Promise.all([
+      getServerDao().findAll(),
+      getUserDao().findAll(),
+      getGroupDao().findAll(),
+      getSystemConfigDao().get(),
+      getUserConfigDao().getAll(),
+      getOAuthClientDao().findAll(),
+      getOAuthTokenDao().findAll(),
+      getBearerKeyDao().findAll(),
+    ]);
+
+    // Convert servers array to mcpServers map format
+    const mcpServers: McpSettings['mcpServers'] = {};
+    for (const server of servers) {
+      const { name, ...config } = server;
+      mcpServers[name] = config;
+    }
+
+    const systemConfig = systemConfigResult || {};
+
+    // Ensure smart routing config has DB URL set if environment variable is present
+    const dbUrlEnv = process.env.DB_URL || '';
+    // Runtime enablement (getSmartRoutingConfig) always lets SMART_ROUTING_ENABLED /
+    // ENABLE_SMART_ROUTING override the stored setting — the dashboard must reflect
+    // that same precedence, or an env-only deployment (our own Docker quick start)
+    // shows "Inactive" here while smart routing is actually live end-to-end.
+    // Mirrors getConfigValue's own precedence: try each var in order, skipping
+    // unset/blank ones — an empty string must fall through to the next
+    // candidate (and ultimately the DB value) rather than being parsed as
+    // "false", or SMART_ROUTING_ENABLED="" would silently override a DB `true`.
+    const smartRoutingEnabledRaw = [
+      process.env.SMART_ROUTING_ENABLED,
+      process.env.ENABLE_SMART_ROUTING,
+    ].find((raw) => raw !== undefined && raw.trim() !== '');
+    const smartRoutingEnabledFromEnv =
+      smartRoutingEnabledRaw !== undefined ? parseBooleanEnvVar(smartRoutingEnabledRaw) : undefined;
+    if (!systemConfig.smartRouting) {
+      systemConfig.smartRouting = {
+        enabled: smartRoutingEnabledFromEnv ?? false,
+        dbUrl: dbUrlEnv ? '${DB_URL}' : '',
+        llmProviderBaseUrl: '',
+        llmProviderApiKey: '',
+        embeddingModel: '',
+      };
+    } else {
+      if (smartRoutingEnabledFromEnv !== undefined) {
+        systemConfig.smartRouting.enabled = smartRoutingEnabledFromEnv;
+      }
+      if (!systemConfig.smartRouting.dbUrl) {
+        systemConfig.smartRouting.dbUrl = dbUrlEnv ? '${DB_URL}' : '';
+      }
+    }
+
+    // Same idea one level down (issue #642): an env var silently outranks the
+    // value the user typed into the dashboard — e.g. a stale OPENAI_API_KEY in
+    // .env shadows a freshly pasted valid key, and embeddings fail with 401 while
+    // the form happily shows the new key. Reuse getSmartRoutingConfig() so the
+    // field→env-var mapping lives in exactly one place instead of being repeated
+    // here; this endpoint is admin-only and low-traffic, so the extra DAO read is
+    // not worth optimising away.
+    const smartRoutingEnvOverriddenFields =
+      (await getSmartRoutingConfig()).envOverriddenFields ?? [];
+
+    if (!systemConfig.toolResultCompression) {
+      systemConfig.toolResultCompression = {
+        enabled: false,
+        minTokens: 2000,
+        maxOutputTokens: 1200,
+        strategy: 'auto',
+      };
+    }
+
+    const systemConfigForResponse = withResolvedInstallBaseUrl(
+      {
+        ...systemConfig,
+        // Response-only copy: `envOverriddenFields` is display metadata, not part
+        // of the persisted schema. The file-backed DAO returns its cached settings
+        // object by reference, so attaching the field to systemConfig.smartRouting
+        // directly would leak it into mcp_settings.json on the next write.
+        ...(systemConfig.smartRouting
+          ? {
+              smartRouting: {
+                ...systemConfig.smartRouting,
+                envOverriddenFields: smartRoutingEnvOverriddenFields,
+              },
+            }
+          : {}),
+      },
+      DEFAULT_INSTALL_BASE_URL,
+    );
+
+    const settings: McpSettings = {
+      users,
+      mcpServers,
+      groups,
+      systemConfig: systemConfigForResponse,
+      userConfigs,
+      oauthClients,
+      oauthTokens,
+      bearerKeys: bearerKeys.map((key) => ({
+        ...key,
+        kind: key.kind ?? 'system',
+        token:
+          key.token.length > 12 ? `${key.token.slice(0, 8)}...${key.token.slice(-4)}` : '********',
+      })),
+    };
+
+    const response: ApiResponse = {
+      success: true,
+      data: createSafeJSON(
+        (req as any).user?.isAdmin
+          ? settings
+          : {
+              mcpServers: {},
+              systemConfig: {
+                install: {
+                  baseUrl: systemConfigForResponse.install?.baseUrl,
+                },
+              },
+              bearerKeys: settings.bearerKeys?.filter(
+                (key) => key.kind === 'user' && key.owner === getRequestUser(req)?.username,
+              ),
+            },
+      ),
+    };
+    res.json(response);
+  } catch (error) {
+    logger.error('Failed to get server settings:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get server settings',
+    });
+  }
+};
+
+/**
+ * Preview the tool list an OpenAPI import would generate, without persisting
+ * anything (#1082). Large specs can silently produce a tools/list that does
+ * not fit in a model's context window; this endpoint lets the form surface
+ * the numbers at the point of confirming the import.
+ */
+export const previewOpenApiToolStatsHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const { config } = req.body as AddServerRequest;
+    if (!config || typeof config !== 'object') {
+      res.status(400).json({
+        success: false,
+        message: 'Server configuration is required',
+      });
+      return;
+    }
+
+    const normalizedConfig = normalizeServerConfigForPersistence(config);
+
+    if (!normalizedConfig.openapi?.url && !normalizedConfig.openapi?.schema) {
+      res.status(400).json({
+        success: false,
+        message: 'OpenAPI specification URL or schema is required',
+      });
+      return;
+    }
+
+    // Assign the requesting user as owner so initialize()'s admin check (and
+    // therefore the internal-network SSRF allowance) matches what a real
+    // add-server request would produce for the same caller.
+    assignServerOwner(req, normalizedConfig);
+
+    const stats = await previewOpenApiToolStats(normalizedConfig);
+    res.json({ success: true, data: stats });
+  } catch (error) {
+    logger.warn('Failed to preview OpenAPI tool stats:', error);
+    res.status(400).json({
+      success: false,
+      message: error instanceof Error ? error.message : 'Failed to analyze OpenAPI specification',
+    });
+  }
+};
+
+export const createServer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name, config } = req.body as AddServerRequest;
+    const nameValidation = validateServerName(name);
+    if (!nameValidation.valid) {
+      res.status(400).json({
+        success: false,
+        message: nameValidation.message,
+      });
+      return;
+    }
+    const serverName = nameValidation.normalized as string;
+
+    if (!config || typeof config !== 'object') {
+      res.status(400).json({
+        success: false,
+        message: 'Server configuration is required',
+      });
+      return;
+    }
+
+    const normalizedConfig = normalizeServerConfigForPersistence(config);
+
+    if (
+      !normalizedConfig.url &&
+      !normalizedConfig.openapi?.url &&
+      !normalizedConfig.openapi?.schema &&
+      !normalizedConfig.command
+    ) {
+      res.status(400).json({
+        success: false,
+        message:
+          'Server configuration must include either a URL, OpenAPI specification URL or schema, or command',
+      });
+      return;
+    }
+
+    // Validate the server type if specified
+    if (
+      normalizedConfig.type &&
+      !['stdio', 'sse', 'streamable-http', 'openapi'].includes(normalizedConfig.type)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Server type must be one of: stdio, sse, streamable-http, openapi',
+      });
+      return;
+    }
+
+    // Validate that URL is provided for sse and streamable-http types
+    if (
+      (normalizedConfig.type === 'sse' || normalizedConfig.type === 'streamable-http') &&
+      !normalizedConfig.url
+    ) {
+      res.status(400).json({
+        success: false,
+        message: `URL is required for ${normalizedConfig.type} server type`,
+      });
+      return;
+    }
+
+    // Validate that OpenAPI specification URL or schema is provided for openapi type
+    if (
+      normalizedConfig.type === 'openapi' &&
+      !normalizedConfig.openapi?.url &&
+      !normalizedConfig.openapi?.schema
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'OpenAPI specification URL or schema is required for openapi server type',
+      });
+      return;
+    }
+
+    // Validate headers if provided
+    if (normalizedConfig.headers && typeof normalizedConfig.headers !== 'object') {
+      res.status(400).json({
+        success: false,
+        message: 'Headers must be an object',
+      });
+      return;
+    }
+
+    // Validate that headers are only used with sse, streamable-http, and openapi types
+    if (normalizedConfig.headers && normalizedConfig.type === 'stdio') {
+      res.status(400).json({
+        success: false,
+        message: 'Headers are not supported for stdio server type',
+      });
+      return;
+    }
+
+    if (!ensureNonAdminCanManageConfig(req, res, normalizedConfig)) {
+      return;
+    }
+
+    // Set default keep-alive interval for SSE servers if not specified
+    if (
+      (normalizedConfig.type === 'sse' || (!normalizedConfig.type && normalizedConfig.url)) &&
+      !normalizedConfig.keepAliveInterval
+    ) {
+      normalizedConfig.keepAliveInterval = 60000; // Default 60 seconds for SSE servers
+    }
+
+    assignServerOwner(req, normalizedConfig);
+
+    const result = await addServer(serverName, normalizedConfig);
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Server added successfully',
+      });
+      notifyToolChanged(serverName, { reportEmbeddingProgress: true }).catch((error) => {
+        logger.error('Failed to trigger embedding sync for created server:', error);
+      });
+    } else {
+      res.status(400).json({
+        success: false,
+        message: result.message || 'Failed to add server',
+      });
+    }
+  } catch (error) {
+    res
+      .status(
+        error instanceof CredentialBindingError ||
+          error instanceof StdioOptionsError ||
+          error instanceof ServerConfigValidationError
+          ? 400
+          : 500,
+      )
+      .json({
+        success: false,
+        message:
+          error instanceof CredentialBindingError ||
+          error instanceof StdioOptionsError ||
+          error instanceof ServerConfigValidationError
+            ? error.message
+            : 'Internal server error',
+      });
+  }
+};
+
+// Batch create servers - validates and creates multiple servers in one request
+export const batchCreateServers = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { servers } = req.body as BatchCreateServersRequest;
+
+    // Validate request body
+    if (!servers || !Array.isArray(servers)) {
+      res.status(400).json({
+        success: false,
+        message: 'Request body must contain a "servers" array',
+      });
+      return;
+    }
+
+    if (servers.length === 0) {
+      res.status(400).json({
+        success: false,
+        message: 'Servers array cannot be empty',
+      });
+      return;
+    }
+
+    // Helper function to validate a single server configuration
+    const validateServerConfig = (
+      name: string,
+      config: ServerConfig,
+    ): { valid: boolean; message?: string; normalizedName?: string } => {
+      const nameValidation = validateServerName(name);
+      if (!nameValidation.valid) {
+        return { valid: false, message: nameValidation.message };
+      }
+
+      if (!config || typeof config !== 'object') {
+        return { valid: false, message: 'Server configuration is required and must be an object' };
+      }
+
+      const normalizedConfig = normalizeServerConfigForPersistence(config);
+
+      if (
+        !normalizedConfig.url &&
+        !normalizedConfig.openapi?.url &&
+        !normalizedConfig.openapi?.schema &&
+        !normalizedConfig.command
+      ) {
+        return {
+          valid: false,
+          message:
+            'Server configuration must include either a URL, OpenAPI specification URL or schema, or command',
+        };
+      }
+
+      // Validate server type if specified
+      if (
+        normalizedConfig.type &&
+        !['stdio', 'sse', 'streamable-http', 'openapi'].includes(normalizedConfig.type)
+      ) {
+        return {
+          valid: false,
+          message: 'Server type must be one of: stdio, sse, streamable-http, openapi',
+        };
+      }
+
+      // Validate URL is provided for sse and streamable-http types
+      if (
+        (normalizedConfig.type === 'sse' || normalizedConfig.type === 'streamable-http') &&
+        !normalizedConfig.url
+      ) {
+        return {
+          valid: false,
+          message: `URL is required for ${normalizedConfig.type} server type`,
+        };
+      }
+
+      // Validate OpenAPI specification URL or schema is provided for openapi type
+      if (
+        normalizedConfig.type === 'openapi' &&
+        !normalizedConfig.openapi?.url &&
+        !normalizedConfig.openapi?.schema
+      ) {
+        return {
+          valid: false,
+          message: 'OpenAPI specification URL or schema is required for openapi server type',
+        };
+      }
+
+      // Validate headers if provided
+      if (normalizedConfig.headers && typeof normalizedConfig.headers !== 'object') {
+        return { valid: false, message: 'Headers must be an object' };
+      }
+
+      // Validate that headers are only used with sse, streamable-http, and openapi types
+      if (normalizedConfig.headers && normalizedConfig.type === 'stdio') {
+        return { valid: false, message: 'Headers are not supported for stdio server type' };
+      }
+
+      return { valid: true, normalizedName: nameValidation.normalized };
+    };
+
+    // Process each server
+    const results: BatchServerResult[] = [];
+    let successCount = 0;
+    let failureCount = 0;
+
+    // Get current user for owner field
+    const currentUser = getRequestUser(req);
+    const defaultOwner = currentUser?.username || 'admin';
+
+    for (const server of servers) {
+      const { name, config } = server;
+
+      // Validate server configuration
+      let validation: ReturnType<typeof validateServerConfig>;
+      try {
+        validation = validateServerConfig(name, config);
+      } catch (error) {
+        if (
+          !(error instanceof StdioOptionsError) &&
+          !(error instanceof ServerConfigValidationError)
+        )
+          throw error;
+        validation = { valid: false, message: error.message };
+      }
+      if (!validation.valid) {
+        results.push({
+          name: name || 'unknown',
+          success: false,
+          message: validation.message,
+        });
+        failureCount++;
+        continue;
+      }
+
+      const serverName = validation.normalizedName ?? name;
+
+      try {
+        // Set default keep-alive interval for SSE servers if not specified
+        const normalizedConfig = normalizeServerConfigForPersistence(config);
+
+        if (
+          (normalizedConfig.type === 'sse' || (!normalizedConfig.type && normalizedConfig.url)) &&
+          !normalizedConfig.keepAliveInterval
+        ) {
+          normalizedConfig.keepAliveInterval = 60000; // Default 60 seconds for SSE servers
+        }
+
+        if (isPrivilegedServerConfig(normalizedConfig) && currentUser?.isAdmin !== true) {
+          results.push({
+            name: serverName,
+            success: false,
+            message:
+              normalizedConfig.oauth?.allowInsecureTokenEndpoint === true
+                ? 'Only admins can create or modify servers allowing HTTP OAuth token endpoints'
+                : normalizedConfig.passthroughHeaders?.length ||
+                    normalizedConfig.openapi?.passthroughHeaders?.length
+                  ? 'Only admins can create or modify servers forwarding caller headers'
+                  : 'Only admins can create or modify stdio-based servers',
+          });
+          failureCount++;
+          continue;
+        }
+
+        // Set owner property if not provided
+        normalizedConfig.owner = currentUser?.isAdmin
+          ? normalizedConfig.owner || defaultOwner
+          : defaultOwner;
+
+        // Attempt to add server
+        const result = await addServer(serverName, normalizedConfig);
+        if (result.success) {
+          results.push({
+            name: serverName,
+            success: true,
+          });
+          successCount++;
+        } else {
+          results.push({
+            name: serverName,
+            success: false,
+            message: result.message || 'Failed to add server',
+          });
+          failureCount++;
+        }
+      } catch (error) {
+        results.push({
+          name: serverName,
+          success: false,
+          message: error instanceof Error ? error.message : 'Internal server error',
+        });
+        failureCount++;
+      }
+    }
+
+    // Prepare response
+    const response: ApiResponse<BatchCreateServersResponse> = {
+      success: successCount > 0, // Success if at least one server was created
+      data: {
+        success: successCount > 0,
+        successCount,
+        failureCount,
+        results,
+      },
+    };
+
+    // Return 207 Multi-Status if there were partial failures, 200 if all succeeded, 400 if all failed
+    const statusCode = failureCount === 0 ? 200 : successCount === 0 ? 400 : 207;
+    res.status(statusCode).json(response);
+
+    if (successCount > 0) {
+      const successfulServerNames = results
+        .filter(
+          (result): result is BatchServerResult & { name: string; success: true } => result.success,
+        )
+        .map((result) => result.name);
+
+      Promise.all(
+        successfulServerNames.map((serverName) =>
+          notifyToolChanged(serverName, { reportEmbeddingProgress: true }),
+        ),
+      ).catch((error) => {
+        logger.error('Failed to trigger embedding sync for batch-created servers:', error);
+      });
+    }
+  } catch (error) {
+    logger.error('Batch create servers error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const deleteServer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+    if (!name) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name is required',
+      });
+      return;
+    }
+
+    const existingServer = await loadAuthorizedServer(req, res, name);
+    if (!existingServer) {
+      return;
+    }
+
+    const result = await removeServer(existingServer.name);
+    if (result.success) {
+      notifyToolChanged();
+      res.json({
+        success: true,
+        message: 'Server removed successfully',
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: result.message || 'Server not found or failed to remove',
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+/**
+ * Move the keys of a server's `tools` or `prompts` map from the old name's
+ * prefix to the new one. The dashboard stores toggles and description
+ * overrides under the prefixed item name (`<server><separator><item>`), so
+ * after a rename the old keys match nothing: a tool disabled under them comes
+ * back enabled and callable, and its description override is lost. Keys
+ * without the old prefix are left as they are; if both prefixes are present,
+ * the old one wins, since it is the one that was in effect.
+ *
+ * With the default `-` separator a key such as `notes-delete_note` can also be
+ * the bare name of an upstream tool called `notes-delete_note`, which tool
+ * toggles accept as well. `keepOldKey` says which old-prefix keys to keep next
+ * to their moved copy, so that meaning survives the rename too.
+ */
+const movePrefixedItemKeys = <T>(
+  entries: Record<string, T> | undefined,
+  oldName: string,
+  newName: string,
+  keepOldKey: (key: string) => boolean = () => false,
+): Record<string, T> | undefined => {
+  if (!entries) {
+    return entries;
+  }
+
+  const separator = getNameSeparator();
+  const oldPrefix = `${oldName}${separator}`;
+  const newPrefix = `${newName}${separator}`;
+  const moved = Object.fromEntries(
+    Object.entries(entries).filter(([key]) => !key.startsWith(oldPrefix)),
+  ) as Record<string, T>;
+  for (const [key, value] of Object.entries(entries)) {
+    if (key.startsWith(oldPrefix)) {
+      moved[`${newPrefix}${key.substring(oldPrefix.length)}`] = value;
+      if (keepOldKey(key)) {
+        moved[key] = value;
+      }
+    }
+  }
+  return moved;
+};
+
+/**
+ * Whether an old-prefix `tools` key may be a bare upstream tool name. Tool
+ * toggles accept the bare name as well as the prefixed one, so `notes-x` on
+ * server `notes` applies both to tool `x` and to a tool literally named
+ * `notes-x`. The cached tool list says which bare names exist; without one
+ * (server not connected yet) every such key is kept, which is harmless when
+ * no such tool exists.
+ */
+const bareToolNameCheck = (serverName: string): ((key: string) => boolean) => {
+  const prefix = `${serverName}${getNameSeparator()}`;
+  const cachedTools = getServerByName(serverName)?.tools ?? [];
+  if (cachedTools.length === 0) {
+    return () => true;
+  }
+  const bareNames = new Set(
+    cachedTools.map((tool) =>
+      tool.name.startsWith(prefix) ? tool.name.substring(prefix.length) : tool.name,
+    ),
+  );
+  return (key) => bareNames.has(key);
+};
+
+export const updateServer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+    const { config, newName } = req.body;
+    if (!name) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name is required',
+      });
+      return;
+    }
+
+    if (!config || typeof config !== 'object') {
+      res.status(400).json({
+        success: false,
+        message: 'Server configuration is required',
+      });
+      return;
+    }
+
+    const normalizedConfig = normalizeServerConfigForPersistence(config);
+
+    if (
+      !normalizedConfig.url &&
+      !normalizedConfig.openapi?.url &&
+      !normalizedConfig.openapi?.schema &&
+      !normalizedConfig.command
+    ) {
+      res.status(400).json({
+        success: false,
+        message:
+          'Server configuration must include either a URL, OpenAPI specification URL or schema, or command',
+      });
+      return;
+    }
+
+    // Validate the server type if specified
+    if (
+      normalizedConfig.type &&
+      !['stdio', 'sse', 'streamable-http', 'openapi'].includes(normalizedConfig.type)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Server type must be one of: stdio, sse, streamable-http, openapi',
+      });
+      return;
+    }
+
+    // Validate that URL is provided for sse and streamable-http types
+    if (
+      (normalizedConfig.type === 'sse' || normalizedConfig.type === 'streamable-http') &&
+      !normalizedConfig.url
+    ) {
+      res.status(400).json({
+        success: false,
+        message: `URL is required for ${normalizedConfig.type} server type`,
+      });
+      return;
+    }
+
+    // Validate that OpenAPI specification URL or schema is provided for openapi type
+    if (
+      normalizedConfig.type === 'openapi' &&
+      !normalizedConfig.openapi?.url &&
+      !normalizedConfig.openapi?.schema
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'OpenAPI specification URL or schema is required for openapi server type',
+      });
+      return;
+    }
+
+    // Validate headers if provided
+    if (normalizedConfig.headers && typeof normalizedConfig.headers !== 'object') {
+      res.status(400).json({
+        success: false,
+        message: 'Headers must be an object',
+      });
+      return;
+    }
+
+    // Validate that headers are only used with sse, streamable-http, and openapi types
+    if (normalizedConfig.headers && normalizedConfig.type === 'stdio') {
+      res.status(400).json({
+        success: false,
+        message: 'Headers are not supported for stdio server type',
+      });
+      return;
+    }
+
+    const existingServer = await loadAuthorizedServer(req, res, name);
+    if (!existingServer) {
+      return;
+    }
+
+    if (
+      ((existingServer.oauth?.allowInsecureTokenEndpoint === true ||
+        Boolean(
+          existingServer.passthroughHeaders?.length ||
+            existingServer.openapi?.passthroughHeaders?.length,
+        )) &&
+        !ensureNonAdminCanManageConfig(req, res, existingServer)) ||
+      !ensureNonAdminCanManageConfig(req, res, normalizedConfig)
+    ) {
+      return;
+    }
+
+    // Set default keep-alive interval for SSE servers if not specified
+    if (
+      (normalizedConfig.type === 'sse' || (!normalizedConfig.type && normalizedConfig.url)) &&
+      !normalizedConfig.keepAliveInterval
+    ) {
+      normalizedConfig.keepAliveInterval = 60000; // Default 60 seconds for SSE servers
+    }
+
+    // Set owner property if not provided - use current user's username, default to 'admin'
+    assignServerOwner(req, normalizedConfig, existingServer.owner);
+
+    // Check if server name is being changed
+    const isRenaming = newName && newName !== name;
+
+    // Final server name used for the rest of the update flow (the new name when
+    // renaming, otherwise the original name).
+    let finalName = name;
+
+    // If renaming, validate the new name and update references
+    if (isRenaming) {
+      const serverDao = getServerDao();
+      const nameValidation = validateServerName(newName);
+      if (!nameValidation.valid) {
+        res.status(400).json({
+          success: false,
+          message: nameValidation.message,
+        });
+        return;
+      }
+      const targetName = nameValidation.normalized as string;
+      finalName = targetName;
+
+      // Check if new name already exists
+      if (await serverDao.exists(targetName)) {
+        res.status(400).json({
+          success: false,
+          message: `Server name '${targetName}' already exists`,
+        });
+        return;
+      }
+
+      // Read the cached tool list before the runtime under the old name is closed
+      const isBareToolName = bareToolNameCheck(name);
+
+      // Personal credential bindings follow a plain rename. A rename that also
+      // changes the connection (target, headers, credential slots, ...) drops
+      // them, so users bind again against the new definition. They are copied
+      // before the definition moves, so a binding that cannot be copied fails
+      // the request with the server, its references and every binding unchanged.
+      const keepBindings = !hasConnectionRelevantChange(existingServer, normalizedConfig);
+      if (keepBindings) {
+        await copyCredentialBindings(name, targetName);
+      }
+
+      // Rename the server
+      let renamed: boolean;
+      try {
+        renamed = await serverDao.rename(name, targetName);
+      } catch (error) {
+        if (keepBindings) await deleteCredentialBindings({ serverName: targetName });
+        throw error;
+      }
+      if (!renamed) {
+        if (keepBindings) await deleteCredentialBindings({ serverName: targetName });
+        res.status(404).json({
+          success: false,
+          message: 'Server not found',
+        });
+        return;
+      }
+
+      // Close the runtime still keyed by the OLD name. addOrUpdateServer below
+      // closes by `finalName` (the new name), which finds nothing - the entry is
+      // still registered under the old name until initializeClientsFromSettings
+      // rebuilds serverInfos. Without this explicit close the old stdio child
+      // process tree is orphaned and leaks until the process restarts.
+      closeServer(name);
+
+      // Kept bindings now have their copies under the new name.
+      await deleteCredentialBindings({ serverName: name });
+
+      // Update references in groups
+      const groupDao = getGroupDao();
+      await groupDao.updateServerName(name, targetName);
+
+      // Update references in bearer keys
+      const bearerKeyDao = getBearerKeyDao();
+      await bearerKeyDao.updateServerName(name, targetName);
+
+      // Move tool and prompt toggles to the new prefix. A request without the
+      // map would keep the stored one through the update merge, old keys and
+      // all, so the stored map is moved in that case. Prompt lookups use the
+      // prefixed name only, so prompt keys are always moved.
+      const tools = movePrefixedItemKeys(
+        normalizedConfig.tools ?? existingServer.tools,
+        name,
+        targetName,
+        isBareToolName,
+      );
+      if (tools) {
+        normalizedConfig.tools = tools;
+      }
+      const prompts = movePrefixedItemKeys(
+        normalizedConfig.prompts ?? existingServer.prompts,
+        name,
+        targetName,
+      );
+      if (prompts) {
+        normalizedConfig.prompts = prompts;
+      }
+
+      // Drop embeddings stored under the old name so search_tools does not
+      // advertise phantom tools; addOrUpdateServer below regenerates them
+      // under the new name. A credential server never connects globally, so
+      // its rows come back on the first per-user connect under the new name
+      // (with a moved binding, or after a user binds again), or on a reindex.
+      // A failure here must not abort the rename.
+      try {
+        await removeServerToolEmbeddings(name);
+      } catch (error) {
+        logger.warn('Failed to remove embeddings for renamed server', {
+          serverName: name,
+          error,
+        });
+      }
+    }
+
+    // Fast path: if no connection-relevant field changed, persist and update
+    // in-memory access metadata without tearing down the runtime. This covers
+    // visibility/sharedWithUsers edits, description-only edits, owner changes,
+    // and no-op edits alike - none of them need a reconnect.
+    if (!isRenaming && !hasConnectionRelevantChange(existingServer, normalizedConfig)) {
+      const serverDao = getServerDao();
+      const updatedServer = await serverDao.update(name, normalizedConfig);
+
+      if (!updatedServer) {
+        res.status(404).json({
+          success: false,
+          message: 'Server not found or failed to update',
+        });
+        return;
+      }
+
+      updateServerInfoVisibility(
+        finalName,
+        normalizedConfig.visibility ?? 'private',
+        normalizedConfig.sharedWithUsers,
+      );
+      broadcastToolListChanged();
+
+      res.json({
+        success: true,
+        message: 'Server updated successfully',
+      });
+      return;
+    }
+
+    const result = await addOrUpdateServer(finalName, normalizedConfig, true); // Allow override for updates
+    if (result.success) {
+      // On-demand servers repopulate their tool cache via primeOnDemandServers
+      // inside initializeClientsFromSettings, which is awaited for a targeted
+      // reload. Await it here too: the dashboard refreshes the server list as
+      // soon as the PUT responds, and without this the refresh would race ahead
+      // of the prime and show an empty tool list until the next 30s poll (or a
+      // manual refresh). Non-on-demand servers keep the existing fire-and-forget
+      // behavior since their connect is already async. See #1032.
+      if (normalizedConfig.startOnDemand === true) {
+        await notifyToolChanged(finalName);
+      } else {
+        notifyToolChanged(finalName);
+      }
+      res.json({
+        success: true,
+        message: isRenaming
+          ? `Server renamed and updated successfully`
+          : 'Server updated successfully',
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: result.message || 'Server not found or failed to update',
+      });
+    }
+  } catch (error) {
+    res
+      .status(
+        error instanceof CredentialBindingError ||
+          error instanceof StdioOptionsError ||
+          error instanceof ServerConfigValidationError
+          ? 400
+          : 500,
+      )
+      .json({
+        success: false,
+        message:
+          error instanceof CredentialBindingError ||
+          error instanceof StdioOptionsError ||
+          error instanceof ServerConfigValidationError
+            ? error.message
+            : 'Internal server error',
+      });
+  }
+};
+
+export const getServerConfig = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+
+    const serverDao = getServerDao();
+    const serverRecord = await serverDao.findById(name);
+    if (!serverRecord) {
+      res.status(404).json({
+        success: false,
+        message: 'Server not found',
+      });
+      return;
+    }
+
+    // #1036 Phase 1: config read and server use are separate decisions.
+    // Owner/admin get the full configuration; visibility-admitted shared users
+    // (public / group members) get a safe view without secret-bearing fields;
+    // everyone else is rejected exactly as before.
+    const principal = getRequestUser(req);
+    const canReadFullConfig = authorizationService.can(
+      'server.config.read',
+      serverRecord,
+      principal,
+    );
+    if (!canReadFullConfig && !authorizationService.can('server.invoke', serverRecord, principal)) {
+      res.status(403).json({
+        success: false,
+        message: 'Forbidden',
+      });
+      return;
+    }
+
+    // Get runtime info (status, tools) from getServersInfo
+    const allServers = await getServersInfo();
+    const serverInfo = allServers.find((s) => s.name === name);
+
+    // Extract config without the name field
+    const { name: serverName, ...config } = serverRecord;
+    const presented = presentServerForPrincipal(config, principal);
+
+    // OpenAPI tools can carry circular $ref cycles left by SwaggerParser.dereference
+    // (recursive schemas), which would make res.json throw. Mirror the list endpoint
+    // and sanitize via createSafeJSON. See #959.
+    const response: ApiResponse = {
+      success: true,
+      data: createSafeJSON({
+        name: serverName,
+        status: serverInfo?.status || 'disconnected',
+        tools: serverInfo?.tools || [],
+        config: presented.data,
+      }),
+    };
+
+    res.json(response);
+  } catch (error) {
+    logger.error('Failed to get server configuration:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get server configuration',
+    });
+  }
+};
+
+export const toggleServer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+    const { enabled } = req.body;
+    if (!name) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name is required',
+      });
+      return;
+    }
+
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({
+        success: false,
+        message: 'Enabled status must be a boolean',
+      });
+      return;
+    }
+
+    const existingServer = await loadAuthorizedServer(req, res, name);
+    if (!existingServer) {
+      return;
+    }
+
+    const result = await toggleServerStatus(existingServer.name, enabled);
+    if (result.success) {
+      // On disable, toggleServerStatus synchronously closes the server and
+      // updates serverInfos, so we broadcast the now-removed tools/prompts/
+      // resources here. On enable, the connection completes asynchronously
+      // inside initializeClientsFromSettings, which broadcasts itself once the
+      // tools/prompts/resources are actually loaded — broadcasting here would
+      // race ahead of that and push a stale (empty) list. See #938 / #942.
+      if (!enabled) {
+        broadcastToolListChanged();
+        broadcastPromptListChanged();
+        broadcastResourceListChanged();
+      }
+      res.json({
+        success: true,
+        message: result.message || `Server ${enabled ? 'enabled' : 'disabled'} successfully`,
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        message: result.message || 'Server not found or failed to toggle status',
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const reloadServer = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+    if (!name) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name is required',
+      });
+      return;
+    }
+
+    const existingServer = await loadAuthorizedServer(req, res, name);
+    if (!existingServer) {
+      return;
+    }
+
+    await reconnectServer(existingServer.name);
+
+    res.json({
+      success: true,
+      message: `Server ${name} reloaded successfully`,
+    });
+  } catch (error) {
+    logger.error('Failed to reload server:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reload server',
+    });
+  }
+};
+
+const parseOAuthDisconnectScope = (scope: unknown): UpstreamOAuthDisconnectScope | null => {
+  if (scope === undefined) {
+    return 'tokens';
+  }
+
+  if (scope === 'tokens' || scope === 'all') {
+    return scope;
+  }
+
+  return null;
+};
+
+export const disconnectServerOAuth = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+    if (!name) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name is required',
+      });
+      return;
+    }
+
+    const scope = parseOAuthDisconnectScope(req.body?.scope);
+    if (!scope) {
+      res.status(400).json({
+        success: false,
+        message: 'OAuth disconnect scope must be "tokens" or "all"',
+      });
+      return;
+    }
+
+    const existingServer = await loadAuthorizedServer(req, res, name);
+    if (!existingServer) {
+      return;
+    }
+
+    const result = await disconnectUpstreamOAuth(existingServer.name, { scope });
+    const { success: _success, ...data } = result;
+
+    res.json({
+      success: true,
+      message: `Server ${name} OAuth disconnected successfully`,
+      data,
+    });
+  } catch (error) {
+    logger.error('Failed to disconnect server OAuth:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to disconnect server OAuth',
+    });
+  }
+};
+
+// Reinstall server: clear package cache and reconnect
+export const reinstallServerHandler = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { name } = req.params;
+    if (!name) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name is required',
+      });
+      return;
+    }
+
+    const existingServer = await loadAuthorizedServer(req, res, name);
+    if (!existingServer) {
+      return;
+    }
+
+    await reinstallServer(existingServer.name);
+
+    res.json({
+      success: true,
+      message: `Server ${name} reinstall initiated`,
+    });
+  } catch (error) {
+    logger.error('Failed to reinstall server:', error);
+    const message = error instanceof Error ? error.message : 'Failed to reinstall server';
+    // Validation errors (unsupported command, disabled server) → 400
+    if (message.includes('does not support cache refresh') || message.includes('disabled server')) {
+      res.status(400).json({ success: false, message });
+    } else {
+      res.status(500).json({ success: false, message: 'Failed to reinstall server' });
+    }
+  }
+};
+
+// Clear all runner caches (npm + uv). Admin-only.
+export const clearCache = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const user = (req as any).user;
+    if (!user?.isAdmin) {
+      res.status(403).json({
+        success: false,
+        message: 'Only admins can clear runner caches',
+      });
+      return;
+    }
+
+    const results = await clearAllCaches();
+
+    res.json({
+      success: true,
+      message: 'Cache clear completed',
+      results,
+    });
+  } catch (error) {
+    logger.error('Failed to clear cache:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear cache',
+    });
+  }
+};
+
+// Toggle tool status for a specific server
+export const toggleTool = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Decode URL-encoded parameters to handle slashes in server/tool names
+    const serverName = decodeURIComponent(req.params.serverName);
+    const toolName = decodeURIComponent(req.params.toolName);
+    const { enabled } = req.body;
+
+    if (!serverName || !toolName || ['__proto__', 'constructor', 'prototype'].includes(toolName)) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and tool name are required',
+      });
+      return;
+    }
+
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({
+        success: false,
+        message: 'Enabled status must be a boolean',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    // Initialize tools config if it doesn't exist
+    const tools = server.tools || {};
+
+    // Set the tool's enabled state in its existing entry (keeps description and hidden parameters)
+    const configKey = findToolConfigKey(tools, serverName, toolName, liveToolNames(serverName));
+    tools[configKey] = { ...tools[configKey], enabled };
+
+    // Update via DAO (supports both file and database modes)
+    const result = await serverDao.updateTools(serverName, tools);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // For an already-connected server, notifyToolChanged()'s full re-init pass
+    // takes the "already connected" shortcut and preserves the in-memory
+    // serverInfo verbatim (see registerAllTools) instead of applying the
+    // freshly-persisted tools config — so findToolOnServer's enabled check
+    // would keep seeing the pre-toggle state until the server reconnects for
+    // an unrelated reason. Patch the live config in place so the toggle takes
+    // effect immediately, without waiting for (or forcing) a reconnect.
+    const liveServer = getServerByName(serverName);
+    if (liveServer?.config) {
+      liveServer.config = { ...liveServer.config, tools };
+    }
+
+    // Notify that tools have changed
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Tool ${toolName} ${enabled ? 'enabled' : 'disabled'} successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Update tool description for a specific server
+export const updateToolDescription = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Decode URL-encoded parameters to handle slashes in server/tool names
+    const serverName = decodeURIComponent(req.params.serverName);
+    const toolName = decodeURIComponent(req.params.toolName);
+    const { description } = req.body;
+
+    if (!serverName || !toolName || ['__proto__', 'constructor', 'prototype'].includes(toolName)) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and tool name are required',
+      });
+      return;
+    }
+
+    if (typeof description !== 'string') {
+      res.status(400).json({
+        success: false,
+        message: 'Description must be a string',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    // Initialize tools config if it doesn't exist
+    const tools = server.tools || {};
+
+    // Set the tool's description
+    const configKey = findToolConfigKey(tools, serverName, toolName, liveToolNames(serverName));
+    if (!tools[configKey]) {
+      tools[configKey] = { enabled: true };
+    }
+    tools[configKey].description = description;
+
+    // Update via DAO (supports both file and database modes)
+    const result = await serverDao.updateTools(serverName, tools);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Same stale-config gap as toggleTool: keep the live serverInfo in sync so
+    // a subsequent enable/disable check (or the dashboard's display of this
+    // description) doesn't read pre-update state.
+    const liveServerForDescription = getServerByName(serverName);
+    if (liveServerForDescription?.config) {
+      liveServerForDescription.config = { ...liveServerForDescription.config, tools };
+    }
+
+    // Notify that tools have changed
+    notifyToolChanged();
+
+    syncToolEmbedding(serverName, toolName);
+
+    res.json({
+      success: true,
+      message: `Tool ${toolName} description updated successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Set the top-level input parameters of a tool that models do not see. An
+// empty list removes the setting.
+export const updateToolHiddenParams = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const serverName = decodeURIComponent(req.params.serverName);
+    const toolName = decodeURIComponent(req.params.toolName);
+    const { hiddenParams } = req.body;
+
+    if (!serverName || !toolName || ['__proto__', 'constructor', 'prototype'].includes(toolName)) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and tool name are required',
+      });
+      return;
+    }
+
+    if (
+      !Array.isArray(hiddenParams) ||
+      !hiddenParams.every((name) => typeof name === 'string' && name.length > 0)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'hiddenParams must be an array of parameter names',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    // Checked against the live schema when the tool is known; a disconnected
+    // server's settings are stored as given, and required ones are never hidden.
+    // The dashboard sends the runtime (prefixed) name, a direct caller may send
+    // the bare one.
+    const runtimeName = resolveRuntimeToolName(serverName, toolName, liveToolNames(serverName));
+    const liveTool = getServerByName(serverName)?.tools?.find((tool) => tool.name === runtimeName);
+    if (liveTool) {
+      const schema = liveTool.inputSchema as { properties?: object; required?: unknown };
+      const required = Array.isArray(schema.required) ? schema.required : [];
+      const properties = schema.properties ?? {};
+      const invalid = hiddenParams.find(
+        (name: string) =>
+          required.includes(name) || !Object.prototype.hasOwnProperty.call(properties, name),
+      );
+      if (invalid) {
+        res.status(400).json({
+          success: false,
+          message: required.includes(invalid)
+            ? `Parameter '${invalid}' is required and cannot be hidden`
+            : `Tool ${toolName} has no parameter '${invalid}'`,
+        });
+        return;
+      }
+    }
+
+    // Write into the entry that already exists under either name, so a bare-name
+    // description and a prefixed-name hiddenParams never shadow each other.
+    const tools: DescribableConfig = { ...(server.tools || {}) };
+    const configKey = findToolConfigKey(tools, serverName, toolName, liveToolNames(serverName));
+    const { hiddenParams: _previous, ...toolConfig } = tools[configKey] ?? { enabled: true };
+    const nextConfig = hiddenParams.length
+      ? { ...toolConfig, hiddenParams: [...new Set<string>(hiddenParams)] }
+      : toolConfig;
+    if (nextConfig.enabled !== false && Object.keys(nextConfig).every((key) => key === 'enabled')) {
+      delete tools[configKey];
+    } else {
+      tools[configKey] = nextConfig;
+    }
+
+    const result = await getServerDao().updateTools(serverName, tools);
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    const liveServer = getServerByName(serverName);
+    if (liveServer?.config) {
+      liveServer.config = { ...liveServer.config, tools };
+    }
+
+    notifyToolChanged();
+    syncToolEmbedding(serverName, toolName);
+
+    res.json({
+      success: true,
+      data: { hiddenParams: tools[configKey]?.hiddenParams ?? [] },
+      message: `Tool ${toolName} hidden parameters updated successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Reset tool description override for a specific server back to the upstream default
+export const resetToolDescription = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const serverName = decodeURIComponent(req.params.serverName);
+    const toolName = decodeURIComponent(req.params.toolName);
+
+    if (!serverName || !toolName || ['__proto__', 'constructor', 'prototype'].includes(toolName)) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and tool name are required',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    const tools = clearDescriptionOverride(
+      server.tools || {},
+      findToolConfigKey(server.tools, serverName, toolName, liveToolNames(serverName)),
+    );
+
+    const result = await serverDao.updateTools(serverName, tools);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    notifyToolChanged();
+    syncToolEmbedding(serverName, toolName);
+
+    const defaultDescription =
+      getServerByName(serverName)?.tools.find((tool) => tool.name === toolName)?.description || '';
+
+    res.json({
+      success: true,
+      message: `Tool ${toolName} description reset successfully`,
+      data: {
+        description: defaultDescription,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const updateSystemConfig = async (req: Request, res: Response): Promise<void> => {
+  const user = getRequestUser(req);
+  if (!user?.isAdmin) {
+    res.status(403).json({
+      success: false,
+      message: 'Admin privileges required',
+    });
+    return;
+  }
+
+  try {
+    const {
+      routing,
+      install,
+      smartRouting: requestSmartRouting,
+      toolResultCompression,
+      mcpRouter,
+      nameSeparator,
+      enableSessionRebuild,
+      oauthServer,
+      auth,
+      activityLog,
+      network,
+    } = req.body;
+    const hasNetworkUpdate = network !== undefined;
+    if (hasNetworkUpdate && (!network || !validateAllowedCidrs(network.allowedCidrs))) {
+      res
+        .status(400)
+        .json({
+          success: false,
+          message: 'network.allowedCidrs must be an array of valid IPv4 or IPv6 CIDRs',
+        });
+      return;
+    }
+    const { smartRouting } = migrateLegacySmartRoutingConfig(requestSmartRouting);
+
+    const hasRoutingUpdate =
+      routing &&
+      (typeof routing.enableGlobalRoute === 'boolean' ||
+        typeof routing.enableGroupNameRoute === 'boolean' ||
+        typeof routing.enableBearerAuth === 'boolean' ||
+        typeof routing.bearerAuthKey === 'string' ||
+        typeof routing.bearerAuthHeaderName === 'string' ||
+        typeof routing.jsonBodyLimit === 'string' ||
+        typeof routing.skipAuth === 'boolean');
+
+    const hasInstallUpdate =
+      install &&
+      (typeof install.pythonIndexUrl === 'string' ||
+        typeof install.npmRegistry === 'string' ||
+        typeof install.baseUrl === 'string');
+
+    const hasSmartRoutingUpdate =
+      smartRouting &&
+      (typeof smartRouting.enabled === 'boolean' ||
+        typeof smartRouting.dbUrl === 'string' ||
+        typeof smartRouting.basePacingDelayMs === 'number' ||
+        smartRouting.basePacingDelayMs === null ||
+        typeof smartRouting.embeddingProvider === 'string' ||
+        typeof smartRouting.embeddingEncodingFormat === 'string' ||
+        typeof smartRouting.embeddingDimensions === 'number' ||
+        smartRouting.embeddingDimensions === null ||
+        typeof smartRouting.embeddingDimensionsApiPassthrough === 'boolean' ||
+        typeof smartRouting.llmProviderBaseUrl === 'string' ||
+        typeof smartRouting.llmProviderApiKey === 'string' ||
+        typeof smartRouting.embeddingModel === 'string' ||
+        typeof smartRouting.azureOpenaiEndpoint === 'string' ||
+        typeof smartRouting.azureOpenaiApiKey === 'string' ||
+        typeof smartRouting.azureOpenaiApiVersion === 'string' ||
+        typeof smartRouting.azureOpenaiEmbeddingDeployment === 'string' ||
+        typeof smartRouting.progressiveDisclosure === 'boolean' ||
+        typeof smartRouting.azureOpenaiEmbeddingModel === 'string' ||
+        typeof smartRouting.serverDescriptionMode === 'string' ||
+        typeof smartRouting.embeddingQueryPrefix === 'string' ||
+        typeof smartRouting.embeddingDocumentPrefix === 'string' ||
+        typeof smartRouting.embeddingMaxTokens === 'number' ||
+        smartRouting.embeddingMaxTokens === null ||
+        smartRouting.similarityThreshold !== undefined ||
+        smartRouting.fullSchemaTopN !== undefined ||
+        smartRouting.toolDefinitionFields !== undefined);
+
+    const hasToolResultCompressionUpdate =
+      toolResultCompression &&
+      (typeof toolResultCompression.enabled === 'boolean' ||
+        typeof toolResultCompression.minTokens === 'number' ||
+        typeof toolResultCompression.maxOutputTokens === 'number' ||
+        typeof toolResultCompression.strategy === 'string');
+
+    const hasMcpRouterUpdate =
+      mcpRouter &&
+      (typeof mcpRouter.apiKey === 'string' ||
+        typeof mcpRouter.referer === 'string' ||
+        typeof mcpRouter.title === 'string' ||
+        typeof mcpRouter.baseUrl === 'string');
+
+    const hasNameSeparatorUpdate = typeof nameSeparator === 'string';
+
+    const hasSessionRebuildUpdate = typeof enableSessionRebuild === 'boolean';
+
+    const hasActivityLogUpdate = activityLog && typeof activityLog.storeToolPayload === 'boolean';
+
+    const hasOAuthServerUpdate =
+      oauthServer &&
+      (typeof oauthServer.enabled === 'boolean' ||
+        typeof oauthServer.accessTokenLifetime === 'number' ||
+        typeof oauthServer.refreshTokenLifetime === 'number' ||
+        typeof oauthServer.authorizationCodeLifetime === 'number' ||
+        typeof oauthServer.requireClientSecret === 'boolean' ||
+        typeof oauthServer.requireState === 'boolean' ||
+        Array.isArray(oauthServer.allowedScopes) ||
+        (oauthServer.dynamicRegistration &&
+          (typeof oauthServer.dynamicRegistration.enabled === 'boolean' ||
+            typeof oauthServer.dynamicRegistration.requiresAuthentication === 'boolean' ||
+            typeof oauthServer.dynamicRegistration.clientTtl === 'number' ||
+            Array.isArray(oauthServer.dynamicRegistration.allowedGrantTypes))));
+
+    const hasBetterAuthUpdate =
+      auth?.betterAuth &&
+      (typeof auth.betterAuth.enabled === 'boolean' ||
+        typeof auth.betterAuth.baseUrl === 'string' ||
+        typeof auth.betterAuth.basePath === 'string' ||
+        Array.isArray(auth.betterAuth.trustedOrigins) ||
+        typeof auth.betterAuth.disablePasswordLogin === 'boolean' ||
+        (auth.betterAuth.providers &&
+          (typeof auth.betterAuth.providers.google?.enabled === 'boolean' ||
+            typeof auth.betterAuth.providers.github?.enabled === 'boolean' ||
+            (auth.betterAuth.providers.oidc &&
+              (typeof auth.betterAuth.providers.oidc.enabled === 'boolean' ||
+                typeof auth.betterAuth.providers.oidc.providerId === 'string' ||
+                typeof auth.betterAuth.providers.oidc.discoveryUrl === 'string' ||
+                Array.isArray(auth.betterAuth.providers.oidc.scopes) ||
+                typeof auth.betterAuth.providers.oidc.pkce === 'boolean' ||
+                typeof auth.betterAuth.providers.oidc.prompt === 'string' ||
+                auth.betterAuth.providers.oidc.prompt === null)))));
+
+    if (
+      !hasRoutingUpdate &&
+      !hasInstallUpdate &&
+      !hasSmartRoutingUpdate &&
+      !hasToolResultCompressionUpdate &&
+      !hasMcpRouterUpdate &&
+      !hasNameSeparatorUpdate &&
+      !hasSessionRebuildUpdate &&
+      !hasOAuthServerUpdate &&
+      !hasBetterAuthUpdate &&
+      typeof auth?.allowRegistration !== 'boolean' &&
+      !hasActivityLogUpdate &&
+      !hasNetworkUpdate
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid system configuration provided',
+      });
+      return;
+    }
+
+    // Get system config from DAO (supports both file and database modes)
+    const systemConfigDao = getSystemConfigDao();
+    let systemConfig = await systemConfigDao.get();
+
+    if (!systemConfig) {
+      systemConfig = {
+        routing: {
+          enableGlobalRoute: true,
+          enableGroupNameRoute: true,
+          enableBearerAuth: true,
+          bearerAuthKey: '',
+          bearerAuthHeaderName: 'Authorization',
+          jsonBodyLimit: '1mb',
+          skipAuth: false,
+        },
+        install: {
+          pythonIndexUrl: '',
+          npmRegistry: '',
+          baseUrl: 'http://localhost:3000',
+        },
+        smartRouting: {
+          enabled: false,
+          dbUrl: '',
+          basePacingDelayMs: undefined,
+          embeddingProvider: 'openai',
+          embeddingDimensions: undefined,
+          llmProviderBaseUrl: '',
+          llmProviderApiKey: '',
+          embeddingModel: '',
+          azureOpenaiEndpoint: '',
+          azureOpenaiApiKey: '',
+          azureOpenaiApiVersion: '',
+          azureOpenaiEmbeddingDeployment: '',
+        },
+        toolResultCompression: {
+          enabled: false,
+          minTokens: 2000,
+          maxOutputTokens: 1200,
+          strategy: 'auto',
+        },
+        mcpRouter: {
+          apiKey: '',
+          referer: 'https://www.mcphub.app',
+          title: 'MCPHub',
+          baseUrl: 'https://api.mcprouter.to/v1',
+        },
+        oauthServer: cloneDefaultOAuthServerConfig(),
+        auth: {
+          betterAuth: {},
+        },
+      };
+    }
+
+    if (!systemConfig.routing) {
+      systemConfig.routing = {
+        enableGlobalRoute: true,
+        enableGroupNameRoute: true,
+        enableBearerAuth: true,
+        bearerAuthKey: '',
+        bearerAuthHeaderName: 'Authorization',
+        jsonBodyLimit: '1mb',
+        skipAuth: false,
+      };
+    }
+
+    if (!systemConfig.install) {
+      systemConfig.install = {
+        pythonIndexUrl: '',
+        npmRegistry: '',
+        baseUrl: 'http://localhost:3000',
+      };
+    }
+
+    if (!systemConfig.smartRouting) {
+      systemConfig.smartRouting = {
+        enabled: false,
+        dbUrl: '',
+        basePacingDelayMs: undefined,
+        embeddingProvider: 'openai',
+        embeddingDimensions: undefined,
+        llmProviderBaseUrl: '',
+        llmProviderApiKey: '',
+        embeddingModel: '',
+        azureOpenaiEndpoint: '',
+        azureOpenaiApiKey: '',
+        azureOpenaiApiVersion: '',
+        azureOpenaiEmbeddingDeployment: '',
+      };
+    }
+
+    if (!systemConfig.toolResultCompression) {
+      systemConfig.toolResultCompression = {
+        enabled: false,
+        minTokens: 2000,
+        maxOutputTokens: 1200,
+        strategy: 'auto',
+      };
+    }
+
+    if (!systemConfig.mcpRouter) {
+      systemConfig.mcpRouter = {
+        apiKey: '',
+        referer: 'https://www.mcphub.app',
+        title: 'MCPHub',
+        baseUrl: 'https://api.mcprouter.to/v1',
+      };
+    }
+
+    if (!systemConfig.oauthServer) {
+      systemConfig.oauthServer = cloneDefaultOAuthServerConfig();
+    }
+
+    if (!systemConfig.oauthServer.dynamicRegistration) {
+      const defaultConfig = cloneDefaultOAuthServerConfig();
+      const defaultDynamic = defaultConfig.dynamicRegistration ?? {
+        enabled: false,
+        allowedGrantTypes: [],
+        requiresAuthentication: false,
+      };
+      systemConfig.oauthServer.dynamicRegistration = {
+        enabled: defaultDynamic.enabled ?? false,
+        allowedGrantTypes: [
+          ...(Array.isArray(defaultDynamic.allowedGrantTypes)
+            ? defaultDynamic.allowedGrantTypes
+            : []),
+        ],
+        requiresAuthentication: defaultDynamic.requiresAuthentication ?? false,
+      };
+    }
+
+    if (!systemConfig.auth) {
+      systemConfig.auth = {};
+    }
+
+    if (!systemConfig.auth.betterAuth) {
+      systemConfig.auth.betterAuth = {};
+    }
+
+    if (routing) {
+      if (typeof routing.enableGlobalRoute === 'boolean') {
+        systemConfig.routing.enableGlobalRoute = routing.enableGlobalRoute;
+      }
+
+      if (typeof routing.enableGroupNameRoute === 'boolean') {
+        systemConfig.routing.enableGroupNameRoute = routing.enableGroupNameRoute;
+      }
+
+      if (typeof routing.enableBearerAuth === 'boolean') {
+        systemConfig.routing.enableBearerAuth = routing.enableBearerAuth;
+      }
+
+      if (typeof routing.bearerAuthKey === 'string') {
+        systemConfig.routing.bearerAuthKey = routing.bearerAuthKey;
+      }
+
+      if (typeof routing.bearerAuthHeaderName === 'string') {
+        systemConfig.routing.bearerAuthHeaderName = routing.bearerAuthHeaderName.trim();
+      }
+
+      if (typeof routing.jsonBodyLimit === 'string') {
+        systemConfig.routing.jsonBodyLimit = routing.jsonBodyLimit.trim();
+      }
+
+      if (typeof routing.skipAuth === 'boolean') {
+        systemConfig.routing.skipAuth = routing.skipAuth;
+      }
+    }
+
+    if (install) {
+      if (typeof install.pythonIndexUrl === 'string') {
+        systemConfig.install.pythonIndexUrl = install.pythonIndexUrl;
+      }
+      if (typeof install.npmRegistry === 'string') {
+        systemConfig.install.npmRegistry = install.npmRegistry;
+      }
+      if (typeof install.baseUrl === 'string') {
+        systemConfig.install.baseUrl = install.baseUrl;
+      }
+    }
+
+    // Track smartRouting state and configuration changes
+    const wasSmartRoutingEnabled = systemConfig.smartRouting.enabled || false;
+    const previousSmartRoutingConfig = { ...systemConfig.smartRouting };
+    let needsSync = false;
+
+    if (smartRouting) {
+      if (typeof smartRouting.embeddingProvider === 'string') {
+        const normalized = smartRouting.embeddingProvider.trim().toLowerCase();
+        systemConfig.smartRouting.embeddingProvider =
+          normalized === 'azure' || normalized === 'azure_openai' ? 'azure_openai' : 'openai';
+      }
+
+      if (typeof smartRouting.embeddingEncodingFormat === 'string') {
+        const normalized = smartRouting.embeddingEncodingFormat.trim().toLowerCase();
+        systemConfig.smartRouting.embeddingEncodingFormat =
+          normalized === 'base64' || normalized === 'float' ? normalized : 'auto';
+      }
+
+      if (
+        typeof smartRouting.embeddingDimensions === 'number' &&
+        Number.isSafeInteger(smartRouting.embeddingDimensions) &&
+        smartRouting.embeddingDimensions > 0
+      ) {
+        systemConfig.smartRouting.embeddingDimensions = smartRouting.embeddingDimensions;
+      } else if (smartRouting.embeddingDimensions === null) {
+        systemConfig.smartRouting.embeddingDimensions = undefined;
+      }
+
+      if (typeof smartRouting.embeddingDimensionsApiPassthrough === 'boolean') {
+        systemConfig.smartRouting.embeddingDimensionsApiPassthrough =
+          smartRouting.embeddingDimensionsApiPassthrough;
+      }
+
+      if (typeof smartRouting.enabled === 'boolean') {
+        // If enabling Smart Routing, validate required fields
+        if (smartRouting.enabled) {
+          const currentDbUrl =
+            process.env.DB_URL || smartRouting.dbUrl || systemConfig.smartRouting.dbUrl;
+
+          if (!currentDbUrl) {
+            res.status(400).json({
+              message:
+                'Smart routing cannot be enabled without Database URL. Please provide DB URL.',
+            });
+            return;
+          }
+
+          const effectiveProvider =
+            (typeof smartRouting.embeddingProvider === 'string'
+              ? smartRouting.embeddingProvider
+              : systemConfig.smartRouting.embeddingProvider) || 'openai';
+
+          if (effectiveProvider === 'azure_openai') {
+            const currentAzureEndpoint =
+              smartRouting.azureOpenaiEndpoint || systemConfig.smartRouting.azureOpenaiEndpoint;
+            const currentAzureKey =
+              smartRouting.azureOpenaiApiKey || systemConfig.smartRouting.azureOpenaiApiKey;
+            const currentAzureDeployment =
+              smartRouting.azureOpenaiEmbeddingDeployment ||
+              systemConfig.smartRouting.azureOpenaiEmbeddingDeployment;
+            const currentAzureApiVersion =
+              smartRouting.azureOpenaiApiVersion || systemConfig.smartRouting.azureOpenaiApiVersion;
+
+            if (
+              !currentAzureEndpoint ||
+              !currentAzureKey ||
+              !currentAzureApiVersion ||
+              !currentAzureDeployment
+            ) {
+              res.status(400).json({
+                message:
+                  'Smart routing cannot be enabled without Azure OpenAI configuration. Please provide endpoint, API key, embedding deployment, and API version.',
+              });
+              return;
+            }
+          } else {
+            // Get current LLM provider config values, preferring new values from request
+            const currentLlmProviderApiKey =
+              typeof smartRouting.llmProviderApiKey === 'string'
+                ? smartRouting.llmProviderApiKey.trim()
+                : (systemConfig.smartRouting.llmProviderApiKey || '').trim();
+            const currentLlmProviderBaseUrl =
+              typeof smartRouting.llmProviderBaseUrl === 'string'
+                ? smartRouting.llmProviderBaseUrl.trim()
+                : (systemConfig.smartRouting.llmProviderBaseUrl || '').trim();
+            const currentEmbeddingModel =
+              typeof smartRouting.embeddingModel === 'string'
+                ? smartRouting.embeddingModel.trim()
+                : (systemConfig.smartRouting.embeddingModel || '').trim();
+
+            if (!currentLlmProviderApiKey || !currentLlmProviderBaseUrl || !currentEmbeddingModel) {
+              res.status(400).json({
+                message:
+                  'Smart routing cannot be enabled without LLM provider configuration. Please provide API key, API base URL, and embedding model.',
+              });
+              return;
+            }
+          }
+        }
+        systemConfig.smartRouting.enabled = smartRouting.enabled;
+      }
+      if (typeof smartRouting.dbUrl === 'string') {
+        systemConfig.smartRouting.dbUrl = smartRouting.dbUrl?.trim();
+      }
+      if (
+        typeof smartRouting.basePacingDelayMs === 'number' &&
+        !isNaN(smartRouting.basePacingDelayMs) &&
+        smartRouting.basePacingDelayMs >= 0
+      ) {
+        systemConfig.smartRouting.basePacingDelayMs = Math.floor(smartRouting.basePacingDelayMs);
+      } else if (smartRouting.basePacingDelayMs === null) {
+        systemConfig.smartRouting.basePacingDelayMs = undefined;
+      }
+      if (typeof smartRouting.llmProviderBaseUrl === 'string') {
+        systemConfig.smartRouting.llmProviderBaseUrl = smartRouting.llmProviderBaseUrl?.trim();
+      }
+      if (typeof smartRouting.llmProviderApiKey === 'string') {
+        systemConfig.smartRouting.llmProviderApiKey = smartRouting.llmProviderApiKey?.trim();
+      }
+      if (typeof smartRouting.embeddingModel === 'string') {
+        systemConfig.smartRouting.embeddingModel = smartRouting.embeddingModel?.trim();
+      }
+
+      if (typeof smartRouting.azureOpenaiEndpoint === 'string') {
+        systemConfig.smartRouting.azureOpenaiEndpoint = smartRouting.azureOpenaiEndpoint?.trim();
+      }
+      if (typeof smartRouting.azureOpenaiApiKey === 'string') {
+        systemConfig.smartRouting.azureOpenaiApiKey = smartRouting.azureOpenaiApiKey?.trim();
+      }
+      if (typeof smartRouting.azureOpenaiApiVersion === 'string') {
+        systemConfig.smartRouting.azureOpenaiApiVersion =
+          smartRouting.azureOpenaiApiVersion?.trim();
+      }
+      if (typeof smartRouting.azureOpenaiEmbeddingDeployment === 'string') {
+        systemConfig.smartRouting.azureOpenaiEmbeddingDeployment =
+          smartRouting.azureOpenaiEmbeddingDeployment?.trim();
+      }
+      if (typeof smartRouting.azureOpenaiEmbeddingModel === 'string') {
+        systemConfig.smartRouting.azureOpenaiEmbeddingModel =
+          smartRouting.azureOpenaiEmbeddingModel.trim();
+      }
+
+      if (typeof smartRouting.progressiveDisclosure === 'boolean') {
+        systemConfig.smartRouting.progressiveDisclosure = smartRouting.progressiveDisclosure;
+      }
+
+      if (typeof smartRouting.serverDescriptionMode === 'string') {
+        // Same normalization as getSmartRoutingConfig(), so the API and the env var agree
+        const normalized = smartRouting.serverDescriptionMode.trim().toLowerCase();
+        systemConfig.smartRouting.serverDescriptionMode = normalized === 'full' ? 'full' : 'names';
+      }
+
+      // Stored verbatim, not trimmed: the trailing space is part of a task prefix
+      if (typeof smartRouting.embeddingQueryPrefix === 'string') {
+        systemConfig.smartRouting.embeddingQueryPrefix = smartRouting.embeddingQueryPrefix;
+      }
+      if (typeof smartRouting.embeddingDocumentPrefix === 'string') {
+        systemConfig.smartRouting.embeddingDocumentPrefix = smartRouting.embeddingDocumentPrefix;
+      }
+
+      if (
+        typeof smartRouting.embeddingMaxTokens === 'number' &&
+        !isNaN(smartRouting.embeddingMaxTokens)
+      ) {
+        systemConfig.smartRouting.embeddingMaxTokens = smartRouting.embeddingMaxTokens;
+      } else if (smartRouting.embeddingMaxTokens === null) {
+        // null explicitly clears the override, restoring the per-model default
+        systemConfig.smartRouting.embeddingMaxTokens = undefined;
+      }
+
+      // Search-time settings: null clears them back to the default, and none of
+      // them touches the stored embeddings, so they do not trigger a re-sync.
+      if (smartRouting.similarityThreshold === null) {
+        systemConfig.smartRouting.similarityThreshold = undefined;
+      } else if (smartRouting.similarityThreshold !== undefined) {
+        const threshold = parseSimilarityThreshold(smartRouting.similarityThreshold);
+        if (threshold === undefined) {
+          res.status(400).json({
+            success: false,
+            message: 'smartRouting.similarityThreshold must be a number between 0 and 1',
+          });
+          return;
+        }
+        systemConfig.smartRouting.similarityThreshold = threshold;
+      }
+
+      if (smartRouting.fullSchemaTopN === null) {
+        systemConfig.smartRouting.fullSchemaTopN = undefined;
+      } else if (smartRouting.fullSchemaTopN !== undefined) {
+        const topN = parseFullSchemaTopN(smartRouting.fullSchemaTopN);
+        if (topN === undefined) {
+          res.status(400).json({
+            success: false,
+            message: 'smartRouting.fullSchemaTopN must be a non-negative integer',
+          });
+          return;
+        }
+        systemConfig.smartRouting.fullSchemaTopN = topN;
+      }
+
+      if (smartRouting.toolDefinitionFields === null) {
+        systemConfig.smartRouting.toolDefinitionFields = undefined;
+      } else if (smartRouting.toolDefinitionFields !== undefined) {
+        // An array only: the comma-separated form is for the env var
+        const fields = Array.isArray(smartRouting.toolDefinitionFields)
+          ? parseToolDefinitionFields(smartRouting.toolDefinitionFields)
+          : undefined;
+        if (fields === undefined) {
+          res.status(400).json({
+            success: false,
+            message: `smartRouting.toolDefinitionFields must be an array of: ${TOOL_DEFINITION_FIELDS.join(', ')}`,
+          });
+          return;
+        }
+        systemConfig.smartRouting.toolDefinitionFields = fields;
+      }
+
+      // Check if we need to sync embeddings
+      const isNowEnabled = systemConfig.smartRouting.enabled || false;
+      const hasConfigChanged =
+        previousSmartRoutingConfig.dbUrl !== systemConfig.smartRouting.dbUrl ||
+        previousSmartRoutingConfig.embeddingProvider !==
+          systemConfig.smartRouting.embeddingProvider ||
+        previousSmartRoutingConfig.embeddingEncodingFormat !==
+          systemConfig.smartRouting.embeddingEncodingFormat ||
+        previousSmartRoutingConfig.embeddingDimensions !==
+          systemConfig.smartRouting.embeddingDimensions ||
+        previousSmartRoutingConfig.embeddingDimensionsApiPassthrough !==
+          systemConfig.smartRouting.embeddingDimensionsApiPassthrough ||
+        previousSmartRoutingConfig.llmProviderBaseUrl !==
+          systemConfig.smartRouting.llmProviderBaseUrl ||
+        previousSmartRoutingConfig.llmProviderApiKey !==
+          systemConfig.smartRouting.llmProviderApiKey ||
+        previousSmartRoutingConfig.embeddingModel !== systemConfig.smartRouting.embeddingModel ||
+        previousSmartRoutingConfig.azureOpenaiEndpoint !==
+          systemConfig.smartRouting.azureOpenaiEndpoint ||
+        previousSmartRoutingConfig.azureOpenaiApiKey !==
+          systemConfig.smartRouting.azureOpenaiApiKey ||
+        previousSmartRoutingConfig.azureOpenaiApiVersion !==
+          systemConfig.smartRouting.azureOpenaiApiVersion ||
+        previousSmartRoutingConfig.azureOpenaiEmbeddingDeployment !==
+          systemConfig.smartRouting.azureOpenaiEmbeddingDeployment ||
+        previousSmartRoutingConfig.azureOpenaiEmbeddingModel !==
+          systemConfig.smartRouting.azureOpenaiEmbeddingModel ||
+        (previousSmartRoutingConfig.embeddingDocumentPrefix ?? '') !==
+          (systemConfig.smartRouting.embeddingDocumentPrefix ?? '') ||
+        previousSmartRoutingConfig.embeddingMaxTokens !==
+          systemConfig.smartRouting.embeddingMaxTokens;
+
+      // Sync if: first time enabling OR smart routing is enabled and any config changed
+      needsSync = (!wasSmartRoutingEnabled && isNowEnabled) || (isNowEnabled && hasConfigChanged);
+    }
+
+    if (mcpRouter) {
+      if (typeof mcpRouter.apiKey === 'string') {
+        systemConfig.mcpRouter.apiKey = mcpRouter.apiKey;
+      }
+      if (typeof mcpRouter.referer === 'string') {
+        systemConfig.mcpRouter.referer = mcpRouter.referer;
+      }
+      if (typeof mcpRouter.title === 'string') {
+        systemConfig.mcpRouter.title = mcpRouter.title;
+      }
+      if (typeof mcpRouter.baseUrl === 'string') {
+        systemConfig.mcpRouter.baseUrl = mcpRouter.baseUrl;
+      }
+    }
+
+    if (toolResultCompression) {
+      const target = systemConfig.toolResultCompression;
+      if (typeof toolResultCompression.enabled === 'boolean') {
+        target.enabled = toolResultCompression.enabled;
+      }
+      if (
+        typeof toolResultCompression.minTokens === 'number' &&
+        Number.isFinite(toolResultCompression.minTokens) &&
+        toolResultCompression.minTokens > 0
+      ) {
+        target.minTokens = Math.floor(toolResultCompression.minTokens);
+      }
+      if (
+        typeof toolResultCompression.maxOutputTokens === 'number' &&
+        Number.isFinite(toolResultCompression.maxOutputTokens) &&
+        toolResultCompression.maxOutputTokens > 0
+      ) {
+        target.maxOutputTokens = Math.floor(toolResultCompression.maxOutputTokens);
+      }
+      if (typeof toolResultCompression.strategy === 'string') {
+        const normalized = toolResultCompression.strategy.trim().toLowerCase();
+        target.strategy = ['auto', 'json', 'log', 'search', 'diff', 'text'].includes(normalized)
+          ? (normalized as any)
+          : 'auto';
+      }
+    }
+
+    if (oauthServer) {
+      const target = systemConfig.oauthServer;
+      if (typeof oauthServer.enabled === 'boolean') {
+        target.enabled = oauthServer.enabled;
+      }
+      if (typeof oauthServer.accessTokenLifetime === 'number') {
+        target.accessTokenLifetime = oauthServer.accessTokenLifetime;
+      }
+      if (typeof oauthServer.refreshTokenLifetime === 'number') {
+        target.refreshTokenLifetime = oauthServer.refreshTokenLifetime;
+      }
+      if (typeof oauthServer.authorizationCodeLifetime === 'number') {
+        target.authorizationCodeLifetime = oauthServer.authorizationCodeLifetime;
+      }
+      if (typeof oauthServer.requireClientSecret === 'boolean') {
+        target.requireClientSecret = oauthServer.requireClientSecret;
+      }
+      if (typeof oauthServer.requireState === 'boolean') {
+        target.requireState = oauthServer.requireState;
+      }
+      if (Array.isArray(oauthServer.allowedScopes)) {
+        target.allowedScopes = oauthServer.allowedScopes
+          .filter((scope: any): scope is string => typeof scope === 'string')
+          .map((scope: string) => scope.trim())
+          .filter((scope: string) => scope.length > 0);
+      }
+
+      if (oauthServer.dynamicRegistration) {
+        const dynamicTarget = target.dynamicRegistration || {
+          enabled: false,
+          allowedGrantTypes: ['authorization_code', 'refresh_token'],
+          requiresAuthentication: false,
+        };
+
+        if (typeof oauthServer.dynamicRegistration.enabled === 'boolean') {
+          dynamicTarget.enabled = oauthServer.dynamicRegistration.enabled;
+        }
+
+        if (Array.isArray(oauthServer.dynamicRegistration.allowedGrantTypes)) {
+          dynamicTarget.allowedGrantTypes = oauthServer.dynamicRegistration.allowedGrantTypes
+            .filter((grant: any): grant is string => typeof grant === 'string')
+            .map((grant: string) => grant.trim())
+            .filter((grant: string) => grant.length > 0);
+        }
+
+        if (typeof oauthServer.dynamicRegistration.requiresAuthentication === 'boolean') {
+          dynamicTarget.requiresAuthentication =
+            oauthServer.dynamicRegistration.requiresAuthentication;
+        }
+
+        if (
+          typeof oauthServer.dynamicRegistration.clientTtl === 'number' &&
+          Number.isFinite(oauthServer.dynamicRegistration.clientTtl) &&
+          oauthServer.dynamicRegistration.clientTtl >= 0
+        ) {
+          dynamicTarget.clientTtl = Math.floor(oauthServer.dynamicRegistration.clientTtl);
+        }
+
+        target.dynamicRegistration = dynamicTarget;
+      }
+    }
+
+    if (typeof auth?.allowRegistration === 'boolean') {
+      systemConfig.auth.allowRegistration = auth.allowRegistration;
+    }
+
+    if (auth?.betterAuth) {
+      const target = systemConfig.auth.betterAuth;
+      const providersTarget = target.providers || {};
+
+      if (typeof auth.betterAuth.enabled === 'boolean') {
+        target.enabled = auth.betterAuth.enabled;
+      }
+
+      if (typeof auth.betterAuth.baseUrl === 'string') {
+        target.baseUrl = auth.betterAuth.baseUrl.trim();
+      }
+
+      if (typeof auth.betterAuth.basePath === 'string') {
+        target.basePath = auth.betterAuth.basePath.trim();
+      }
+
+      if (typeof auth.betterAuth.disablePasswordLogin === 'boolean') {
+        target.disablePasswordLogin = auth.betterAuth.disablePasswordLogin;
+      }
+
+      if (Array.isArray(auth.betterAuth.trustedOrigins)) {
+        target.trustedOrigins = auth.betterAuth.trustedOrigins
+          .filter((origin: any): origin is string => typeof origin === 'string')
+          .map((origin: string) => origin.trim())
+          .filter((origin: string) => origin.length > 0);
+      }
+
+      if (auth.betterAuth.providers) {
+        if (typeof auth.betterAuth.providers.google?.enabled === 'boolean') {
+          providersTarget.google = {
+            ...(providersTarget.google || {}),
+            enabled: auth.betterAuth.providers.google.enabled,
+          };
+        }
+
+        if (typeof auth.betterAuth.providers.github?.enabled === 'boolean') {
+          providersTarget.github = {
+            ...(providersTarget.github || {}),
+            enabled: auth.betterAuth.providers.github.enabled,
+          };
+        }
+
+        if (auth.betterAuth.providers.oidc) {
+          const oidcTarget = {
+            ...(providersTarget.oidc || {}),
+          };
+
+          if (typeof auth.betterAuth.providers.oidc.enabled === 'boolean') {
+            oidcTarget.enabled = auth.betterAuth.providers.oidc.enabled;
+          }
+
+          if (typeof auth.betterAuth.providers.oidc.providerId === 'string') {
+            oidcTarget.providerId = auth.betterAuth.providers.oidc.providerId.trim();
+          }
+
+          if (typeof auth.betterAuth.providers.oidc.discoveryUrl === 'string') {
+            oidcTarget.discoveryUrl = auth.betterAuth.providers.oidc.discoveryUrl.trim();
+          }
+
+          if (Array.isArray(auth.betterAuth.providers.oidc.scopes)) {
+            oidcTarget.scopes = auth.betterAuth.providers.oidc.scopes
+              .filter((scope: any): scope is string => typeof scope === 'string')
+              .map((scope: string) => scope.trim())
+              .filter((scope: string) => scope.length > 0);
+          }
+
+          if (typeof auth.betterAuth.providers.oidc.pkce === 'boolean') {
+            oidcTarget.pkce = auth.betterAuth.providers.oidc.pkce;
+          }
+
+          if (typeof auth.betterAuth.providers.oidc.prompt === 'string') {
+            const promptValue = auth.betterAuth.providers.oidc.prompt.trim();
+            oidcTarget.prompt = promptValue || undefined;
+          } else if (auth.betterAuth.providers.oidc.prompt === null) {
+            oidcTarget.prompt = undefined;
+          }
+
+          providersTarget.oidc = oidcTarget;
+        }
+
+        target.providers = providersTarget;
+      }
+    }
+
+    if (typeof nameSeparator === 'string') {
+      systemConfig.nameSeparator = nameSeparator;
+    }
+
+    if (typeof enableSessionRebuild === 'boolean') {
+      systemConfig.enableSessionRebuild = enableSessionRebuild;
+    }
+
+    if (activityLog && typeof activityLog.storeToolPayload === 'boolean') {
+      systemConfig.activityLog = {
+        ...systemConfig.activityLog,
+        storeToolPayload: activityLog.storeToolPayload,
+      };
+    }
+
+    if (hasNetworkUpdate) {
+      systemConfig.network = { allowedCidrs: [...new Set<string>(network.allowedCidrs)] };
+    }
+
+    // Save using DAO (supports both file and database modes)
+    try {
+      await systemConfigDao.update(systemConfig);
+      setCachedSystemConfig(systemConfig);
+      res.json({
+        success: true,
+        data: systemConfig,
+        message: 'System configuration updated successfully',
+      });
+
+      // If smart routing configuration changed, sync all existing server tools
+      if (needsSync) {
+        logger.log('SmartRouting configuration changed - syncing all existing server tools...');
+        // Run sync asynchronously to avoid blocking the response
+        syncAllServerToolsEmbeddings().catch((error) => {
+          logger.error('Failed to sync server tools embeddings:', error);
+        });
+      }
+    } catch (saveError) {
+      logger.error('Failed to save system configuration:', saveError);
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save system configuration',
+      });
+    }
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Toggle prompt status for a specific server
+export const togglePrompt = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Decode URL-encoded parameters to handle slashes in server/prompt names
+    const serverName = decodeURIComponent(req.params.serverName);
+    const promptName = decodeURIComponent(req.params.promptName);
+    const { enabled } = req.body;
+
+    if (
+      !serverName ||
+      !promptName ||
+      ['__proto__', 'constructor', 'prototype'].includes(promptName)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and prompt name are required',
+      });
+      return;
+    }
+
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({
+        success: false,
+        message: 'Enabled status must be a boolean',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    // Initialize prompts config if it doesn't exist
+    const prompts = server.prompts || {};
+
+    // Set the prompt's enabled state (preserve existing description if any)
+    prompts[promptName] = { ...prompts[promptName], enabled };
+
+    // Update via DAO (supports both file and database modes)
+    const result = await serverDao.updatePrompts(serverName, prompts);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Notify that tools have changed (as prompts are part of the tool listing)
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Prompt ${promptName} ${enabled ? 'enabled' : 'disabled'} successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Update prompt description for a specific server
+export const updatePromptDescription = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Decode URL-encoded parameters to handle slashes in server/prompt names
+    const serverName = decodeURIComponent(req.params.serverName);
+    const promptName = decodeURIComponent(req.params.promptName);
+    const { description } = req.body;
+
+    if (
+      !serverName ||
+      !promptName ||
+      ['__proto__', 'constructor', 'prototype'].includes(promptName)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and prompt name are required',
+      });
+      return;
+    }
+
+    if (typeof description !== 'string') {
+      res.status(400).json({
+        success: false,
+        message: 'Description must be a string',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    // Initialize prompts config if it doesn't exist
+    const prompts = server.prompts || {};
+
+    // Set the prompt's description
+    if (!prompts[promptName]) {
+      prompts[promptName] = { enabled: true };
+    }
+    prompts[promptName].description = description;
+
+    // Update via DAO (supports both file and database modes)
+    const result = await serverDao.updatePrompts(serverName, prompts);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Notify that tools have changed (as prompts are part of the tool listing)
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Prompt ${promptName} description updated successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const resetPromptDescription = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const serverName = decodeURIComponent(req.params.serverName);
+    const promptName = decodeURIComponent(req.params.promptName);
+
+    if (
+      !serverName ||
+      !promptName ||
+      ['__proto__', 'constructor', 'prototype'].includes(promptName)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and prompt name are required',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    const prompts = clearDescriptionOverride(server.prompts || {}, promptName);
+    const result = await serverDao.updatePrompts(serverName, prompts);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    notifyToolChanged();
+
+    const defaultDescription =
+      getServerByName(serverName)?.prompts.find((prompt) => prompt.name === promptName)
+        ?.description || '';
+
+    res.json({
+      success: true,
+      message: `Prompt ${promptName} description reset successfully`,
+      data: {
+        description: defaultDescription,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Toggle resource status for a specific server
+export const toggleResource = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Decode URL-encoded parameters to handle slashes in server/resource names
+    const serverName = decodeURIComponent(req.params.serverName);
+    const resourceUri = decodeURIComponent(req.params.resourceUri);
+    const { enabled } = req.body;
+
+    if (
+      !serverName ||
+      !resourceUri ||
+      ['__proto__', 'constructor', 'prototype'].includes(resourceUri)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and resource URI are required',
+      });
+      return;
+    }
+
+    if (typeof enabled !== 'boolean') {
+      res.status(400).json({
+        success: false,
+        message: 'Enabled status must be a boolean',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    // Initialize resources config if it doesn't exist
+    const resources = server.resources || {};
+
+    // Set the resource's enabled state (preserve existing description if any)
+    resources[resourceUri] = { ...resources[resourceUri], enabled };
+
+    // Update via DAO (supports both file and database modes)
+    const result = await serverDao.updateResources(serverName, resources);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Notify that tools/resources metadata has changed
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Resource ${resourceUri} ${enabled ? 'enabled' : 'disabled'} successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// Update resource description for a specific server
+export const updateResourceDescription = async (req: Request, res: Response): Promise<void> => {
+  try {
+    // Decode URL-encoded parameters to handle slashes in server/resource names
+    const serverName = decodeURIComponent(req.params.serverName);
+    const resourceUri = decodeURIComponent(req.params.resourceUri);
+    const { description } = req.body;
+
+    if (
+      !serverName ||
+      !resourceUri ||
+      ['__proto__', 'constructor', 'prototype'].includes(resourceUri)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and resource URI are required',
+      });
+      return;
+    }
+
+    if (typeof description !== 'string') {
+      res.status(400).json({
+        success: false,
+        message: 'Description must be a string',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    // Initialize resources config if it doesn't exist
+    const resources = server.resources || {};
+
+    // Set the resource's description
+    if (!resources[resourceUri]) {
+      resources[resourceUri] = { enabled: true };
+    }
+    resources[resourceUri].description = description;
+
+    // Update via DAO (supports both file and database modes)
+    const result = await serverDao.updateResources(serverName, resources);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    // Notify that tools/resources metadata has changed
+    notifyToolChanged();
+
+    res.json({
+      success: true,
+      message: `Resource ${resourceUri} description updated successfully`,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const resetResourceDescription = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const serverName = decodeURIComponent(req.params.serverName);
+    const resourceUri = decodeURIComponent(req.params.resourceUri);
+
+    if (
+      !serverName ||
+      !resourceUri ||
+      ['__proto__', 'constructor', 'prototype'].includes(resourceUri)
+    ) {
+      res.status(400).json({
+        success: false,
+        message: 'Server name and resource URI are required',
+      });
+      return;
+    }
+
+    const server = await loadAuthorizedServer(req, res, serverName);
+    if (!server) {
+      return;
+    }
+
+    const serverDao = getServerDao();
+
+    const resources = clearDescriptionOverride(server.resources || {}, resourceUri);
+    const result = await serverDao.updateResources(serverName, resources);
+
+    if (!result) {
+      res.status(500).json({
+        success: false,
+        message: 'Failed to save settings',
+      });
+      return;
+    }
+
+    notifyToolChanged();
+
+    const defaultDescription =
+      getServerByName(serverName)?.resources.find((resource) => resource.uri === resourceUri)
+        ?.description || '';
+
+    res.json({
+      success: true,
+      message: `Resource ${resourceUri} description reset successfully`,
+      data: {
+        description: defaultDescription,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
