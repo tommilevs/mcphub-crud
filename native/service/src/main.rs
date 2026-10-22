@@ -142,7 +142,8 @@ fn run_named_pipe(
         Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES},
         Storage::FileSystem::PIPE_ACCESS_DUPLEX,
         System::Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
+            ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
+            PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
         },
     };
     let name: Vec<u16> = "\\\\.\\pipe\\mcphub-runtime"
@@ -183,7 +184,7 @@ fn run_named_pipe(
                 name.as_ptr(),
                 PIPE_ACCESS_DUPLEX,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-                1,
+                PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
                 64 * 1024,
                 0,
