@@ -13,6 +13,9 @@ use std::{
 };
 use thiserror::Error;
 
+#[cfg(windows)]
+pub mod dpapi;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagedProcessSpec {
     pub id: String,

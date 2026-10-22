@@ -21,3 +21,9 @@ to start automatically with Windows. The service receives resolved command
 specifications from MCPHub; it never reads dashboard credentials from source
 files and never stores secrets in this crate.
 
+`runtime-core::dpapi` provides the Windows machine-scoped DPAPI
+protect/unprotect primitive for the credential broker. Native mode currently
+refuses credential-templated and personal-auth stdio configurations, so
+plaintext credentials remain in the existing Node-owned transport until that
+broker is wired end to end.
+
