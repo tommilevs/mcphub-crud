@@ -11,6 +11,16 @@ if ($Action -eq 'uninstall') {
 }
 
 if (-not (Test-Path -LiteralPath $ServiceBinary)) { throw "Service binary not found: $ServiceBinary" }
+
+# Make upgrades safe: replace an older registration without leaving a stale
+# binary path behind. The service is recreated with the same stable name.
+$existing = Get-Service -Name $serviceName -ErrorAction SilentlyContinue
+if ($existing) {
+  sc.exe stop $serviceName | Out-Null
+  Start-Sleep -Milliseconds 500
+  sc.exe delete $serviceName | Out-Null
+  Start-Sleep -Milliseconds 500
+}
 sc.exe create $serviceName binPath= ('"' + $ServiceBinary + '"') start= auto DisplayName= 'MCPHub Runtime Service' | Out-Null
 sc.exe failure $serviceName reset= 86400 actions= restart/5000/restart/15000/restart/60000 | Out-Null
 sc.exe description $serviceName 'MCPHub managed stdio MCP runtime and watchdog' | Out-Null
