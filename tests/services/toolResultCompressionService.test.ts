@@ -12,6 +12,19 @@ describe('toolResultCompressionService', () => {
     setCachedSystemConfig(null);
   });
 
+  it('applies an explicit per-tool policy while keeping global compression off by default', async () => {
+    setCachedSystemConfig({
+      toolResultCompression: {
+        enabled: false,
+        policies: { 'demo/log': { enabled: true, minTokens: 1, maxOutputTokens: 20, strategy: 'text' } },
+      },
+    });
+    const result = { content: [{ type: 'text', text: largeLines('policy', 120) }] };
+    const compressed = await maybeCompressToolResult(result, { serverName: 'demo', toolName: 'log' });
+    expect(compressed).not.toBe(result);
+    expect((compressed.content[0] as { text: string }).text).toContain('mcphub:compressed-tool-result');
+  });
+
   it('returns the original result when compression is disabled', async () => {
     setCachedSystemConfig({
       toolResultCompression: {

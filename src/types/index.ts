@@ -250,6 +250,8 @@ export interface ToolResultCompressionConfig {
   minTokens?: number;
   maxOutputTokens?: number;
   strategy?: ToolResultCompressionStrategy;
+  /** Optional explicit per-tool overrides keyed by `server/tool` or tool name. */
+  policies?: Record<string, Partial<Omit<ToolResultCompressionConfig, 'policies'>>>;
 }
 
 export interface SystemConfig {

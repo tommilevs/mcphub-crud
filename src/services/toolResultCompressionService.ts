@@ -15,6 +15,7 @@ const DEFAULT_CONFIG: Required<ToolResultCompressionConfig> = {
   minTokens: 2000,
   maxOutputTokens: 1200,
   strategy: 'auto',
+  policies: {},
 };
 
 const VALID_STRATEGIES = new Set<ToolResultCompressionStrategy>([
@@ -75,6 +76,7 @@ export const normalizeToolResultCompressionConfig = (
       DEFAULT_CONFIG.maxOutputTokens,
     ),
     strategy: strategy && VALID_STRATEGIES.has(strategy) ? strategy : DEFAULT_CONFIG.strategy,
+    policies: config?.policies && typeof config.policies === 'object' ? config.policies : {},
   };
 };
 
@@ -470,7 +472,12 @@ export const maybeCompressToolResult = async <T extends ToolResultLike>(
 ): Promise<T> => {
   try {
     const config = await getRuntimeConfig();
-    if (!config.enabled || result?.isError === true || !Array.isArray(result?.content)) {
+    const policyKey = _context.serverName && _context.toolName
+      ? `${_context.serverName}/${_context.toolName}`
+      : _context.toolName;
+    const policy = policyKey ? config.policies[policyKey] ?? config.policies[_context.toolName || ''] : undefined;
+    const effective = normalizeToolResultCompressionConfig({ ...config, ...policy, policies: {} });
+    if (!effective.enabled || result?.isError === true || !Array.isArray(result?.content)) {
       return result;
     }
 
@@ -478,7 +485,7 @@ export const maybeCompressToolResult = async <T extends ToolResultLike>(
     const content = await Promise.all(
       result.content.map(async (block) => {
         if (block?.type !== 'text' || typeof block.text !== 'string') return block;
-        const text = await compressTextBlock(block.text, config);
+        const text = await compressTextBlock(block.text, effective);
         if (text === block.text) return block;
         changed = true;
         return { ...block, text };

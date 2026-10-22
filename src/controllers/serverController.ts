@@ -16,6 +16,7 @@ import {
   BatchServerResult,
   ServerConfig,
   ServerInfo,
+  ToolResultCompressionConfig,
 } from '../types/index.js';
 import {
   getServersInfo,
@@ -2041,7 +2042,8 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
       (typeof toolResultCompression.enabled === 'boolean' ||
         typeof toolResultCompression.minTokens === 'number' ||
         typeof toolResultCompression.maxOutputTokens === 'number' ||
-        typeof toolResultCompression.strategy === 'string');
+        typeof toolResultCompression.strategy === 'string' ||
+        (toolResultCompression.policies && typeof toolResultCompression.policies === 'object'));
 
     const hasMcpRouterUpdate =
       mcpRouter &&
@@ -2583,6 +2585,20 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         target.strategy = ['auto', 'json', 'log', 'search', 'diff', 'text'].includes(normalized)
           ? (normalized as any)
           : 'auto';
+      }
+      if (toolResultCompression.policies && typeof toolResultCompression.policies === 'object') {
+        const policies: NonNullable<typeof target.policies> = {};
+        for (const [key, policy] of Object.entries(toolResultCompression.policies)) {
+          if (!policy || typeof policy !== 'object' || !key.trim()) continue;
+          const candidate = policy as Partial<Omit<ToolResultCompressionConfig, 'policies'>>;
+          const entry: NonNullable<typeof target.policies>[string] = {};
+          if (typeof candidate.enabled === 'boolean') entry.enabled = candidate.enabled;
+          if (typeof candidate.minTokens === 'number' && Number.isFinite(candidate.minTokens) && candidate.minTokens > 0) entry.minTokens = Math.floor(candidate.minTokens);
+          if (typeof candidate.maxOutputTokens === 'number' && Number.isFinite(candidate.maxOutputTokens) && candidate.maxOutputTokens > 0) entry.maxOutputTokens = Math.floor(candidate.maxOutputTokens);
+          if (typeof candidate.strategy === 'string' && ['auto', 'json', 'log', 'search', 'diff', 'text'].includes(candidate.strategy)) entry.strategy = candidate.strategy as any;
+          if (Object.keys(entry).length > 0) policies[key.trim()] = entry;
+        }
+        target.policies = policies;
       }
     }
 
