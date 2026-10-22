@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     time::{Duration, Instant},
 };
@@ -75,6 +75,18 @@ pub struct RuntimeSupervisor {
     processes: HashMap<String, ManagedProcess>,
 }
 
+fn drain_stderr(stderr: Option<std::process::ChildStderr>) {
+    let Some(mut stderr) = stderr else {
+        return;
+    };
+    let _ = std::thread::Builder::new()
+        .name("mcphub-runtime-stderr".to_string())
+        .spawn(move || {
+            let mut buffer = [0u8; 4096];
+            while stderr.read(&mut buffer).ok().filter(|size| *size > 0).is_some() {}
+        });
+}
+
 impl RuntimeSupervisor {
     pub fn new() -> Self {
         Self {
@@ -106,6 +118,7 @@ impl RuntimeSupervisor {
             id: id.clone(),
             source: std::io::Error::other("stdio stdout unavailable"),
         })?;
+        drain_stderr(child.stderr.take());
         #[cfg(windows)]
         let job = windows::assign_to_job(child.id())?;
         let status = ProcessStatus {
@@ -168,6 +181,7 @@ impl RuntimeSupervisor {
                     let Some(stdout) = child.stdout.take() else {
                         continue;
                     };
+                    drain_stderr(child.stderr.take());
                     process.child = child;
                     process.stdin = stdin;
                     process.stdout = BufReader::new(stdout);
