@@ -15,6 +15,8 @@ use thiserror::Error;
 
 #[cfg(windows)]
 pub mod dpapi;
+#[cfg(windows)]
+pub mod secret_store;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagedProcessSpec {

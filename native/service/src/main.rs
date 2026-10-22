@@ -1,6 +1,8 @@
 //! MCPHub service host. The Windows SCM wrapper and named-pipe IPC are kept at
 //! this boundary so the supervisor core remains testable on every platform.
 
+#[cfg(windows)]
+use mcphub_runtime_core::secret_store::SecretStore;
 use mcphub_runtime_core::{ManagedProcessSpec, RuntimeSupervisor};
 use std::io::{self, BufRead, BufReader};
 #[cfg(not(windows))]
@@ -36,6 +38,50 @@ fn handle_request(
 }
 
 #[cfg(windows)]
+fn handle_request_with_secrets(
+    supervisor: &mut RuntimeSupervisor,
+    secrets: &SecretStore,
+    line: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let mut request: serde_json::Value = serde_json::from_str(line)?;
+    match request.get("op").and_then(|value| value.as_str()) {
+        Some("secret_put") => {
+            let id = request["id"].as_str().unwrap_or_default();
+            let value = request["value"].as_str().unwrap_or_default();
+            secrets.put(id, value.as_bytes())?;
+            return Ok(serde_json::json!({"ok": true, "id": id}).to_string());
+        }
+        Some("secret_delete") => {
+            secrets.delete(request["id"].as_str().unwrap_or_default())?;
+            return Ok(serde_json::json!({"ok": true}).to_string());
+        }
+        Some("start") => {
+            if let Some(secret_env) = request
+                .get("secret_env")
+                .and_then(|value| value.as_object())
+                .cloned()
+            {
+                let env = request["spec"]
+                    .get_mut("env")
+                    .and_then(|value| value.as_object_mut());
+                let Some(env) = env else {
+                    return Err("start spec env must be an object".into());
+                };
+                for (key, secret_id) in secret_env {
+                    let secret_id = secret_id
+                        .as_str()
+                        .ok_or("secret_env values must be strings")?;
+                    let value = String::from_utf8(secrets.get(secret_id)?)?;
+                    env.insert(key.clone(), serde_json::Value::String(value));
+                }
+            }
+        }
+        _ => {}
+    }
+    handle_request(supervisor, &serde_json::to_string(&request)?)
+}
+
+#[cfg(windows)]
 fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std::error::Error>> {
     use std::os::windows::io::FromRawHandle;
     use windows_sys::Win32::{
@@ -51,6 +97,7 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
+    let secrets = SecretStore::machine_default()?;
     loop {
         let pipe = unsafe {
             CreateNamedPipeW(
@@ -80,7 +127,7 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
         let mut reader = BufReader::new(unsafe { std::fs::File::from_raw_handle(pipe as *mut _) });
         let mut line = String::new();
         while reader.read_line(&mut line)? > 0 {
-            let response = handle_request(supervisor, line.trim())?;
+            let response = handle_request_with_secrets(supervisor, &secrets, line.trim())?;
             let bytes = format!("{response}\n");
             let mut written = 0;
             unsafe {
