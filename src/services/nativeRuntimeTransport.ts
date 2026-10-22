@@ -10,7 +10,7 @@ type ManagedProcessSpec = {
   restart_delay_ms?: number;
 };
 
-type ControlResponse = { response?: string; error?: string } & Record<string, unknown>;
+type ControlResponse = { responses?: string[]; error?: string } & Record<string, unknown>;
 
 /**
  * Optional Windows transport backed by the MCPHub service named pipe.
@@ -58,12 +58,12 @@ export class NativeRuntimeTransport implements Transport {
       id: this.spec.id,
       message: JSON.stringify(message),
     });
-    const response = (result as ControlResponse).response;
-    if (!response) return;
-    try {
-      this.onmessage?.(JSON.parse(response) as JSONRPCMessage);
-    } catch (error) {
-      this.onerror?.(error instanceof Error ? error : new Error(String(error)));
+    for (const response of (result as ControlResponse).responses ?? []) {
+      try {
+        this.onmessage?.(JSON.parse(response) as JSONRPCMessage);
+      } catch (error) {
+        this.onerror?.(error instanceof Error ? error : new Error(String(error)));
+      }
     }
   }
 

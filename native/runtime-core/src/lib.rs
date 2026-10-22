@@ -189,10 +189,12 @@ impl RuntimeSupervisor {
         self.poll()
     }
 
-    /// Send one newline-delimited MCP JSON-RPC frame and wait for one response.
+    /// Send one newline-delimited MCP JSON-RPC frame and collect frames until
+    /// the response with the same request id arrives. Notifications emitted by
+    /// the upstream before that response are preserved in order.
     /// The service layer uses this only for managed stdio sessions; ordinary
     /// MCPHub transports remain unchanged until native mode is explicitly enabled.
-    pub fn send_stdio(&mut self, id: &str, message: &str) -> Result<String, SupervisorError> {
+    pub fn send_stdio(&mut self, id: &str, message: &str) -> Result<Vec<String>, SupervisorError> {
         let process = self
             .processes
             .get_mut(id)
@@ -213,17 +215,35 @@ impl RuntimeSupervisor {
             .and_then(|value| value.get("id").cloned())
             .is_none()
         {
-            return Ok(String::new());
+            return Ok(Vec::new());
         }
-        let mut response = String::new();
-        process
-            .stdout
-            .read_line(&mut response)
-            .map_err(|source| SupervisorError::Spawn {
-                id: id.to_owned(),
-                source,
+        let expected_id = serde_json::from_str::<serde_json::Value>(message)
+            .ok()
+            .and_then(|value| value.get("id").cloned());
+        let mut frames = Vec::new();
+        loop {
+            let mut response = String::new();
+            let bytes = process.stdout.read_line(&mut response).map_err(|source| {
+                SupervisorError::Spawn {
+                    id: id.to_owned(),
+                    source,
+                }
             })?;
-        Ok(response.trim_end().to_owned())
+            if bytes == 0 {
+                break;
+            }
+            let trimmed = response.trim_end().to_owned();
+            let is_expected_response = serde_json::from_str::<serde_json::Value>(&trimmed)
+                .ok()
+                .and_then(|value| value.get("id").cloned())
+                .zip(expected_id.clone())
+                .is_some_and(|(actual, expected)| actual == expected);
+            frames.push(trimmed);
+            if is_expected_response {
+                break;
+            }
+        }
+        Ok(frames)
     }
 }
 

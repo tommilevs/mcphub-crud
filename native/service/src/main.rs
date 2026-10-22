@@ -27,7 +27,7 @@ fn handle_request(
         }
         Some("status") => serde_json::to_value(supervisor.statuses())?,
         Some("stdio") => {
-            serde_json::json!({"response": supervisor.send_stdio(request["id"].as_str().unwrap_or_default(), request["message"].as_str().unwrap_or_default())?})
+            serde_json::json!({"responses": supervisor.send_stdio(request["id"].as_str().unwrap_or_default(), request["message"].as_str().unwrap_or_default())?})
         }
         Some("shutdown") => serde_json::json!({"shutdown": true}),
         _ => serde_json::json!({"error": "unknown operation"}),
