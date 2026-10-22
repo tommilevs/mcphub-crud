@@ -12,7 +12,15 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["../target/release/mcphub-runtime-service.exe"],
-    "windows": { "nsis": { "installMode": "perMachine", "displayLanguageSelector": true } }
+    "resources": {
+      "../target/release/mcphub-runtime-service.exe": "mcphub-runtime-service.exe"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "displayLanguageSelector": true,
+        "installerHooks": "windows/hooks.nsh"
+      }
+    }
   }
 }
