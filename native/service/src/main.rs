@@ -88,6 +88,7 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
         Foundation::{
             CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
         },
+        Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES},
         Storage::FileSystem::{WriteFile, PIPE_ACCESS_DUPLEX},
         System::Pipes::{
             ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
@@ -97,6 +98,33 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
+    // The service runs as LocalSystem, while the Node gateway/tray normally
+    // runs in the signed-in user's session. Keep the pipe local and grant
+    // access only to SYSTEM, local Administrators, and the interactive user
+    // token. Secret values are still accepted only through the authenticated
+    // admin HTTP endpoints; the pipe never exposes secret_get.
+    let sddl: Vec<u16> = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut security_descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
+    let mut _descriptor_size = 0u32;
+    let converted = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.as_ptr(),
+            1,
+            &mut security_descriptor,
+            &mut _descriptor_size,
+        )
+    };
+    if converted == 0 || security_descriptor.is_null() {
+        return Err(Box::new(io::Error::last_os_error()));
+    }
+    let security_attributes = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: security_descriptor,
+        bInheritHandle: 0,
+    };
     let secrets = SecretStore::machine_default()?;
     loop {
         let pipe = unsafe {
@@ -108,7 +136,7 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
                 64 * 1024,
                 64 * 1024,
                 0,
-                std::ptr::null(),
+                &security_attributes,
             )
         };
         if pipe == INVALID_HANDLE_VALUE {
@@ -142,6 +170,7 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
             line.clear();
         }
     }
+
 }
 
 #[cfg(windows)]
