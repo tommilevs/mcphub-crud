@@ -111,6 +111,25 @@ describe('toolResultController', () => {
     expect(res.status).toHaveBeenCalledWith(400);
   });
 
+  it('returns valid RAW byte ranges as partial content', async () => {
+    repository.findById.mockResolvedValue({
+      resultId: 'result-id',
+      raw: 'hello',
+      payloadAvailable: true,
+    });
+    const res = makeRes();
+
+    await getToolResultRange(
+      makeReq({ params: { id: 'result-id' }, query: { start: '1', end: '4' } }),
+      res,
+    );
+
+    expect(res.status).toHaveBeenCalledWith(206);
+    expect(res.setHeader).toHaveBeenCalledWith('Accept-Ranges', 'bytes');
+    expect(res.setHeader).toHaveBeenCalledWith('Content-Range', 'bytes 1-3/5');
+    expect(res.send).toHaveBeenCalledWith(Buffer.from('ell'));
+  });
+
   it('searches existing results without executing tools', async () => {
     repository.search.mockResolvedValue([]);
     const res = makeRes();

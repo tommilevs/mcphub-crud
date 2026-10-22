@@ -143,6 +143,8 @@ export const getToolResultRange = async (req: Request, res: Response): Promise<v
     return;
   }
   await repository.incrementUseCount(record.resultId);
+  res.status(206);
+  res.setHeader('Accept-Ranges', 'bytes');
   res.setHeader('Content-Type', 'application/octet-stream');
   res.setHeader('Content-Range', `bytes ${start}-${end - 1}/${bytes.length}`);
   res.send(bytes.subarray(start, end));
