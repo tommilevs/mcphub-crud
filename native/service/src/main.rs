@@ -255,6 +255,18 @@ fn service_main(_arguments: Vec<OsString>) {
         return;
     }
     let supervisor = std::sync::Arc::new(std::sync::Mutex::new(RuntimeSupervisor::new()));
+    // Keep restart policy active even when no dashboard/API client is polling
+    // status. The named-pipe handlers share the same supervisor lock.
+    let poll_supervisor = std::sync::Arc::clone(&supervisor);
+    std::thread::Builder::new()
+        .name("mcphub-runtime-watchdog".to_string())
+        .spawn(move || loop {
+            if let Ok(mut guard) = poll_supervisor.lock() {
+                let _ = guard.poll();
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        })
+        .ok();
     if let Err(error) = run_named_pipe(supervisor) {
         eprintln!("MCPHub runtime service stopped: {error}");
     }
