@@ -2,6 +2,24 @@ import { normalizeServerConfigForPersistence } from '../../src/utils/serverConfi
 import { ServerConfig, ServerInfo } from '../../src/types/index.js';
 
 describe('normalizeServerConfigForPersistence', () => {
+  it('preserves opaque native runtime secret references', () => {
+    const normalized = normalizeServerConfigForPersistence({
+      type: 'stdio',
+      command: 'node',
+      nativeSecretRefs: { API_KEY: 'github-token_1' },
+    });
+    expect(normalized.nativeSecretRefs).toEqual({ API_KEY: 'github-token_1' });
+  });
+
+  it('rejects unsafe native runtime secret ids', () => {
+    expect(() =>
+      normalizeServerConfigForPersistence({
+        type: 'stdio',
+        command: 'node',
+        nativeSecretRefs: { API_KEY: '../secret' },
+      }),
+    ).toThrow('Invalid native runtime secret reference');
+  });
   it('keeps remote keep-alive checks disabled by default', () => {
     const normalized = normalizeServerConfigForPersistence({
       type: 'streamable-http',

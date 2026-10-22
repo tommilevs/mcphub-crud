@@ -2,6 +2,27 @@ import type { ServerFormData } from '../../frontend/src/types';
 import { buildServerPayload } from '../../frontend/src/utils/serverFormPayload';
 
 describe('buildServerPayload', () => {
+  it('serializes native runtime secret refs without secret values', () => {
+    const payload = buildServerPayload({
+      formData: {
+        name: 'native-cli',
+        url: '',
+        command: 'node',
+        arguments: '',
+        args: [],
+        env: [],
+        headers: [],
+        nativeSecretRefsText: 'API_KEY=github-token\nHOME_TOKEN=home-secret',
+      },
+      serverType: 'stdio',
+      envVars: [],
+      headerVars: [],
+    });
+    expect(payload.config.nativeSecretRefs).toEqual({
+      API_KEY: 'github-token',
+      HOME_TOKEN: 'home-secret',
+    });
+  });
   it('preserves args credential targets and placeholders when editing stdio servers', () => {
     const credentialTemplate: ServerFormData['credentialTemplate'] = [
       { target: 'env', name: 'ENV_KEY' },
