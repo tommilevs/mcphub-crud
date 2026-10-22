@@ -1,0 +1,132 @@
+//! Native process supervision for the MCPHub Windows service.
+//!
+//! The core deliberately owns process lifecycle only. Configuration, credentials,
+//! and dashboard policy remain in MCPHub; this crate receives already-resolved
+//! commands and environment values from the service IPC boundary.
+
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, process::{Child, Command, Stdio}, time::{Duration, Instant}};
+use thiserror::Error;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ManagedProcessSpec {
+    pub id: String,
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+    #[serde(default = "default_restart_limit")]
+    pub restart_limit: u32,
+    #[serde(default = "default_restart_delay_ms")]
+    pub restart_delay_ms: u64,
+}
+
+fn default_restart_limit() -> u32 { 5 }
+fn default_restart_delay_ms() -> u64 { 500 }
+
+#[derive(Debug, Error)]
+pub enum SupervisorError {
+    #[error("managed process already exists: {0}")]
+    AlreadyRunning(String),
+    #[error("managed process not found: {0}")]
+    NotFound(String),
+    #[error("failed to spawn {id}: {source}")]
+    Spawn { id: String, source: std::io::Error },
+    #[error("restart limit reached for {0}")]
+    RestartLimitReached(String),
+}
+
+struct ManagedProcess {
+    spec: ManagedProcessSpec,
+    child: Child,
+    restarts: u32,
+    last_start: Instant,
+    #[cfg(windows)]
+    job: windows::JobHandle,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessStatus {
+    pub id: String,
+    pub running: bool,
+    pub pid: Option<u32>,
+    pub restarts: u32,
+    pub restart_limit: u32,
+}
+
+pub struct RuntimeSupervisor {
+    processes: HashMap<String, ManagedProcess>,
+}
+
+impl RuntimeSupervisor {
+    pub fn new() -> Self { Self { processes: HashMap::new() } }
+
+    pub fn start(&mut self, spec: ManagedProcessSpec) -> Result<ProcessStatus, SupervisorError> {
+        if self.processes.contains_key(&spec.id) { return Err(SupervisorError::AlreadyRunning(spec.id)); }
+        let id = spec.id.clone();
+        let mut command = Command::new(&spec.command);
+        command.args(&spec.args).envs(&spec.env).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        let child = command.spawn().map_err(|source| SupervisorError::Spawn { id: id.clone(), source })?;
+        #[cfg(windows)]
+        let job = windows::assign_to_job(child.id())?;
+        let status = ProcessStatus { id: id.clone(), running: true, pid: Some(child.id()), restarts: 0, restart_limit: spec.restart_limit };
+        self.processes.insert(id, ManagedProcess { spec, child, restarts: 0, last_start: Instant::now(), #[cfg(windows)] job });
+        Ok(status)
+    }
+
+    pub fn stop(&mut self, id: &str) -> Result<(), SupervisorError> {
+        let mut process = self.processes.remove(id).ok_or_else(|| SupervisorError::NotFound(id.to_owned()))?;
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+        Ok(())
+    }
+
+    pub fn poll(&mut self) -> Vec<ProcessStatus> {
+        let mut statuses = Vec::new();
+        let ids: Vec<String> = self.processes.keys().cloned().collect();
+        for id in ids {
+            let Some(process) = self.processes.get_mut(&id) else { continue };
+            let exited = process.child.try_wait().ok().flatten().is_some();
+            if exited && process.restarts < process.spec.restart_limit && process.last_start.elapsed() >= Duration::from_millis(process.spec.restart_delay_ms) {
+                let mut command = Command::new(&process.spec.command);
+                command.args(&process.spec.args).envs(&process.spec.env).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+                if let Ok(child) = command.spawn() {
+                    process.child = child;
+                    process.restarts += 1;
+                    process.last_start = Instant::now();
+                }
+            }
+            statuses.push(ProcessStatus { id: id.clone(), running: process.child.try_wait().ok().flatten().is_none(), pid: Some(process.child.id()), restarts: process.restarts, restart_limit: process.spec.restart_limit });
+        }
+        statuses
+    }
+
+    pub fn statuses(&mut self) -> Vec<ProcessStatus> { self.poll() }
+}
+
+impl Default for RuntimeSupervisor { fn default() -> Self { Self::new() } }
+
+#[cfg(windows)]
+mod windows {
+    use super::SupervisorError;
+    use std::io;
+    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
+    use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_SET_QUOTA, PROCESS_TERMINATE, PROCESS_QUERY_INFORMATION};
+
+    pub struct JobHandle(HANDLE);
+    impl Drop for JobHandle { fn drop(&mut self) { unsafe { windows_sys::Win32::Foundation::CloseHandle(self.0); } } }
+
+    pub fn assign_to_job(pid: u32) -> Result<JobHandle, SupervisorError> {
+        unsafe {
+            let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION, 0, pid);
+            if process == 0 { return Err(SupervisorError::Spawn { id: pid.to_string(), source: io::Error::last_os_error() }); }
+            let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
+            if job == 0 { return Err(SupervisorError::Spawn { id: pid.to_string(), source: io::Error::last_os_error() }); }
+            if AssignProcessToJobObject(job, process) == 0 { return Err(SupervisorError::Spawn { id: pid.to_string(), source: io::Error::last_os_error() }); }
+            Ok(JobHandle(job))
+        }
+    }
+}
+

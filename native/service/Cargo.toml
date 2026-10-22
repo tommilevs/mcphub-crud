@@ -1,0 +1,9 @@
+[package]
+name = "mcphub-runtime-service"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mcphub-runtime-core = { path = "../runtime-core" }
+serde_json = "1"
+
