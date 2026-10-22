@@ -269,6 +269,10 @@ mod windows {
     };
 
     pub struct JobHandle(HANDLE);
+    // Windows kernel handles are process-wide and the supervisor serializes
+    // access through its service mutex before moving this owner between the
+    // named-pipe client threads.
+    unsafe impl Send for JobHandle {}
     impl Drop for JobHandle {
         fn drop(&mut self) {
             unsafe {

@@ -82,14 +82,65 @@ fn handle_request_with_secrets(
 }
 
 #[cfg(windows)]
-fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std::error::Error>> {
+fn serve_named_pipe_client(
+    pipe: usize,
+    supervisor: std::sync::Arc<std::sync::Mutex<RuntimeSupervisor>>,
+    secrets: std::sync::Arc<SecretStore>,
+) {
     use std::os::windows::io::FromRawHandle;
     use windows_sys::Win32::{
+        Foundation::HANDLE,
+        Storage::FileSystem::WriteFile,
+    };
+    let raw_handle = pipe as HANDLE;
+    let mut reader = BufReader::new(unsafe { std::fs::File::from_raw_handle(raw_handle as *mut _) });
+    let mut line = String::new();
+    loop {
+        let read = match reader.read_line(&mut line) {
+            Ok(read) => read,
+            Err(_) => break,
+        };
+        if read == 0 {
+            break;
+        }
+        let response = {
+            let mut guard = match supervisor.lock() {
+                Ok(guard) => guard,
+                Err(_) => break,
+            };
+            match handle_request_with_secrets(&mut guard, &secrets, line.trim()) {
+                Ok(response) => response,
+                Err(error) => serde_json::json!({ "error": error.to_string() }).to_string(),
+            }
+        };
+        let bytes = format!("{response}\n");
+        let mut written = 0;
+        let write_ok = unsafe {
+            WriteFile(
+                raw_handle,
+                bytes.as_ptr() as *const _,
+                bytes.len() as u32,
+                &mut written,
+                std::ptr::null_mut(),
+            )
+        };
+        if write_ok == 0 {
+            break;
+        }
+        line.clear();
+    }
+}
+
+#[cfg(windows)]
+fn run_named_pipe(
+    supervisor: std::sync::Arc<std::sync::Mutex<RuntimeSupervisor>>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use windows_sys::Win32::{
         Foundation::{
-            CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
+            CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE,
         },
         Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES},
-        Storage::FileSystem::{WriteFile, PIPE_ACCESS_DUPLEX},
+        Storage::FileSystem::PIPE_ACCESS_DUPLEX,
         System::Pipes::{
             ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
         },
@@ -125,7 +176,7 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
         lpSecurityDescriptor: security_descriptor,
         bInheritHandle: 0,
     };
-    let secrets = SecretStore::machine_default()?;
+    let secrets = std::sync::Arc::new(SecretStore::machine_default()?);
     loop {
         let pipe = unsafe {
             CreateNamedPipeW(
@@ -152,25 +203,13 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
             }
             continue;
         }
-        let mut reader = BufReader::new(unsafe { std::fs::File::from_raw_handle(pipe as *mut _) });
-        let mut line = String::new();
-        while reader.read_line(&mut line)? > 0 {
-            let response = handle_request_with_secrets(supervisor, &secrets, line.trim())?;
-            let bytes = format!("{response}\n");
-            let mut written = 0;
-            unsafe {
-                WriteFile(
-                    pipe as HANDLE,
-                    bytes.as_ptr() as *const _,
-                    bytes.len() as u32,
-                    &mut written,
-                    std::ptr::null_mut(),
-                );
-            }
-            line.clear();
-        }
+        let pipe_id = pipe as usize;
+        let supervisor = std::sync::Arc::clone(&supervisor);
+        let secrets = std::sync::Arc::clone(&secrets);
+        std::thread::Builder::new()
+            .name("mcphub-runtime-client".to_string())
+            .spawn(move || serve_named_pipe_client(pipe_id, supervisor, secrets))?;
     }
-
 }
 
 #[cfg(windows)]
@@ -215,8 +254,8 @@ fn service_main(_arguments: Vec<OsString>) {
         eprintln!("failed to publish MCPHub service status: {error}");
         return;
     }
-    let mut supervisor = RuntimeSupervisor::new();
-    if let Err(error) = run_named_pipe(&mut supervisor) {
+    let supervisor = std::sync::Arc::new(std::sync::Mutex::new(RuntimeSupervisor::new()));
+    if let Err(error) = run_named_pipe(supervisor) {
         eprintln!("MCPHub runtime service stopped: {error}");
     }
 }
