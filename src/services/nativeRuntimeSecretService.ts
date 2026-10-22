@@ -44,3 +44,5 @@ export const putNativeRuntimeSecret = (id: string, value: string): Promise<Runti
 
 export const deleteNativeRuntimeSecret = (id: string): Promise<RuntimeResponse> =>
   callRuntime({ op: 'secret_delete', id });
+
+export const getNativeRuntimeStatus = (): Promise<RuntimeResponse> => callRuntime({ op: 'status' });

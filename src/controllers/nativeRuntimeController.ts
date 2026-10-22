@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import {
   deleteNativeRuntimeSecret,
   putNativeRuntimeSecret,
+  getNativeRuntimeStatus,
 } from '../services/nativeRuntimeSecretService.js';
 
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -30,6 +31,15 @@ export const deleteSecret = async (req: Request, res: Response): Promise<void> =
   try {
     await deleteNativeRuntimeSecret(id);
     res.status(204).end();
+  } catch (error) {
+    res.status(503).json({ error: error instanceof Error ? error.message : 'Native runtime unavailable' });
+  }
+};
+
+export const getStatus = async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const status = await getNativeRuntimeStatus();
+    res.json({ data: status });
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : 'Native runtime unavailable' });
   }
