@@ -35,6 +35,8 @@
     "frontend:build": "cd frontend && vite build",
     "frontend:typecheck": "tsc --noEmit -p frontend/tsconfig.json",
     "frontend:preview": "cd frontend && vite preview",
+    "native:build:windows": "powershell -ExecutionPolicy Bypass -File native/build-windows.ps1 -Action release",
+    "native:check:windows": "powershell -ExecutionPolicy Bypass -File native/build-windows.ps1 -Action check",
     "dev": "concurrently \"pnpm backend:dev\" \"pnpm frontend:dev\"",
     "debug": "concurrently \"pnpm backend:debug\" \"pnpm frontend:dev\"",
     "prepublishOnly": "npm run build && node scripts/verify-dist.js"

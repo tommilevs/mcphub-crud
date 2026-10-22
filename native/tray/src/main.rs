@@ -24,9 +24,8 @@ fn open_dashboard() {
 fn restart_service() {
     #[cfg(windows)]
     {
-        let _ = Command::new("sc")
-            .args(["control", "MCPHub", "128"])
-            .spawn();
+        let _ = Command::new("sc").args(["stop", "MCPHub"]).status();
+        let _ = Command::new("sc").args(["start", "MCPHub"]).status();
     }
 }
 

@@ -206,6 +206,15 @@ impl RuntimeSupervisor {
                 id: id.to_owned(),
                 source,
             })?;
+        // JSON-RPC notifications do not have a response. Waiting on stdout
+        // for them would deadlock the named-pipe request/response loop.
+        if serde_json::from_str::<serde_json::Value>(message)
+            .ok()
+            .and_then(|value| value.get("id").cloned())
+            .is_none()
+        {
+            return Ok(String::new());
+        }
         let mut response = String::new();
         process
             .stdout
@@ -228,7 +237,7 @@ impl Default for RuntimeSupervisor {
 mod windows {
     use super::SupervisorError;
     use std::io;
-    use windows_sys::Win32::Foundation::HANDLE;
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
     use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
@@ -250,25 +259,29 @@ mod windows {
                 0,
                 pid,
             );
-            if process == 0 {
+            if process.is_null() {
                 return Err(SupervisorError::Spawn {
                     id: pid.to_string(),
                     source: io::Error::last_os_error(),
                 });
             }
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
-            if job == 0 {
+            if job.is_null() {
+                CloseHandle(process);
                 return Err(SupervisorError::Spawn {
                     id: pid.to_string(),
                     source: io::Error::last_os_error(),
                 });
             }
             if AssignProcessToJobObject(job, process) == 0 {
+                CloseHandle(process);
+                CloseHandle(job);
                 return Err(SupervisorError::Spawn {
                     id: pid.to_string(),
                     source: io::Error::last_os_error(),
                 });
             }
+            CloseHandle(process);
             Ok(JobHandle(job))
         }
     }

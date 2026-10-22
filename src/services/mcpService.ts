@@ -47,6 +47,7 @@ import fs from 'fs';
 import treeKill from 'tree-kill';
 import { isProcessTreeKillAvailable } from '../utils/processTree.js';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { NativeRuntimeTransport } from './nativeRuntimeTransport.js';
 import {
   type Client,
   SSEClientTransport,
@@ -1787,19 +1788,31 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
       conf.proxy,
     );
 
-    // Create STDIO transport with potentially wrapped command
-    transport = new StdioClientTransport({
-      cwd: process.cwd(),
-      command: finalCommand,
-      // Substitute after expansion and proxy argument cleaning so secrets stay literal.
-      args: resolveCredentialArguments(conf, finalArgs),
-      env: env,
-      stderr: 'pipe',
-      maxBufferSize: validateMaxBufferSize(conf.options?.maxBufferSize),
-    });
-    if (transport.stderr && hasPersonalAuthentication(conf)) {
+    // Native Windows service hosting is opt-in; the default remains the SDK
+    // transport for backwards compatibility and local development.
+    if (process.platform === 'win32' && process.env.MCPHUB_NATIVE_RUNTIME_ENABLED === 'true') {
+      transport = new NativeRuntimeTransport({
+        id: name,
+        command: finalCommand,
+        args: resolveCredentialArguments(conf, finalArgs),
+        env,
+      });
+      logger.log(`[${name}] Using MCPHub native runtime service for stdio`);
+    } else {
+      // Create STDIO transport with potentially wrapped command
+      transport = new StdioClientTransport({
+        cwd: process.cwd(),
+        command: finalCommand,
+        // Substitute after expansion and proxy argument cleaning so secrets stay literal.
+        args: resolveCredentialArguments(conf, finalArgs),
+        env: env,
+        stderr: 'pipe',
+        maxBufferSize: validateMaxBufferSize(conf.options?.maxBufferSize),
+      });
+    }
+    if ('stderr' in transport && transport.stderr && hasPersonalAuthentication(conf)) {
       transport.stderr.on('data', () => undefined); // Personal upstream diagnostics can contain raw credentials.
-    } else if (transport.stderr) {
+    } else if ('stderr' in transport && transport.stderr) {
       observeStdioStderr(transport, transport.stderr, (message) => {
         logger.log(
           'Upstream server stderr',

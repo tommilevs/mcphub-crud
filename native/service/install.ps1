@@ -1,6 +1,6 @@
 param(
   [ValidateSet('install', 'uninstall')][string]$Action = 'install',
-  [string]$ServiceBinary = (Join-Path $PSScriptRoot 'target\release\mcphub-runtime-service.exe')
+  [string]$ServiceBinary = (Join-Path $PSScriptRoot '..\target\release\mcphub-runtime-service.exe')
 )
 
 $serviceName = 'MCPHub'

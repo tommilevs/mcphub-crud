@@ -2,11 +2,14 @@
 //! this boundary so the supervisor core remains testable on every platform.
 
 use mcphub_runtime_core::{ManagedProcessSpec, RuntimeSupervisor};
-use std::{
-    io::{self, BufRead, BufReader, Write},
-    thread,
-    time::Duration,
-};
+use std::io::{self, BufRead, BufReader};
+#[cfg(not(windows))]
+use std::{thread, time::Duration};
+
+#[cfg(windows)]
+use std::ffi::OsString;
+#[cfg(windows)]
+use windows_service::{define_windows_service, service_dispatcher};
 
 fn handle_request(
     supervisor: &mut RuntimeSupervisor,
@@ -36,11 +39,12 @@ fn handle_request(
 fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std::error::Error>> {
     use std::os::windows::io::FromRawHandle;
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE},
-        Storage::FileSystem::WriteFile,
+        Foundation::{
+            CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, HANDLE, INVALID_HANDLE_VALUE,
+        },
+        Storage::FileSystem::{WriteFile, PIPE_ACCESS_DUPLEX},
         System::Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE,
-            PIPE_TYPE_BYTE, PIPE_WAIT,
+            ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
         },
     };
     let name: Vec<u16> = "\\\\.\\pipe\\mcphub-runtime"
@@ -63,7 +67,10 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
         if pipe == INVALID_HANDLE_VALUE {
             return Err(Box::new(io::Error::last_os_error()));
         }
-        let connected = unsafe { ConnectNamedPipe(pipe, std::ptr::null()) } != 0;
+        let connected = unsafe {
+            ConnectNamedPipe(pipe, std::ptr::null_mut()) != 0
+                || GetLastError() == ERROR_PIPE_CONNECTED
+        };
         if !connected {
             unsafe {
                 CloseHandle(pipe);
@@ -90,16 +97,69 @@ fn run_named_pipe(supervisor: &mut RuntimeSupervisor) -> Result<(), Box<dyn std:
     }
 }
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+#[cfg(windows)]
+define_windows_service!(ffi_service_main, service_main);
+#[cfg(windows)]
+fn service_main(_arguments: Vec<OsString>) {
+    use windows_service::{
+        service::{
+            ServiceControl, ServiceControlAccept, ServiceExitCode, ServiceState, ServiceStatus,
+            ServiceType,
+        },
+        service_control_handler::{self, ServiceControlHandlerResult},
+    };
+
+    let event_handler = move |control_event| -> ServiceControlHandlerResult {
+        match control_event {
+            ServiceControl::Stop | ServiceControl::Shutdown => {
+                // Dropping the supervisor closes each Job Object and takes
+                // managed descendants down with the service process.
+                std::process::exit(0);
+            }
+            _ => ServiceControlHandlerResult::NotImplemented,
+        }
+    };
+    let status_handle = match service_control_handler::register("MCPHub", event_handler) {
+        Ok(handle) => handle,
+        Err(error) => {
+            eprintln!("failed to register MCPHub service: {error}");
+            return;
+        }
+    };
+    let status = ServiceStatus {
+        service_type: ServiceType::OWN_PROCESS,
+        current_state: ServiceState::Running,
+        controls_accepted: ServiceControlAccept::STOP | ServiceControlAccept::SHUTDOWN,
+        exit_code: ServiceExitCode::Win32(0),
+        checkpoint: 0,
+        wait_hint: std::time::Duration::default(),
+        process_id: None,
+    };
+    if let Err(error) = status_handle.set_service_status(status) {
+        eprintln!("failed to publish MCPHub service status: {error}");
+        return;
+    }
     let mut supervisor = RuntimeSupervisor::new();
+    if let Err(error) = run_named_pipe(&mut supervisor) {
+        eprintln!("MCPHub runtime service stopped: {error}");
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
-    return run_named_pipe(&mut supervisor);
+    {
+        service_dispatcher::start("MCPHub", ffi_service_main)?;
+        return Ok(());
+    }
 
     #[cfg(not(windows))]
-    for line in io::stdin().lock().lines() {
-        let response = handle_request(&mut supervisor, &line?)?;
-        println!("{response}");
-        thread::sleep(Duration::from_millis(10));
+    {
+        let mut supervisor = RuntimeSupervisor::new();
+        for line in io::stdin().lock().lines() {
+            let response = handle_request(&mut supervisor, &line?)?;
+            println!("{response}");
+            thread::sleep(Duration::from_millis(10));
+        }
+        Ok(())
     }
-    Ok(())
 }

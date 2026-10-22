@@ -7,12 +7,12 @@
   "app": {
     "windows": [{ "title": "MCPHub", "width": 1280, "height": 800, "visible": false }],
     "security": { "csp": null },
-    "trayIcon": { "iconPath": "../../frontend/favicon.ico", "tooltip": "MCPHub" }
+    "trayIcon": { "iconPath": "icons/icon.ico", "tooltip": "MCPHub" }
   },
   "bundle": {
     "active": true,
     "targets": "all",
-    "resources": ["../service/target/release/mcphub-runtime-service.exe"],
+    "resources": ["../target/release/mcphub-runtime-service.exe"],
     "windows": { "nsis": { "installMode": "perMachine", "displayLanguageSelector": true } }
   }
 }
