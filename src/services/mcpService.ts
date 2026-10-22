@@ -1790,7 +1790,12 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
 
     // Native Windows service hosting is opt-in; the default remains the SDK
     // transport for backwards compatibility and local development.
-    if (process.platform === 'win32' && process.env.MCPHUB_NATIVE_RUNTIME_ENABLED === 'true') {
+    const nativeRuntimeEligible =
+      process.platform === 'win32' &&
+      process.env.MCPHUB_NATIVE_RUNTIME_ENABLED === 'true' &&
+      !hasCredentialTemplate(conf) &&
+      !hasPersonalAuthentication(conf);
+    if (nativeRuntimeEligible) {
       transport = new NativeRuntimeTransport({
         id: name,
         command: finalCommand,
@@ -1799,6 +1804,13 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
       });
       logger.log(`[${name}] Using MCPHub native runtime service for stdio`);
     } else {
+      if (
+        process.platform === 'win32' &&
+        process.env.MCPHUB_NATIVE_RUNTIME_ENABLED === 'true' &&
+        (hasCredentialTemplate(conf) || hasPersonalAuthentication(conf))
+      ) {
+        logger.log(`[${name}] Native runtime skipped for credential-backed stdio config`);
+      }
       // Create STDIO transport with potentially wrapped command
       transport = new StdioClientTransport({
         cwd: process.cwd(),
