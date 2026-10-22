@@ -466,7 +466,8 @@
     "logs": "Logs",
     "activity": "Activity",
     "workspace": "Workspace",
-    "system": "System"
+    "system": "System",
+    "toolResults": "Result History"
   },
   "pages": {
     "dashboard": {
@@ -1447,5 +1448,28 @@
     "showAll": "Show all servers",
     "loading": "Loading…",
     "empty": "No shared servers require personal credentials."
+  },
+  "toolResults": {
+    "title": "Tool Result History",
+    "subtitle": "Immutable evidence from real MCP tool executions.",
+    "fetchError": "Failed to load tool results",
+    "total": "Total",
+    "pinned": "Pinned",
+    "payloads": "RAW available",
+    "storage": "Storage",
+    "server": "Server",
+    "tool": "Tool",
+    "status": "Status",
+    "timestamp": "Timestamp",
+    "duration": "Duration",
+    "size": "Size",
+    "objective": "Objective",
+    "allStatuses": "All statuses",
+    "pinnedOnly": "Pinned only",
+    "empty": "No results found",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "download": "Download RAW",
+    "noPayload": "RAW payload is unavailable"
   }
 }

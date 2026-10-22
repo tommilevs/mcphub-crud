@@ -83,6 +83,13 @@ jest.mock('../../src/services/activityLoggingService.js', () => ({
   })),
 }));
 
+const mockCaptureAndAnnotate = jest.fn(async (result: any) => result);
+jest.mock('../../src/services/toolResultHistoryCoordinator.js', () => ({
+  getToolResultHistoryCoordinator: jest.fn(() => ({
+    captureAndAnnotate: mockCaptureAndAnnotate,
+  })),
+}));
+
 jest.mock('../../src/services/keepAliveService.js', () => ({
   setupClientKeepAlive: jest.fn().mockResolvedValue(undefined),
 }));
@@ -182,6 +189,26 @@ describe('handleCallToolRequest null / primitive tool result payloads (issue #92
       content: [{ type: 'text', text: '42' }],
       isError: false,
     });
+  });
+
+  it('captures the pre-compression result once and returns its namespaced result id', async () => {
+    mockCaptureAndAnnotate.mockImplementationOnce(async (result: any) => ({
+      ...result,
+      _meta: { 'mcphub/result_id': 'result-1' },
+    }));
+
+    const { result } = await callWithPayload('history');
+
+    expect(mockCaptureAndAnnotate).toHaveBeenCalledTimes(1);
+    expect(mockCaptureAndAnnotate).toHaveBeenCalledWith(
+      expect.objectContaining({ content: [{ type: 'text', text: 'history' }] }),
+      expect.objectContaining({
+        server: 'null-server',
+        tool: 'do_thing',
+        sessionId: 'session-1',
+      }),
+    );
+    expect(result._meta).toEqual({ 'mcphub/result_id': 'result-1' });
   });
 
   it('passes through a boolean payload without throwing', async () => {

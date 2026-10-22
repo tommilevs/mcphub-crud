@@ -13,6 +13,7 @@ import {
   Activity,
   ScrollText,
   KeyRound,
+  History,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useServerContext } from '@/contexts/ServerContext';
@@ -21,6 +22,7 @@ import { canViewSystemLogs } from '@/utils/navigationPermissions';
 import { usePermissionCheck } from '../PermissionChecker';
 import UserProfileMenu from '@/components/ui/UserProfileMenu';
 import { checkActivityAvailable } from '@/services/activityService';
+import { checkToolResultHistoryAvailable } from '@/services/toolResultHistoryService';
 
 interface SidebarProps {
   collapsed: boolean;
@@ -40,6 +42,7 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
   const { allServers } = useServerContext();
   const { groups } = useGroupData();
   const [activityAvailable, setActivityAvailable] = useState(false);
+  const [toolResultHistoryAvailable, setToolResultHistoryAvailable] = useState(false);
 
   const appVersion = import.meta.env.PACKAGE_VERSION as string;
 
@@ -47,6 +50,9 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
     checkActivityAvailable()
       .then(setActivityAvailable)
       .catch(() => setActivityAvailable(false));
+    checkToolResultHistoryAvailable()
+      .then(setToolResultHistoryAvailable)
+      .catch(() => setToolResultHistoryAvailable(false));
   }, []);
 
   const userCanManageUsers = auth.user?.isAdmin && usePermissionCheck('x');
@@ -76,6 +82,9 @@ const Sidebar: React.FC<SidebarProps> = ({ collapsed }) => {
       : []),
     ...(activityAvailable && auth.user?.isAdmin
       ? [{ path: '/activity', label: t('nav.activity'), icon: <Activity className="h-4 w-4" /> }]
+      : []),
+    ...(toolResultHistoryAvailable && auth.user?.isAdmin
+      ? [{ path: '/tool-results', label: t('nav.toolResults'), icon: <History className="h-4 w-4" /> }]
       : []),
     ...(canViewSystemLogs(auth.user)
       ? [{ path: '/logs', label: t('nav.logs'), icon: <ScrollText className="h-4 w-4" /> }]

@@ -467,7 +467,8 @@
     "logs": "Günlükler",
     "activity": "Etkinlik",
     "workspace": "Çalışma Alanı",
-    "system": "Sistem"
+    "system": "Sistem",
+    "toolResults": "Sonuç geçmişi"
   },
   "pages": {
     "dashboard": {
@@ -1444,5 +1445,28 @@
     "showAll": "Tüm sunucuları göster",
     "loading": "Yükleniyor…",
     "empty": "Kişisel kimlik bilgisi gerektiren paylaşılan sunucu yok."
+  },
+  "toolResults": {
+    "title": "Araç sonuç geçmişi",
+    "subtitle": "Gerçek MCP araç çalıştırmalarından değişmez kanıtlar.",
+    "fetchError": "Failed to load tool results",
+    "total": "Total",
+    "pinned": "Pinned",
+    "payloads": "RAW available",
+    "storage": "Storage",
+    "server": "Server",
+    "tool": "Tool",
+    "status": "Status",
+    "timestamp": "Timestamp",
+    "duration": "Duration",
+    "size": "Size",
+    "objective": "Objective",
+    "allStatuses": "All statuses",
+    "pinnedOnly": "Pinned only",
+    "empty": "No results found",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "download": "Download RAW",
+    "noPayload": "RAW payload is unavailable"
   }
 }

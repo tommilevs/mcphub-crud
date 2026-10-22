@@ -468,7 +468,8 @@
     "logs": "日志",
     "activity": "活动",
     "workspace": "工作区",
-    "system": "系统"
+    "system": "系统",
+    "toolResults": "结果历史"
   },
   "pages": {
     "dashboard": {
@@ -1449,5 +1450,28 @@
     "showAll": "显示所有服务器",
     "loading": "加载中…",
     "empty": "暂无需要个人凭据的共享服务器。"
+  },
+  "toolResults": {
+    "title": "工具结果历史",
+    "subtitle": "真实 MCP 工具执行产生的不可变证据。",
+    "fetchError": "Failed to load tool results",
+    "total": "Total",
+    "pinned": "Pinned",
+    "payloads": "RAW available",
+    "storage": "Storage",
+    "server": "Server",
+    "tool": "Tool",
+    "status": "Status",
+    "timestamp": "Timestamp",
+    "duration": "Duration",
+    "size": "Size",
+    "objective": "Objective",
+    "allStatuses": "All statuses",
+    "pinnedOnly": "Pinned only",
+    "empty": "No results found",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "download": "Download RAW",
+    "noPayload": "RAW payload is unavailable"
   }
 }

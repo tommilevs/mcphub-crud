@@ -34,6 +34,7 @@ const useCrumbs = (): string[] => {
     }
     if (path.startsWith('/logs')) return [root, t('nav.logs')];
     if (path.startsWith('/activity')) return [root, t('nav.activity')];
+    if (path.startsWith('/tool-results')) return [root, t('nav.toolResults')];
     if (path.startsWith('/settings')) return [root, t('nav.settings')];
     return [root];
   }, [location.pathname, params, t]);

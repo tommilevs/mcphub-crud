@@ -169,6 +169,16 @@ import {
   deleteOldActivities,
 } from '../controllers/activityController.js';
 import {
+  checkToolResultHistoryAvailable,
+  getToolResults,
+  getToolResultById,
+  getToolResultRaw,
+  getToolResultRange,
+  searchToolResults,
+  pinToolResult,
+  getToolResultStats,
+} from '../controllers/toolResultController.js';
+import {
   getHostedInternalRuntimeCatalog,
   receiveHostedInternalEvent,
 } from '../controllers/hostedInternalController.js';
@@ -385,6 +395,16 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.get('/activities/filters', getActivityFilterOptions);
   authenticatedRouter.get('/activities/:id', getActivityById);
   authenticatedRouter.delete('/activities/cleanup', deleteOldActivities);
+
+  // Immutable tool execution result history (database mode, admin-only handlers)
+  authenticatedRouter.get('/tool-results/available', checkToolResultHistoryAvailable);
+  authenticatedRouter.get('/tool-results', getToolResults);
+  authenticatedRouter.get('/tool-results/search', searchToolResults);
+  authenticatedRouter.get('/tool-results/stats', getToolResultStats);
+  authenticatedRouter.get('/tool-results/:id', getToolResultById);
+  authenticatedRouter.get('/tool-results/:id/raw', getToolResultRaw);
+  authenticatedRouter.get('/tool-results/:id/range', getToolResultRange);
+  authenticatedRouter.patch('/tool-results/:id/pin', pinToolResult);
 
   // Configuration template routes
   authenticatedRouter.post('/templates/export', templateRateLimiter, auth, exportConfigTemplate);

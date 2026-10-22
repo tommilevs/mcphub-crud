@@ -920,3 +920,53 @@ export interface OpenApiToolStats {
   estimatedTokens: number;
   declaredSecurity?: OpenAPIDeclaredSecurity;
 }
+
+export type ToolResultStatus = 'success' | 'error';
+
+export interface ToolResultSummary {
+  resultId: string;
+  timestamp: string;
+  server: string;
+  tool: string;
+  durationMs: number;
+  status: ToolResultStatus;
+  group?: string;
+  username?: string;
+  sessionId?: string;
+  objective?: string;
+  arguments: string | null;
+  rawBytes: number;
+  rawSha256: string | null;
+  payloadAvailable: boolean;
+  payloadOmissionReason?: string;
+  pinned: boolean;
+  useCount: number;
+  lastReferencedAt?: string;
+}
+
+export type ToolResultDetail = ToolResultSummary;
+
+export interface ToolResultFilter {
+  server?: string;
+  tool?: string;
+  status?: ToolResultStatus;
+  pinned?: boolean;
+}
+
+export interface ToolResultStats {
+  total: number;
+  pinned: number;
+  payloadAvailable: number;
+  totalRawBytes: number;
+  oldest?: string;
+  newest?: string;
+}
+
+export interface PaginationInfo {
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  hasNextPage: boolean;
+  hasPrevPage: boolean;
+}

@@ -55,6 +55,10 @@ jest.mock('./types/postgresVectorType.js', () => ({
   registerPostgresVectorType: jest.fn(),
 }));
 
+jest.mock('./toolResultHistorySchema.js', () => ({
+  ensureToolResultHistorySchema: jest.fn(async () => {}),
+}));
+
 import {
   checkDatabaseHealth,
   closeDatabase,
@@ -64,8 +68,10 @@ import {
   updateDataSourceConfig,
 } from './connection.js';
 import { registerPostgresVectorType } from './types/postgresVectorType.js';
+import { ensureToolResultHistorySchema } from './toolResultHistorySchema.js';
 
 const registerPostgresVectorTypeMock = jest.mocked(registerPostgresVectorType);
+const ensureToolResultHistorySchemaMock = jest.mocked(ensureToolResultHistorySchema);
 
 describe('database connection recovery', () => {
   beforeEach(() => {
@@ -89,6 +95,12 @@ describe('database connection recovery', () => {
     expect(dataSource.destroy).toHaveBeenCalledTimes(1);
     expect(dataSource.initialize).toHaveBeenCalledTimes(2);
     expect(getSmartRoutingConfigMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('initializes the explicit tool result history schema during startup', async () => {
+    const dataSource = await initializeDatabase();
+
+    expect(ensureToolResultHistorySchemaMock).toHaveBeenCalledWith(dataSource);
   });
 
   it('shares one reconnection attempt with concurrent initialization callers', async () => {

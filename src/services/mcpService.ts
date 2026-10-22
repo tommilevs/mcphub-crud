@@ -109,6 +109,7 @@ import {
 } from './smartRoutingService.js';
 import { getActivityLoggingService } from './activityLoggingService.js';
 import { maybeCompressToolResult } from './toolResultCompressionService.js';
+import { getToolResultHistoryCoordinator } from './toolResultHistoryCoordinator.js';
 import {
   assertHostedToolAllowed,
   filterHostedTools,
@@ -4071,6 +4072,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
   logger.log('Handling CallToolRequest for tool', summarizeToolRequestForLogging(request.params));
   const startTime = Date.now();
   const activityLogger = getActivityLoggingService();
+  const resultHistory = getToolResultHistoryCoordinator();
 
   // Opt-in fail-closed guard for high-confidence command-injection / SSRF /
   // cloud-credential-theft payloads in tool call arguments. Disabled by
@@ -4344,15 +4346,29 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
           hasCredentialTemplate: hasPersonalAuthentication(targetServerInfo.config),
         });
 
+        const rawMcpResult = {
+          content: [
+            {
+              type: 'text' as const,
+              text: JSON.stringify(result),
+            },
+          ],
+        };
+        const resultWithHistory = await resultHistory.captureAndAnnotate(rawMcpResult, {
+          server: targetServerInfo.name,
+          tool: cleanToolName,
+          durationMs: duration,
+          status: 'success',
+          arguments: finalArgs,
+          group,
+          username,
+          keyId,
+          sessionId,
+          sensitive: hasPersonalAuthentication(targetServerInfo.config),
+        });
+
         return await maybeCompressToolResult(
-          {
-            content: [
-              {
-                type: 'text',
-                text: JSON.stringify(result),
-              },
-            ],
-          },
+          resultWithHistory,
           {
             serverName: targetServerInfo.name,
             toolName: cleanToolName,
@@ -4436,7 +4452,20 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         errorMessage: result.isError ? 'Tool returned error response' : undefined,
       });
 
-      return await maybeCompressToolResult(result, {
+      const resultWithHistory = await resultHistory.captureAndAnnotate(result, {
+        server: targetServerInfo.name,
+        tool: cleanToolName,
+        durationMs: duration,
+        status: result.isError ? 'error' : 'success',
+        arguments: finalArgs,
+        group,
+        username,
+        keyId,
+        sessionId,
+        sensitive: hasPersonalAuthentication(targetServerInfo.config),
+      });
+
+      return await maybeCompressToolResult(resultWithHistory, {
         serverName: targetServerInfo.name,
         toolName: cleanToolName,
         group,
@@ -4570,15 +4599,29 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         hasCredentialTemplate: hasPersonalAuthentication(serverInfo.config),
       });
 
+      const rawMcpResult = {
+        content: [
+          {
+            type: 'text' as const,
+            text: JSON.stringify(result),
+          },
+        ],
+      };
+      const resultWithHistory = await resultHistory.captureAndAnnotate(rawMcpResult, {
+        server: serverInfo.name,
+        tool: cleanToolName,
+        durationMs: duration,
+        status: 'success',
+        arguments: request.params.arguments,
+        group,
+        username,
+        keyId,
+        sessionId,
+        sensitive: hasPersonalAuthentication(serverInfo.config),
+      });
+
       return await maybeCompressToolResult(
-        {
-          content: [
-            {
-              type: 'text',
-              text: JSON.stringify(result),
-            },
-          ],
-        },
+        resultWithHistory,
         {
           serverName: serverInfo.name,
           toolName: cleanToolName,
@@ -4641,7 +4684,20 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
       errorMessage: result.isError ? 'Tool returned error response' : undefined,
     });
 
-    return await maybeCompressToolResult(result, {
+    const resultWithHistory = await resultHistory.captureAndAnnotate(result, {
+      server: serverInfo.name,
+      tool: cleanToolName,
+      durationMs: duration,
+      status: result.isError ? 'error' : 'success',
+      arguments: request.params.arguments,
+      group,
+      username,
+      keyId,
+      sessionId,
+      sensitive: hasPersonalAuthentication(serverInfo.config),
+    });
+
+    return await maybeCompressToolResult(resultWithHistory, {
       serverName: serverInfo.name,
       toolName: cleanToolName,
       group,

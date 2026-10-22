@@ -201,6 +201,17 @@ jest.mock('../../src/controllers/activityController.js', () => ({
   deleteOldActivities: routeHandler,
 }));
 
+jest.mock('../../src/controllers/toolResultController.js', () => ({
+  checkToolResultHistoryAvailable: routeHandler,
+  getToolResults: routeHandler,
+  getToolResultById: routeHandler,
+  getToolResultRaw: routeHandler,
+  getToolResultRange: routeHandler,
+  searchToolResults: routeHandler,
+  pinToolResult: routeHandler,
+  getToolResultStats: routeHandler,
+}));
+
 jest.mock('../../src/controllers/hostedInternalController.js', () => ({
   receiveHostedInternalEvent: routeHandler,
   getHostedInternalRuntimeCatalog: routeHandler,

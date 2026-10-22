@@ -21,6 +21,7 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const MarketPage = lazy(() => import('./pages/MarketPage'));
 const LogsPage = lazy(() => import('./pages/LogsPage'));
 const ActivityPage = lazy(() => import('./pages/ActivityPage'));
+const ToolResultsPage = lazy(() => import('./pages/ToolResultsPage'));
 const PromptsPage = lazy(() => import('./pages/PromptsPage'));
 const ResourcesPage = lazy(() => import('./pages/ResourcesPage'));
 
@@ -85,6 +86,8 @@ function App() {
                       <Route path="/cloud/:serverName" element={<CloudRedirect />} />
                       <Route path="/logs" element={<LogsPage />} />
                       <Route path="/activity" element={<ActivityPage />} />
+                      <Route path="/tool-results" element={<ToolResultsPage />} />
+                      <Route path="/tool-results/:resultId" element={<ToolResultsPage />} />
                       <Route path="/settings" element={<SettingsPage />} />
                     </Route>
                   </Route>

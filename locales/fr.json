@@ -467,7 +467,8 @@
     "logs": "Journaux",
     "activity": "Activité",
     "workspace": "Espace de travail",
-    "system": "Système"
+    "system": "Système",
+    "toolResults": "Historique des résultats"
   },
   "pages": {
     "dashboard": {
@@ -1445,5 +1446,28 @@
     "showAll": "Afficher tous les serveurs",
     "loading": "Chargement…",
     "empty": "Aucun serveur partagé ne nécessite d’identifiants personnels."
+  },
+  "toolResults": {
+    "title": "Historique des résultats",
+    "subtitle": "Preuves immuables issues des exécutions réelles des outils MCP.",
+    "fetchError": "Failed to load tool results",
+    "total": "Total",
+    "pinned": "Pinned",
+    "payloads": "RAW available",
+    "storage": "Storage",
+    "server": "Server",
+    "tool": "Tool",
+    "status": "Status",
+    "timestamp": "Timestamp",
+    "duration": "Duration",
+    "size": "Size",
+    "objective": "Objective",
+    "allStatuses": "All statuses",
+    "pinnedOnly": "Pinned only",
+    "empty": "No results found",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "download": "Download RAW",
+    "noPayload": "RAW payload is unavailable"
   }
 }
