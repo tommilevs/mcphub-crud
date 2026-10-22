@@ -16,6 +16,7 @@ import { useServerContext } from '@/contexts/ServerContext';
 import { useGroupData } from '@/hooks/useGroupData';
 import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import SmartRoutingIndexPanel from '@/components/SmartRoutingIndexPanel';
+import NativeRuntimeSecretsPanel from '@/components/NativeRuntimeSecretsPanel';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet, apiPost } from '@/utils/fetchInterceptor';
 import {
@@ -1791,6 +1792,8 @@ const SettingsPage: React.FC = () => {
         <h1 className="hub-h1">{t('pages.settings.title')}</h1>
         <p className="hub-sub">{t('settings.subtitle') || ''}</p>
       </div>
+
+      {isAdmin && <NativeRuntimeSecretsPanel />}
 
       {/* Bearer Keys Settings */}
         <div className="hub-card mb-6 overflow-visible">
