@@ -2,7 +2,7 @@
 
 use std::process::Command;
 use tauri::{
-    menu::{MenuBuilder, MenuItemBuilder},
+    menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
     AppHandle, Manager,
 };
@@ -34,21 +34,88 @@ fn restart_service() {
     }
 }
 
+#[cfg(windows)]
+fn tray_autostart_enabled() -> bool {
+    Command::new("reg")
+        .args([
+            "query",
+            r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
+            "/v",
+            "MCPHub",
+        ])
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(windows))]
+fn tray_autostart_enabled() -> bool {
+    false
+}
+
+#[cfg(windows)]
+fn set_tray_autostart(enabled: bool) -> bool {
+    let key = r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run";
+    if enabled {
+        let Ok(executable) = std::env::current_exe() else {
+            return false;
+        };
+        Command::new("reg")
+            .args([
+                "add",
+                key,
+                "/v",
+                "MCPHub",
+                "/t",
+                "REG_SZ",
+                "/d",
+                &executable.to_string_lossy(),
+                "/f",
+            ])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    } else {
+        Command::new("reg")
+            .args(["delete", key, "/v", "MCPHub", "/f"])
+            .status()
+            .map(|status| status.success())
+            .unwrap_or(false)
+    }
+}
+
+#[cfg(not(windows))]
+fn set_tray_autostart(_enabled: bool) -> bool {
+    false
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
             let dashboard = MenuItemBuilder::with_id("dashboard", "Open Dashboard").build(app)?;
             let restart =
                 MenuItemBuilder::with_id("restart", "Restart MCPHub service").build(app)?;
+            let autostart = CheckMenuItemBuilder::with_id(
+                "autostart",
+                "Start MCPHub with Windows",
+            )
+            .checked(tray_autostart_enabled())
+            .build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Exit tray").build(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[&dashboard, &restart, &quit])
+                .items(&[&dashboard, &restart, &autostart, &quit])
                 .build()?;
             TrayIconBuilder::new()
                 .menu(&menu)
-                .on_menu_event(|app, event| match event.id().as_ref() {
+                .on_menu_event(move |app, event| match event.id().as_ref() {
                     "dashboard" => open_dashboard(app),
                     "restart" => restart_service(),
+                    "autostart" => {
+                        let enabled = !autostart.is_checked().unwrap_or(false);
+                        if set_tray_autostart(enabled) {
+                            let _ = autostart.set_checked(enabled);
+                        }
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
