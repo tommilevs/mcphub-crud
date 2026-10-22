@@ -7,6 +7,7 @@ import {
 import { requireAdmin } from '../utils/requireAdmin.js';
 import { logger } from '../utils/logger.js';
 import { generateEmbedding } from '../services/vectorSearchService.js';
+import { getToolResultRetrievalMetrics, recordToolResultSearch } from '../services/toolResultMetricsService.js';
 
 const publicRecord = (record: ToolResultRecord): Omit<ToolResultRecord, 'raw' | 'rawText'> => {
   const { raw: _raw, rawText: _rawText, ...metadata } = record;
@@ -71,6 +72,20 @@ export const getToolResults = async (req: Request, res: Response): Promise<void>
     logger.error('Failed to list tool results:', error);
     res.status(500).json({ success: false, message: 'Failed to list tool results' });
   }
+};
+
+export const getToolResultTimeline = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
+  const repository = requireRepository(res);
+  if (!repository) return;
+  const sessionId = String(req.params.sessionId || '').trim();
+  const limit = Number.parseInt(String(req.query.limit ?? '100'), 10);
+  if (!sessionId || !Number.isInteger(limit) || limit < 1 || limit > 500) {
+    res.status(400).json({ success: false, message: 'Invalid session timeline request' });
+    return;
+  }
+  const result = await repository.findPaginated(1, limit, { sessionId });
+  res.json({ success: true, data: result.data.map(publicRecord), pagination: { ...result, totalPages: 1 } });
 };
 
 export const getToolResultById = async (req: Request, res: Response): Promise<void> => {
@@ -157,6 +172,7 @@ export const searchToolResults = async (req: Request, res: Response): Promise<vo
   } else {
     data = await repository.search(query, limit, parseFilter(req));
   }
+  recordToolResultSearch(mode);
   res.json({ success: true, data: data.map(publicRecord), meta: { mode } });
 };
 
@@ -176,9 +192,39 @@ export const pinToolResult = async (req: Request, res: Response): Promise<void> 
   res.json({ success: true, data: publicRecord(record) });
 };
 
+export const compareToolResults = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
+  const repository = requireRepository(res);
+  if (!repository) return;
+  const rawIds: unknown[] = Array.isArray(req.body?.resultIds) ? req.body.resultIds : [];
+  const ids: string[] = [...new Set(
+    rawIds
+      .filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      .map((id) => id.trim()),
+  )];
+  if (ids.length < 2 || ids.length > 10) {
+    res.status(400).json({ success: false, message: 'Provide between 2 and 10 resultIds' });
+    return;
+  }
+  const records = await Promise.all(ids.map((id) => repository.findById(id)));
+  if (records.some((record) => !record)) {
+    res.status(404).json({ success: false, message: 'One or more tool results were not found' });
+    return;
+  }
+  const safe = records.filter((record): record is ToolResultRecord => Boolean(record)).map(publicRecord);
+  res.json({
+    success: true,
+    data: {
+      results: safe,
+      sameRaw: safe.length > 0 && safe.every((record) => Boolean(record.rawSha256)) && safe.every((record) => record.rawSha256 === safe[0].rawSha256),
+      totalBytes: safe.reduce((sum, record) => sum + record.rawBytes, 0),
+    },
+  });
+};
+
 export const getToolResultStats = async (req: Request, res: Response): Promise<void> => {
   if (!(await requireAdmin(req, res))) return;
   const repository = requireRepository(res);
   if (!repository) return;
-  res.json({ success: true, data: await repository.getStats(parseFilter(req)) });
+  res.json({ success: true, data: { ...(await repository.getStats(parseFilter(req))), retrieval: getToolResultRetrievalMetrics() } });
 };

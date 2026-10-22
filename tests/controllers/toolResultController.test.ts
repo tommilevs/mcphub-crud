@@ -23,6 +23,8 @@ import {
   getToolResultRange,
   pinToolResult,
   searchToolResults,
+  compareToolResults,
+  getToolResultTimeline,
 } from '../../src/controllers/toolResultController.js';
 
 const makeReq = (overrides: Record<string, unknown> = {}) =>
@@ -125,5 +127,22 @@ describe('toolResultController', () => {
     await pinToolResult(makeReq({ params: { id: 'result-id' }, body: { pinned: true } }), res);
 
     expect(repository.setPinned).toHaveBeenCalledWith('result-id', true);
+  });
+
+  it('returns a bounded timeline for a session', async () => {
+    repository.findPaginated.mockResolvedValue({ data: [], total: 0, page: 1, limit: 50, totalPages: 0 });
+    const res = makeRes();
+    await getToolResultTimeline(makeReq({ params: { sessionId: 's-1' }, query: { limit: '50' } }), res);
+    expect(repository.findPaginated).toHaveBeenCalledWith(1, 50, { sessionId: 's-1' });
+  });
+
+  it('compares exactly two result records without exposing RAW', async () => {
+    repository.findById
+      .mockResolvedValueOnce({ resultId: 'a', rawSha256: 'same', rawBytes: 10, payloadAvailable: true })
+      .mockResolvedValueOnce({ resultId: 'b', rawSha256: 'same', rawBytes: 10, payloadAvailable: true });
+    const res = makeRes();
+    await compareToolResults(makeReq({ body: { resultIds: ['a', 'b'] } }), res);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: expect.objectContaining({ sameRaw: true }) }));
+    expect((res.json as jest.Mock).mock.calls[0][0].data.results[0]).not.toHaveProperty('raw');
   });
 });

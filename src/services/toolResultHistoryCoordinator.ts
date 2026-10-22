@@ -5,6 +5,7 @@ import { logger } from '../utils/logger.js';
 import { ToolResultHistoryService } from './toolResultHistoryService.js';
 import { getToolResultRepository } from './toolResultHistoryRegistry.js';
 import { generateEmbedding } from './vectorSearchService.js';
+import { recordToolResultIndexAttempt, recordToolResultIndexFailure } from './toolResultMetricsService.js';
 
 export interface ToolResultHistoryCapture {
   server: string;
@@ -51,9 +52,13 @@ export class ToolResultHistoryCoordinator {
         void (async () => {
           const repository = getToolResultRepository();
           if (!repository?.indexContent) return;
+          recordToolResultIndexAttempt();
           const embedding = await generateEmbedding(searchable, 'document');
           await repository.indexContent(saved.resultId, searchable, embedding);
-        })().catch((error) => logger.warn('Failed to index tool result history:', error));
+        })().catch((error) => {
+          recordToolResultIndexFailure();
+          logger.warn('Failed to index tool result history:', error);
+        });
       }
       const currentMeta =
         result._meta && typeof result._meta === 'object'

@@ -5,8 +5,9 @@ import type {
   ToolResultFilter,
   ToolResultStats,
   ToolResultSummary,
+  ToolResultCompare,
 } from '@/types';
-import { apiGet, apiPatch, fetchWithInterceptors } from '@/utils/fetchInterceptor';
+import { apiGet, apiPatch, apiPost, fetchWithInterceptors } from '@/utils/fetchInterceptor';
 import { getApiUrl } from '@/utils/runtime';
 
 const query = (values: object): string => {
@@ -42,6 +43,9 @@ export const setToolResultPinned = (
   pinned: boolean,
 ): Promise<ApiResponse<ToolResultDetail>> =>
   apiPatch(`/tool-results/${encodeURIComponent(resultId)}/pin`, { pinned });
+
+export const compareToolResults = (resultIds: string[]): Promise<ApiResponse<ToolResultCompare>> =>
+  apiPost('/tool-results/compare', { resultIds });
 
 export const getToolResultRaw = async (resultId: string): Promise<string> => {
   const response = await fetchWithInterceptors(

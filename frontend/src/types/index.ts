@@ -963,6 +963,19 @@ export interface ToolResultStats {
   totalRawBytes: number;
   oldest?: string;
   newest?: string;
+  retrieval?: {
+    searches: number;
+    hybridSearches: number;
+    lexicalFallbacks: number;
+    indexAttempts: number;
+    indexFailures: number;
+  };
+}
+
+export interface ToolResultCompare {
+  results: ToolResultSummary[];
+  sameRaw: boolean;
+  totalBytes: number;
 }
 
 export interface PaginationInfo {

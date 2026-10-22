@@ -210,6 +210,8 @@ jest.mock('../../src/controllers/toolResultController.js', () => ({
   searchToolResults: routeHandler,
   pinToolResult: routeHandler,
   getToolResultStats: routeHandler,
+  getToolResultTimeline: routeHandler,
+  compareToolResults: routeHandler,
 }));
 
 jest.mock('../../src/controllers/hostedInternalController.js', () => ({

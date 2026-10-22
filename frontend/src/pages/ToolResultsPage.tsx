@@ -9,6 +9,7 @@ import {
   getToolResultRaw,
   getToolResults,
   getToolResultStats,
+  compareToolResults,
   setToolResultPinned,
 } from '@/services/toolResultHistoryService';
 
@@ -93,6 +94,8 @@ const ToolResultsPage: React.FC = () => {
   const [filter, setFilter] = useState<ToolResultFilter>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [selected, setSelected] = useState<string[]>([]);
+  const [comparison, setComparison] = useState<{ sameRaw: boolean; results: ToolResultSummary[] } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -103,6 +106,11 @@ const ToolResultsPage: React.FC = () => {
     setLoading(false);
   }, [page, filter, t]);
 
+  const runCompare = async () => {
+    const response = await compareToolResults(selected);
+    if (response.success && response.data) setComparison(response.data);
+  };
+
   useEffect(() => { if (!resultId) void load(); }, [load, resultId]);
   if (resultId) return <ToolResultDetailView resultId={resultId} />;
 
@@ -111,6 +119,7 @@ const ToolResultsPage: React.FC = () => {
     {stats && <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {[[t('toolResults.total'), stats.total], [t('toolResults.pinned'), stats.pinned], [t('toolResults.payloads'), stats.payloadAvailable], [t('toolResults.storage'), bytes(stats.totalRawBytes)]].map(([label, value]) => <div key={label} className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{label}</div><div className="hub-num mt-1 text-xl">{value}</div></div>)}
     </div>}
+    {stats?.retrieval && <div className="hub-card px-3 py-2 text-xs text-[var(--hub-ink-3)]">{t('toolResults.retrievalMetrics')}: {stats.retrieval.searches} {t('toolResults.searches')} · {stats.retrieval.hybridSearches} {t('toolResults.hybrid')} · {stats.retrieval.indexFailures} {t('toolResults.indexFailures')}</div>}
     <form className="hub-card p-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setPage(1); setFilter(draft); }}>
       <input className="hub-input min-w-56 flex-1" placeholder={t('toolResults.query')} value={draft.query || ''} onChange={(e) => setDraft({ ...draft, query: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.server')} value={draft.server || ''} onChange={(e) => setDraft({ ...draft, server: e.target.value })} />
@@ -121,9 +130,11 @@ const ToolResultsPage: React.FC = () => {
       <button className="hub-btn hub-btn-primary active:scale-[0.98]" type="submit"><Search size={15} /> {t('common.search')}</button>
     </form>
     {error && <div className="hub-card p-4 text-sm text-red-500">{error}</div>}
+    {selected.length >= 2 && <button className="hub-btn hub-btn-primary" onClick={() => void runCompare()}>{t('toolResults.compare')} ({selected.length})</button>}
+    {comparison && <div className="hub-card p-3"><div className="flex items-center justify-between"><span className="text-sm font-medium">{t('toolResults.compare')}</span><button className="hub-btn" onClick={() => setComparison(null)}>{t('common.close')}</button></div><div className="mt-2 grid gap-2 md:grid-cols-2">{comparison.results.map((item) => <div key={item.resultId} className="rounded border border-[var(--hub-line)] p-2 text-xs"><div className="font-medium">{item.server} / {item.tool}</div><div className="hub-mono text-[var(--hub-ink-3)]">{item.resultId}</div><div>{new Date(item.timestamp).toLocaleString()} · {bytes(item.rawBytes)}</div></div>)}</div><div className="mt-2 text-xs text-[var(--hub-ink-3)]">{comparison.sameRaw ? t('toolResults.sameRaw') : t('toolResults.differentRaw')}</div></div>}
     <div className="hub-card overflow-x-auto">
-      <table className="w-full text-sm"><thead className="border-b border-[var(--hub-line)] text-left text-xs text-[var(--hub-ink-3)]"><tr>{['timestamp','server','tool','status','duration','size'].map((key) => <th key={key} className="px-3 py-2 font-medium">{t(`toolResults.${key}`)}</th>)}</tr></thead>
-      <tbody>{items.map((item) => <tr key={item.resultId} className="border-b border-[var(--hub-line)] last:border-0 hover:bg-[var(--hub-surface-hover)]"><td className="px-3 py-2 whitespace-nowrap"><Link className="text-[var(--hub-accent)]" to={`/tool-results/${item.resultId}`}>{new Date(item.timestamp).toLocaleString()}</Link></td><td className="px-3 py-2">{item.server}</td><td className="px-3 py-2">{item.tool}</td><td className="px-3 py-2"><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span>{item.pinned && <Pin size={12} className="inline ml-1" />}</td><td className="px-3 py-2 hub-num">{item.durationMs} ms</td><td className="px-3 py-2 hub-num">{bytes(item.rawBytes)}</td></tr>)}</tbody></table>
+      <table className="w-full text-sm"><thead className="border-b border-[var(--hub-line)] text-left text-xs text-[var(--hub-ink-3)]"><tr><th className="px-3 py-2" /><>{['timestamp','server','tool','status','duration','size'].map((key) => <th key={key} className="px-3 py-2 font-medium">{t(`toolResults.${key}`)}</th>)}</></tr></thead>
+      <tbody>{items.map((item) => <tr key={item.resultId} className="border-b border-[var(--hub-line)] last:border-0 hover:bg-[var(--hub-surface-hover)]"><td className="px-3 py-2"><input type="checkbox" checked={selected.includes(item.resultId)} onChange={(e) => setSelected(e.target.checked ? [...selected, item.resultId] : selected.filter((id) => id !== item.resultId))} /></td><td className="px-3 py-2 whitespace-nowrap"><Link className="text-[var(--hub-accent)]" to={`/tool-results/${item.resultId}`}>{new Date(item.timestamp).toLocaleString()}</Link></td><td className="px-3 py-2">{item.server}</td><td className="px-3 py-2">{item.tool}</td><td className="px-3 py-2"><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span>{item.pinned && <Pin size={12} className="inline ml-1" />}</td><td className="px-3 py-2 hub-num">{item.durationMs} ms</td><td className="px-3 py-2 hub-num">{bytes(item.rawBytes)}</td></tr>)}</tbody></table>
       {!loading && items.length === 0 && <div className="p-8 text-center text-sm text-[var(--hub-ink-3)]">{t('toolResults.empty')}</div>}
       {loading && <div className="p-8 text-center text-sm text-[var(--hub-ink-3)]">{t('app.loading')}</div>}
     </div>

@@ -1469,6 +1469,13 @@
     "download": "Download RAW",
     "noPayload": "RAW payload is unavailable",
     "session": "Session",
-    "query": "Search objective or result content"
+    "query": "Search objective or result content",
+    "compare": "Compare",
+    "sameRaw": "RAW payloads are identical",
+    "differentRaw": "RAW payloads differ",
+    "retrievalMetrics": "Retrieval metrics",
+    "searches": "searches",
+    "hybrid": "hybrid",
+    "indexFailures": "index failures"
   }
 }
