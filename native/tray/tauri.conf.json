@@ -12,6 +12,7 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "icon": ["icons/icon.ico"],
     "resources": {
       "../target/release/mcphub-runtime-service.exe": "mcphub-runtime-service.exe"
     },
