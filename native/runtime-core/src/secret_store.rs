@@ -4,6 +4,7 @@ use crate::dpapi::{protect_machine, unprotect_machine};
 use std::{
     fs, io,
     path::{Path, PathBuf},
+    process::{Command, Stdio},
 };
 
 pub struct SecretStore {
@@ -14,6 +15,7 @@ impl SecretStore {
     pub fn new(root: impl Into<PathBuf>) -> io::Result<Self> {
         let root = root.into();
         fs::create_dir_all(&root)?;
+        harden_directory(&root)?;
         Ok(Self { root })
     }
 
@@ -60,4 +62,31 @@ impl SecretStore {
         }
         Ok(self.root.join(Path::new(id).with_extension("dpapi")))
     }
+}
+
+#[cfg(windows)]
+fn harden_directory(root: &Path) -> io::Result<()> {
+    let system_root = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    let icacls = PathBuf::from(system_root).join("System32").join("icacls.exe");
+    let status = Command::new(icacls)
+        .arg(root)
+        .args([
+            "/inheritance:r",
+            "/grant:r",
+            "*S-1-5-18:(OI)(CI)(F)",
+            "*S-1-5-32-544:(OI)(CI)(F)",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other("failed to harden MCPHub secret directory ACL"))
+    }
+}
+
+#[cfg(not(windows))]
+fn harden_directory(_root: &Path) -> io::Result<()> {
+    Ok(())
 }
