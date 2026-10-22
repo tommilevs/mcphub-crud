@@ -14,7 +14,10 @@
     "targets": "all",
     "icon": ["icons/icon.ico"],
     "resources": {
-      "../target/release/mcphub-runtime-service.exe": "mcphub-runtime-service.exe"
+      "../target/release/mcphub-runtime-service.exe": "mcphub-runtime-service.exe",
+      "../staging/node.exe": "runtime/node.exe",
+      "../staging/dist": "runtime/dist",
+      "../staging/node_modules": "runtime/node_modules"
     },
     "windows": {
       "nsis": {

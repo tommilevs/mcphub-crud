@@ -31,10 +31,12 @@ broker. Credential-templated and personal-auth stdio configurations remain on
 the existing Node-owned transport until those identity-specific flows can be
 represented safely by the service.
 
-The Tauri tray bundle contains the dashboard assets and runtime service binary.
-The Node gateway remains the API process and must be started by the host
-deployment. For development use `pnpm backend:dev`; for a production Node
-deployment, build with `pnpm backend:build` and run `dist/index.js`. The tray
-opens the gateway at `http://127.0.0.1:3000`, while the installer registers the
-native service independently so managed stdio processes survive tray closure.
+The Windows Tauri installer can include a self-contained gateway runtime. Run
+`native/package-windows.ps1` before `cargo tauri build` to stage portable
+`node.exe`, the compiled `dist`, and production `node_modules`. The tray starts
+that gateway automatically from the installed resources and keeps the native
+service independently registered, so managed stdio processes survive tray
+closure. If those resources are absent, development and host-managed
+deployments can continue to run the Node gateway separately (`pnpm
+backend:dev` or `pnpm backend:build` followed by `dist/index.js`).
 

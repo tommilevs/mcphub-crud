@@ -7,6 +7,34 @@ use tauri::{
     AppHandle, Manager,
 };
 
+fn start_gateway(app: &AppHandle) {
+    let Ok(resource_dir) = app.path().resource_dir() else {
+        return;
+    };
+    let node = resource_dir.join("runtime").join("node.exe");
+    let backend = resource_dir.join("runtime").join("dist").join("index.js");
+    if !node.exists() || !backend.exists() {
+        // Development and host-managed deployments can run the Node gateway
+        // separately; the tray remains usable in that mode.
+        return;
+    }
+    let Ok(data_dir) = app.path().app_data_dir() else {
+        return;
+    };
+    if std::fs::create_dir_all(&data_dir).is_err() {
+        return;
+    }
+    let settings = data_dir.join("mcp_settings.json");
+    let _ = Command::new(node)
+        .arg(backend)
+        .current_dir(resource_dir.join("runtime"))
+        .env("PORT", "3000")
+        .env("DISABLE_WEB", "true")
+        .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
+        .env("MCPHUB_SETTING_PATH", settings)
+        .spawn();
+}
+
 fn open_dashboard(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.show();
@@ -92,6 +120,7 @@ fn set_tray_autostart(_enabled: bool) -> bool {
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
+            start_gateway(app.handle());
             let dashboard = MenuItemBuilder::with_id("dashboard", "Open Dashboard").build(app)?;
             let restart =
                 MenuItemBuilder::with_id("restart", "Restart MCPHub service").build(app)?;
