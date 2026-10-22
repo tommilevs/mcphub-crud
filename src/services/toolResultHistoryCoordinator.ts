@@ -3,6 +3,8 @@ import { ToolResultRepositoryDb } from '../db/repositories/ToolResultRepository.
 import type { ToolResultStatus } from '../types/toolResult.js';
 import { logger } from '../utils/logger.js';
 import { ToolResultHistoryService } from './toolResultHistoryService.js';
+import { getToolResultRepository } from './toolResultHistoryRegistry.js';
+import { generateEmbedding } from './vectorSearchService.js';
 
 export interface ToolResultHistoryCapture {
   server: string;
@@ -41,6 +43,18 @@ export class ToolResultHistoryCoordinator {
           : undefined,
       });
       if (!saved) return result;
+      if (saved.payloadAvailable && saved.rawText) {
+        const searchable = [saved.server, saved.tool, saved.objective, saved.rawText]
+          .filter(Boolean)
+          .join('\n')
+          .slice(0, 64_000);
+        void (async () => {
+          const repository = getToolResultRepository();
+          if (!repository?.indexContent) return;
+          const embedding = await generateEmbedding(searchable, 'document');
+          await repository.indexContent(saved.resultId, searchable, embedding);
+        })().catch((error) => logger.warn('Failed to index tool result history:', error));
+      }
       const currentMeta =
         result._meta && typeof result._meta === 'object'
           ? (result._meta as Record<string, unknown>)

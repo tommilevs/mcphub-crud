@@ -768,7 +768,7 @@ const supportBase64Embeddings = async (baseURL: string = ''): Promise<boolean> =
  *   configured task prefix (embeddingQueryPrefix / embeddingDocumentPrefix)
  * @returns Promise with vector embedding as number array
  */
-async function generateEmbedding(text: string, kind: 'query' | 'document'): Promise<number[]> {
+export async function generateEmbedding(text: string, kind: 'query' | 'document'): Promise<number[]> {
   const smartRoutingConfig = await getSmartRoutingConfig();
   applyConfiguredBasePacingDelay(smartRoutingConfig.basePacingDelayMs);
   const provider = smartRoutingConfig.embeddingProvider || 'openai';

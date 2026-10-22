@@ -268,6 +268,10 @@ Available servers: ${serversList}`,
               description:
                 'The arguments to pass to the tool based on its inputSchema from describe_tool (optional if tool requires no arguments)',
             },
+            objective: {
+              type: 'string',
+              description: 'Optional short statement of what this call should accomplish. Stored with result history to improve later retrieval.',
+            },
           },
           required: ['toolName'],
         },
@@ -343,6 +347,10 @@ Available servers: ${serversList}`,
               additionalProperties: true,
               description:
                 'The arguments to pass to the tool based on its inputSchema (optional if tool requires no arguments)',
+            },
+            objective: {
+              type: 'string',
+              description: 'Optional short statement of what this call should accomplish. Stored with result history to improve later retrieval.',
             },
           },
           required: ['toolName'],

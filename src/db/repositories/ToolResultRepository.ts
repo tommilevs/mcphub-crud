@@ -2,6 +2,7 @@ import type {
   ToolResultFilter,
   ToolResultRecord,
   ToolResultStats,
+  ToolResultSearchHit,
 } from '../../types/toolResult.js';
 import type {
   ToolResultPage,
@@ -164,6 +165,67 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     return rows.map(mapRow);
   }
 
+  async indexContent(resultId: string, content: string, embedding: number[] | null): Promise<void> {
+    const vector = embedding ? `[${embedding.join(',')}]` : null;
+    await this.dataSource.query(
+      `INSERT INTO tool_result_chunks (result_id, chunk_index, chunk_version, content, embedding)
+       VALUES ($1, 0, 1, $2, $3::vector)
+       ON CONFLICT (result_id, chunk_index, chunk_version) DO UPDATE
+       SET content = EXCLUDED.content, embedding = EXCLUDED.embedding`,
+      [resultId, content, vector],
+    );
+  }
+
+  async hybridSearch(
+    query: string,
+    embedding: number[] | null,
+    limit: number,
+    filter: ToolResultFilter = {},
+  ): Promise<ToolResultSearchHit[]> {
+    const { clause, params } = this.buildFilter(filter);
+    const queryParam = params.length + 1;
+    const vectorParam = params.length + 2;
+    const limitParam = params.length + 3;
+    const vector = embedding ? `[${embedding.join(',')}]` : null;
+    const rows = await this.dataSource.query<ToolResultRow[]>(
+      `WITH lexical AS (
+         SELECT result_id, ROW_NUMBER() OVER (
+           ORDER BY ts_rank_cd(to_tsvector('simple', content), websearch_to_tsquery('simple', $${queryParam})) DESC
+         ) AS lexical_rank
+         FROM tool_result_chunks
+         WHERE to_tsvector('simple', content) @@ websearch_to_tsquery('simple', $${queryParam})
+         LIMIT 100
+       ), semantic AS (
+         SELECT result_id, ROW_NUMBER() OVER (ORDER BY embedding <=> $${vectorParam}::vector) AS vector_rank
+         FROM tool_result_chunks
+         WHERE $${vectorParam}::vector IS NOT NULL AND embedding IS NOT NULL
+         LIMIT 100
+       ), ranked AS (
+         SELECT ids.result_id, lexical.lexical_rank, semantic.vector_rank,
+           COALESCE(1.0 / (60 + lexical.lexical_rank), 0) +
+           COALESCE(1.0 / (60 + semantic.vector_rank), 0) AS retrieval_score
+         FROM (SELECT result_id FROM lexical UNION SELECT result_id FROM semantic) ids
+         LEFT JOIN lexical USING (result_id)
+         LEFT JOIN semantic USING (result_id)
+       )
+       SELECT result.*, state.pinned, state.use_count, state.last_referenced_at,
+         ranked.retrieval_score, ranked.lexical_rank, ranked.vector_rank
+       FROM ranked
+       JOIN tool_results result ON result.result_id = ranked.result_id
+       JOIN tool_result_state state ON state.result_id = result.result_id
+       ${clause}
+       ORDER BY ranked.retrieval_score DESC, result.timestamp DESC
+       LIMIT $${limitParam}`,
+      [...params, query, vector, limit],
+    );
+    return rows.map((row) => ({
+      ...mapRow(row),
+      retrievalScore: Number(row.retrieval_score ?? 0),
+      lexicalRank: row.lexical_rank == null ? undefined : Number(row.lexical_rank),
+      vectorRank: row.vector_rank == null ? undefined : Number(row.vector_rank),
+    }));
+  }
+
   async setPinned(resultId: string, pinned: boolean): Promise<ToolResultRecord | null> {
     await this.dataSource.query(
       `UPDATE tool_result_state SET pinned = $2 WHERE result_id = $1`,
@@ -221,6 +283,8 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     if (filter.tool) add('result.tool = ?', filter.tool);
     if (filter.status) add('result.status = ?', filter.status);
     if (filter.username) add('result.username = ?', filter.username);
+    if (filter.sessionId) add('result.session_id = ?', filter.sessionId);
+    if (filter.conversationId) add('result.conversation_id = ?', filter.conversationId);
     if (filter.pinned !== undefined) add('state.pinned = ?', filter.pinned);
     if (filter.startDate) add('result.timestamp >= ?', filter.startDate);
     if (filter.endDate) add('result.timestamp <= ?', filter.endDate);

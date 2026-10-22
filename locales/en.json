@@ -1470,6 +1470,8 @@
     "pin": "Pin",
     "unpin": "Unpin",
     "download": "Download RAW",
-    "noPayload": "RAW payload is unavailable"
+    "noPayload": "RAW payload is unavailable",
+    "session": "Session",
+    "query": "Search objective or result content"
   }
 }

@@ -947,10 +947,13 @@ export interface ToolResultSummary {
 export type ToolResultDetail = ToolResultSummary;
 
 export interface ToolResultFilter {
+  query?: string;
   server?: string;
   tool?: string;
   status?: ToolResultStatus;
   pinned?: boolean;
+  sessionId?: string;
+  conversationId?: string;
 }
 
 export interface ToolResultStats {

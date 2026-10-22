@@ -25,16 +25,15 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    Promise.all([getToolResult(resultId), getToolResultRaw(resultId).catch((e) => Promise.reject(e))])
-      .then(([response, payload]) => {
-        if (!response.success || !response.data) throw new Error(response.message);
-        setDetail(response.data);
-        setRaw(payload);
-      })
-      .catch((e) => {
-        getToolResult(resultId).then((response) => response.data && setDetail(response.data));
-        setError(e instanceof Error ? e.message : t('toolResults.fetchError'));
-      });
+    Promise.allSettled([getToolResult(resultId), getToolResultRaw(resultId)]).then(([metadata, payload]) => {
+      if (metadata.status === 'fulfilled' && metadata.value.success && metadata.value.data) {
+        setDetail(metadata.value.data);
+      } else {
+        setError(metadata.status === 'rejected' ? metadata.reason?.message : metadata.value.message || t('toolResults.fetchError'));
+      }
+      if (payload.status === 'fulfilled') setRaw(payload.value);
+      else setError(payload.reason instanceof Error ? payload.reason.message : t('toolResults.noPayload'));
+    });
   }, [resultId, t]);
 
   const togglePin = async () => {
@@ -98,7 +97,7 @@ const ToolResultsPage: React.FC = () => {
   const load = useCallback(async () => {
     setLoading(true); setError('');
     const [list, totals] = await Promise.all([getToolResults(page, 20, filter), getToolResultStats(filter)]);
-    if (list.success && list.data) { setItems(list.data); setPagination(list.pagination || null); }
+    if (list.success && list.data) { setItems(list.data); setPagination(list.pagination || (filter.query ? { page: 1, limit: 20, total: list.data.length, totalPages: 1, hasNextPage: false, hasPrevPage: false } : null)); }
     else setError(list.message || t('toolResults.fetchError'));
     if (totals.success && totals.data) setStats(totals.data);
     setLoading(false);
@@ -113,8 +112,10 @@ const ToolResultsPage: React.FC = () => {
       {[[t('toolResults.total'), stats.total], [t('toolResults.pinned'), stats.pinned], [t('toolResults.payloads'), stats.payloadAvailable], [t('toolResults.storage'), bytes(stats.totalRawBytes)]].map(([label, value]) => <div key={label} className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{label}</div><div className="hub-num mt-1 text-xl">{value}</div></div>)}
     </div>}
     <form className="hub-card p-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setPage(1); setFilter(draft); }}>
+      <input className="hub-input min-w-56 flex-1" placeholder={t('toolResults.query')} value={draft.query || ''} onChange={(e) => setDraft({ ...draft, query: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.server')} value={draft.server || ''} onChange={(e) => setDraft({ ...draft, server: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.tool')} value={draft.tool || ''} onChange={(e) => setDraft({ ...draft, tool: e.target.value })} />
+      <input className="hub-input min-w-44" placeholder={t('toolResults.session')} value={draft.sessionId || ''} onChange={(e) => setDraft({ ...draft, sessionId: e.target.value })} />
       <select className="hub-input" value={draft.status || ''} onChange={(e) => setDraft({ ...draft, status: (e.target.value || undefined) as ToolResultFilter['status'] })}><option value="">{t('toolResults.allStatuses')}</option><option value="success">success</option><option value="error">error</option></select>
       <label className="flex items-center gap-2 px-2 text-sm"><input type="checkbox" checked={draft.pinned === true} onChange={(e) => setDraft({ ...draft, pinned: e.target.checked ? true : undefined })} />{t('toolResults.pinnedOnly')}</label>
       <button className="hub-btn hub-btn-primary active:scale-[0.98]" type="submit"><Search size={15} /> {t('common.search')}</button>

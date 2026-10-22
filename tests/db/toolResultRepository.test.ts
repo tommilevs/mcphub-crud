@@ -44,4 +44,39 @@ describe('ToolResultRepositoryDb', () => {
     expect(params).toContain('Xid 79');
     expect(params).toContain('desktop-commander');
   });
+
+  it('filters a timeline by session without interpolating its identifier', async () => {
+    const query = jest.fn().mockResolvedValueOnce([]).mockResolvedValueOnce([{ count: '0' }]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+
+    await repository.findPaginated(1, 20, { sessionId: 'session-42' });
+
+    expect(query.mock.calls[0][0]).toContain('result.session_id = $1');
+    expect(query.mock.calls[0][0]).not.toContain('session-42');
+    expect(query.mock.calls[0][1]).toEqual(['session-42', 20, 0]);
+  });
+
+  it('stores a derived vector index separately from immutable RAW', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+
+    await repository.indexContent('result-1', 'searchable evidence', [0.1, 0.2]);
+
+    expect(query.mock.calls[0][0]).toContain('INSERT INTO tool_result_chunks');
+    expect(query.mock.calls[0][0]).not.toContain('UPDATE tool_results');
+    expect(query.mock.calls[0][1]).toEqual(['result-1', 'searchable evidence', '[0.1,0.2]']);
+  });
+
+  it('combines lexical and vector ranks with reciprocal-rank fusion', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+
+    await repository.hybridSearch('failed deployment', [0.3, 0.4], 10, { status: 'error' });
+
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain('websearch_to_tsquery');
+    expect(sql).toContain('embedding <=>');
+    expect(sql).toContain('retrieval_score');
+    expect(params).toEqual(['error', 'failed deployment', '[0.3,0.4]', 10]);
+  });
 });

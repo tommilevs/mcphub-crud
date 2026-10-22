@@ -4,6 +4,7 @@ import type {
   ToolResultFilter,
   ToolResultRecord,
   ToolResultStats,
+  ToolResultSearchHit,
 } from '../types/toolResult.js';
 
 export interface ToolResultPage {
@@ -20,6 +21,8 @@ export interface ToolResultRepository {
   findById(resultId: string): Promise<ToolResultRecord | null>;
   findPaginated(page: number, limit: number, filter?: ToolResultFilter): Promise<ToolResultPage>;
   search(query: string, limit: number, filter?: ToolResultFilter): Promise<ToolResultRecord[]>;
+  indexContent?(resultId: string, content: string, embedding: number[] | null): Promise<void>;
+  hybridSearch?(query: string, embedding: number[] | null, limit: number, filter?: ToolResultFilter): Promise<ToolResultSearchHit[]>;
   setPinned(resultId: string, pinned: boolean): Promise<ToolResultRecord | null>;
   incrementUseCount(resultId: string): Promise<void>;
   getStats(filter?: ToolResultFilter): Promise<ToolResultStats>;

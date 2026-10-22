@@ -38,6 +38,19 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
   `);
 
   await dataSource.query(`
+    CREATE TABLE IF NOT EXISTS tool_result_chunks (
+      result_id uuid NOT NULL REFERENCES tool_results(result_id) ON DELETE CASCADE,
+      chunk_index integer NOT NULL,
+      chunk_version integer NOT NULL DEFAULT 1,
+      content text NOT NULL,
+      embedding vector,
+      PRIMARY KEY (result_id, chunk_index, chunk_version)
+    );
+    CREATE INDEX IF NOT EXISTS tool_result_chunks_search_idx
+      ON tool_result_chunks USING gin (to_tsvector('simple', content));
+  `);
+
+  await dataSource.query(`
     CREATE INDEX IF NOT EXISTS tool_results_timestamp_idx
       ON tool_results (timestamp DESC, result_id DESC);
     CREATE INDEX IF NOT EXISTS tool_results_server_tool_idx

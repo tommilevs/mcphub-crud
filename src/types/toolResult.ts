@@ -49,6 +49,8 @@ export interface ToolResultFilter {
   tool?: string;
   status?: ToolResultStatus;
   username?: string;
+  sessionId?: string;
+  conversationId?: string;
   pinned?: boolean;
   query?: string;
   startDate?: Date;
@@ -62,4 +64,10 @@ export interface ToolResultStats {
   totalRawBytes: number;
   oldest?: Date;
   newest?: Date;
+}
+
+export interface ToolResultSearchHit extends ToolResultRecord {
+  retrievalScore: number;
+  lexicalRank?: number;
+  vectorRank?: number;
 }

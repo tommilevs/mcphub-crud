@@ -4189,7 +4189,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         throw new Error('toolName parameter is required');
       }
 
-      const { arguments: toolArgs } = request.params.arguments || {};
+      const { arguments: toolArgs, objective } = request.params.arguments || {};
       // A single connected server on an Apps-enabled route is addressed by
       // its raw (unqualified) tool name, same as before. A multi-server
       // Apps-enabled route falls through to qualified-name group
@@ -4364,6 +4364,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
           username,
           keyId,
           sessionId,
+          objective: typeof objective === 'string' ? objective : undefined,
           sensitive: hasPersonalAuthentication(targetServerInfo.config),
         });
 
@@ -4462,6 +4463,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         username,
         keyId,
         sessionId,
+        objective: typeof objective === 'string' ? objective : undefined,
         sensitive: hasPersonalAuthentication(targetServerInfo.config),
       });
 

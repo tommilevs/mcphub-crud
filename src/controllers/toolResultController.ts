@@ -6,6 +6,7 @@ import {
 } from '../services/toolResultHistoryRegistry.js';
 import { requireAdmin } from '../utils/requireAdmin.js';
 import { logger } from '../utils/logger.js';
+import { generateEmbedding } from '../services/vectorSearchService.js';
 
 const publicRecord = (record: ToolResultRecord): Omit<ToolResultRecord, 'raw' | 'rawText'> => {
   const { raw: _raw, rawText: _rawText, ...metadata } = record;
@@ -26,6 +27,8 @@ const parseFilter = (req: Request): ToolResultFilter => {
   if (typeof req.query.tool === 'string' && req.query.tool) filter.tool = req.query.tool;
   if (req.query.status === 'success' || req.query.status === 'error') filter.status = req.query.status;
   if (typeof req.query.username === 'string' && req.query.username) filter.username = req.query.username;
+  if (typeof req.query.sessionId === 'string' && req.query.sessionId) filter.sessionId = req.query.sessionId;
+  if (typeof req.query.conversationId === 'string' && req.query.conversationId) filter.conversationId = req.query.conversationId;
   if (req.query.pinned === 'true') filter.pinned = true;
   if (req.query.pinned === 'false') filter.pinned = false;
   if (typeof req.query.startDate === 'string') filter.startDate = new Date(req.query.startDate);
@@ -140,8 +143,21 @@ export const searchToolResults = async (req: Request, res: Response): Promise<vo
     res.status(400).json({ success: false, message: 'Invalid search query' });
     return;
   }
-  const data = await repository.search(query, limit, parseFilter(req));
-  res.json({ success: true, data: data.map(publicRecord) });
+  let mode: 'hybrid' | 'lexical' = 'lexical';
+  let data: ToolResultRecord[] = [];
+  if (repository.hybridSearch) {
+    try {
+      const embedding = await generateEmbedding(query, 'query');
+      data = await repository.hybridSearch(query, embedding, limit, parseFilter(req));
+      mode = 'hybrid';
+    } catch (error) {
+      logger.warn('Hybrid result search fell back to lexical search:', error);
+      data = await repository.search(query, limit, parseFilter(req));
+    }
+  } else {
+    data = await repository.search(query, limit, parseFilter(req));
+  }
+  res.json({ success: true, data: data.map(publicRecord), meta: { mode } });
 };
 
 export const pinToolResult = async (req: Request, res: Response): Promise<void> => {

@@ -27,7 +27,9 @@ export const getToolResults = (
   limit: number,
   filter: ToolResultFilter,
 ): Promise<ApiResponse<ToolResultSummary[]> & { pagination?: PaginationInfo }> =>
-  apiGet(`/tool-results?${query({ page, limit, ...filter })}`);
+  filter.query
+    ? apiGet(`/tool-results/search?${query({ q: filter.query, limit, ...filter, query: undefined })}`)
+    : apiGet(`/tool-results?${query({ page, limit, ...filter })}`);
 
 export const getToolResultStats = (filter: ToolResultFilter): Promise<ApiResponse<ToolResultStats>> =>
   apiGet(`/tool-results/stats?${query(filter)}`);
