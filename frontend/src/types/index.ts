@@ -16,8 +16,6 @@ export interface MarketServerInstallation {
   command: string;
   args: string[];
   env?: Record<string, string>;
-  /** Environment key -> opaque native runtime secret id. Values are never returned. */
-  nativeSecretRefs?: Record<string, string>;
 }
 
 export interface MarketServerArgument {
@@ -218,6 +216,8 @@ export interface ServerConfig {
   command?: string;
   args?: string[];
   env?: Record<string, string>;
+  /** Environment key -> opaque native runtime secret id. Values are never returned. */
+  nativeSecretRefs?: Record<string, string>;
   headers?: Record<string, string>;
   passthroughHeaders?: string[];
   enabled?: boolean;
