@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {getDatasetAvailability,previewDataset,downloadDataset,type DatasetManifest} from '@/services/datasetService';
 import DatasetExportHistory from './DatasetExportHistory';
+import DatasetPreferencePanel from './DatasetPreferencePanel';
 
 export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
   const {t}=useTranslation();
@@ -30,7 +31,7 @@ export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
         const blob=await downloadDataset(selection,split);
         if(!blob.size){setPreview(undefined);throw new Error(t('datasets.empty','No eligible examples remain. Refresh the preview.'));}
         const url=URL.createObjectURL(blob),link=document.createElement('a');
-        link.href=url;link.download=`mcphub-${format==='recorded-tool-trajectory'?'trajectory':'sft'}-${split}.jsonl`;document.body.appendChild(link);link.click();link.remove();
+        link.href=url;link.download=`mcphub-${format==='recorded-tool-trajectory'?'trajectory':format==='tool-preference-dpo'?'dpo':'sft'}-${split}.jsonl`;document.body.appendChild(link);link.click();link.remove();
         setTimeout(()=>URL.revokeObjectURL(url),1000);
       }else{
         const response=await previewDataset(selection);
@@ -53,6 +54,7 @@ export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
       <label className="block text-xs">{t('datasets.format','Export format')}<select className="hub-input mt-1 block" value={format} disabled={busy} onChange={event=>setFormat(event.target.value)}>
         <option value="tool-selection-sft">{t('datasets.sftFormat','Positive tool-selection SFT')}</option>
         <option value="recorded-tool-trajectory">{t('datasets.trajectoryFormat','Recorded tool trajectories by model segment')}</option>
+        <option value="tool-preference-dpo">{t('datasets.dpoFormat','Reviewed tool preference pairs (DPO)')}</option>
       </select></label>
       {format==='recorded-tool-trajectory'&&<p className="text-xs text-[var(--hub-ink-3)]">{t('datasets.trajectoryHelp','Select every retained call in each model segment. Reviewed errors stay labeled as errors. Results are references; hidden client conversation and final answers are not reconstructed.')}</p>}
       <p className="text-xs text-[var(--hub-ink-3)]">{t('datasets.registryHelp','Earlier exports keep related tasks, traces and duplicate examples in the same split, even if the seed changes. Conflicting past assignments block export. Previews are provisional until download.')}</p>
@@ -69,6 +71,7 @@ export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
         <p className="hub-mono text-xs break-all">SHA-256 · {manifest.contentSha256}</p>
       </div>}
       <DatasetExportHistory key={keyId.trim()} keyId={keyId.trim()}/>
+      <DatasetPreferencePanel resultIds={selection.resultIds} keyId={keyId.trim()} allowSelfReported={allowSelfReported} onChooseDpo={()=>setFormat('tool-preference-dpo')}/>
     </>}
   </section>;
 }

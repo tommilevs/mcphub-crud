@@ -3,6 +3,7 @@ import { ensureToolResultReviewSchema } from './toolResultReviewSchema.js';
 import { ensureExperienceSchema } from './experienceSchema.js';
 import { ensureSkillProposalSchema } from './skillProposalSchema.js';
 import { ensureDatasetExportSchema } from './datasetExportSchema.js';
+import { ensureDatasetPreferenceSchema } from './datasetPreferenceSchema.js';
 type Queryable = {
   query(sql: string, parameters?: unknown[]): Promise<unknown>;
 };
@@ -126,4 +127,5 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
   await ensureExperienceSchema(dataSource);
   await ensureSkillProposalSchema(dataSource);
   await ensureDatasetExportSchema(dataSource);
+  await ensureDatasetPreferenceSchema(dataSource);
 };

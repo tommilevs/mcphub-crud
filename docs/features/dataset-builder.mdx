@@ -86,8 +86,44 @@ timestamps do not prove causal order. Coverage explicitly means all **currently
 retained** segment calls: old pruned events and original conversation completeness
 remain unknown. Separate segments are exported separately and share task/trace
 split constraints, including the same persistent registry used for SFT. The
-dashboard format selector invalidates an old preview when changed. DPO still
-requires separate reliable comparative labels and is not inferred from these traces.
+dashboard format selector invalidates an old preview when changed.
+
+### Explicit tool-preference DPO
+
+`MCPHUB_DPO_ENABLED=true` is an additional default-off gate. The History dataset
+panel can review two selected calls as a preference draft. Admin
+`POST /api/datasets/preferences` accepts `chosenId`, `rejectedId`, `rationale`,
+`comparabilityConfirmed: true`, optional `keyId` and explicit `allowSelfReported`.
+The objective and ordered available catalogue must match canonically, actions
+must differ, chosen call quality must be reviewed correct and rejected quality
+reviewed incorrect. Both calls need current privacy/context approval, task consent
+and trusted attribution by default. Chosen task outcome must be success/partial;
+the rejected task can have a reviewed failure outcome. HTTP status does not create
+a preference. The reviewer must compare relevant environment and tool-version
+conditions; equality of text alone does not prove these conditions match.
+
+Creation always saves a draft with privacy approval off. `PATCH
+/api/datasets/preferences/:id` uses optimistic `revision` and `status`. Approval
+requires separate `comparabilityConfirmed: true` and `privacyApproved: true`
+against the exact saved revision, without editing rationale in that request.
+Any changed source review or digest blocks approval/export. Refreshing as draft
+rechecks current evidence, updates its snapshot and removes approval; review the
+new revision before approving again. Retired labels remain in the audit and cannot
+be revived; a replacement may be created. One active label per result pair and
+canonical action comparison prevents duplicate or opposing current labels.
+`GET /api/datasets/preferences?keyId=...` lists the latest 50 scoped labels.
+
+Select both source calls and use `format: "tool-preference-dpo"` in the existing
+preview/export endpoints. Up to 100 approved pairs are evaluated per selection.
+The JSONL contains prompt/catalogue and chosen/rejected normalized tool actions,
+separate source model/segment/review provenance, label revision and
+`labelSource: "user_confirmed"`. Reviewer rationale is not exported. The context
+is explicitly a **reviewed derived objective and catalogue**, not a verified copy
+of hidden client conversation. No provider-verified preference is claimed.
+Both sides and duplicate comparisons share persistent split constraints with SFT
+and trajectories. Revocation/review changes exclude a previously approved pair;
+old downloaded files cannot be recalled and should not be mixed with replacement
+labels without rebuilding the dataset. There is no automatic fine-tuning.
 
 Select results with the history table checkboxes to open the Dataset Builder
 panel. It checks feature availability, offers the key scope and separate

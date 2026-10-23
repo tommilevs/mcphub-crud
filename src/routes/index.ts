@@ -7,6 +7,7 @@ import { saveTrainingContext, getTrainingContext } from '../controllers/training
 import { previewDataset,exportDataset,getDatasetAvailability,listDatasetExports } from '../controllers/datasetController.js';
 import {saveExperience,findExperiences,reviewExperience,listExperiences,readExperience,getExperienceAvailability} from '../controllers/experienceController.js';
 import {previewSkillProposal,manageSkillProposals} from '../controllers/skillsMinerController.js';
+import {manageDatasetPreferences,datasetPreferenceAvailability} from '../controllers/datasetPreferenceController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
 import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
 import express from 'express';
@@ -443,6 +444,10 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.post('/datasets/preview',previewDataset);
   authenticatedRouter.get('/datasets/available',getDatasetAvailability);
   authenticatedRouter.get('/datasets/exports',listDatasetExports);
+  authenticatedRouter.get('/datasets/preferences/available',datasetPreferenceAvailability);
+  authenticatedRouter.get('/datasets/preferences',manageDatasetPreferences);
+  authenticatedRouter.post('/datasets/preferences',manageDatasetPreferences);
+  authenticatedRouter.patch('/datasets/preferences/:id',manageDatasetPreferences);
   authenticatedRouter.post('/datasets/export',exportDataset);
   authenticatedRouter.post('/experiences',saveExperience);
   authenticatedRouter.get('/experiences',listExperiences);

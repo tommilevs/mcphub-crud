@@ -11,6 +11,7 @@ export interface DatasetCall {
 export interface DatasetOptions { username:string;keyId:string|null;allowSelfReported?:boolean;seed?:string }
 const canonical=(value:any):string=>JSON.stringify(value&&typeof value==='object'?
   Array.isArray(value)?value.map(item=>JSON.parse(canonical(item))):Object.fromEntries(Object.keys(value).sort().map(key=>[key,JSON.parse(canonical(value[key]))])):value);
+export const canonicalDatasetValue=canonical;
 const hash=(value:string)=>createHash('sha256').update(value).digest('hex');
 const sensitive=(value:unknown,key=''):boolean=>{
   if(typeof value==='string')return (/(?:password|passwd|secret|api[_-]?key|access[_-]?token|authorization|trace[_-]?key)/i.test(key)&&

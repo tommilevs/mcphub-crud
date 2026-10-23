@@ -24,6 +24,8 @@ import {getExperienceAdvice} from '../../src/services/experienceAdvice.js';
 import {previewSkillFromExperience} from '../../src/services/skillProposalService.js';
 import {ensureSkillProposalSchema} from '../../src/db/skillProposalSchema.js';
 import {ensureDatasetExportSchema} from '../../src/db/datasetExportSchema.js';
+import {ensureDatasetPreferenceSchema} from '../../src/db/datasetPreferenceSchema.js';
+import {createPreference,reviewPreference} from '../../src/services/datasetPreference.js';
 import {createSkillProposal,reviseSkillProposal,exportSkillProposal,listSkillProposals} from '../../src/services/storedSkillProposals.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
@@ -425,6 +427,38 @@ suite('attribution PostgreSQL isolated schema', () => {
       expect(trajectory.events[1]).toMatchObject({executionStatus:'error',quality:'incorrect'});
       expect(trajectory.metadata).toMatchObject({split,originalConversationComplete:false,representation:'recorded-tool-trajectory'});
       expect(trajectory).not.toHaveProperty('messages');expect(JSON.stringify(trajectory)).not.toContain('do not export RAW');
+      await ensureDatasetPreferenceSchema(pool);await ensureDatasetPreferenceSchema(pool);
+      const dpoFlag=process.env.MCPHUB_DPO_ENABLED;process.env.MCPHUB_DPO_ENABLED='true';
+      try{
+        const owner={username:'dataset-owner',keyId:null};
+        const preference=await createPreference(mockSummaryDb,owner,{chosenId:id,rejectedId:second,rationale:'Explicit comparable-context review'});
+        expect(preference).toMatchObject({status:'draft',privacy_approved:false,revision:1});
+        expect(await createPreference(mockSummaryDb,owner,{chosenId:id,rejectedId:second,rationale:'Duplicate'})).toBeNull();
+        const equivalent=randomUUID();
+        await pool.query(`INSERT INTO tool_results(result_id,username,key_id,status,raw,raw_sha256,objective,arguments,attribution,timestamp)
+          SELECT $2,username,key_id,status,raw,raw_sha256,objective,arguments,attribution,timestamp+INTERVAL '2 seconds' FROM tool_results WHERE result_id=$1`,[id,equivalent]);
+        await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,1,$2,'correct','approved','reviewer')`,[equivalent,digest]);
+        await pool.query(`INSERT INTO tool_result_training_contexts(result_id,revision,discovery_call_id,objective,tool_catalogue,privacy_approved,reviewed_by)
+          VALUES($1,1,$2,'read a record',$3,true,'reviewer')`,[equivalent,randomUUID(),JSON.stringify(tools)]);
+        expect(await createPreference(mockSummaryDb,owner,{chosenId:equivalent,rejectedId:second,rationale:'Same canonical comparison from another source'})).toBeNull();
+        expect((await invoke(false,'dataset-owner',split,'seed','tool-preference-dpo',[id,second])).payload.data.exported).toBe(0);
+        const approve=()=>reviewPreference(mockSummaryDb,owner,preference.preference_id,{revision:1,status:'approved'});
+        expect((await Promise.all([approve(),approve()])).filter(Boolean)).toHaveLength(1);
+        const pair=JSON.parse((await invoke(true,'dataset-owner',split,'seed','tool-preference-dpo',[id,second])).body);
+        expect(pair.metadata).toMatchObject({labelSource:'user_confirmed',preferenceRevision:2,resultIds:[id,second],originalConversationComplete:false,split});
+        expect(pair.chosen[0].tool_calls[0].function.arguments).toBe('{}');
+        expect(pair.rejected[0].tool_calls[0].function.arguments).toBe('{"attempt":2}');
+        expect(JSON.stringify(pair)).not.toMatch(/do not export RAW|Explicit comparable-context review/);
+        expect((await invoke(false,'other-owner',split,'seed','tool-preference-dpo',[id,second])).payload.data.exported).toBe(0);
+        await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,2,$2,'correct','approved','reviewer')`,[id,digest]);
+        expect((await invoke(false,'dataset-owner',split,'seed','tool-preference-dpo',[id,second])).payload.data.exported).toBe(0);
+        expect(await reviewPreference(mockSummaryDb,owner,preference.preference_id,{revision:2,status:'approved'})).toBeNull();
+        expect(await reviewPreference(mockSummaryDb,owner,preference.preference_id,{revision:2,status:'draft'})).toMatchObject({revision:3,privacy_approved:false});
+        expect(await reviewPreference(mockSummaryDb,owner,preference.preference_id,{revision:3,status:'approved'})).toMatchObject({revision:4});
+        expect((await invoke(false,'dataset-owner',split,'seed','tool-preference-dpo',[id,second])).payload.data.exported).toBe(1);
+        expect(await reviewPreference(mockSummaryDb,owner,preference.preference_id,{revision:4,status:'retired'})).toMatchObject({revision:5});
+        expect(await createPreference(mockSummaryDb,owner,{chosenId:id,rejectedId:second,rationale:'Replacement after retirement'})).toMatchObject({status:'draft'});
+      }finally{if(dpoFlag===undefined)delete process.env.MCPHUB_DPO_ENABLED;else process.env.MCPHUB_DPO_ENABLED=dpoFlag;}
       expect((await invoke(false,'other-owner')).payload.data.exported).toBe(0);
       await pool.query(`INSERT INTO attribution_task_reviews(task_id,revision,outcome,training_consent,reviewed_by) VALUES($1,2,'success',false,'reviewer')`,[context.taskId]);
       expect((await invoke(false)).payload.data.excluded.training_consent_missing).toBe(1);
