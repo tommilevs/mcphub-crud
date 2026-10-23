@@ -1,0 +1,54 @@
+---
+title: "Tool Result History"
+description: "Inspect immutable MCP tool execution results and retrieval metrics."
+---
+
+Tool Result History is available in database mode and is restricted to administrators. Each eligible tool execution receives a `result_id`. The original MCP response is stored as immutable RAW before optional legacy compression; pin and usage counters are stored separately.
+
+All endpoints below are under `/api` and use the normal dashboard authentication.
+
+## Availability and listing
+
+```http
+GET /api/tool-results/available
+GET /api/tool-results?page=1&limit=20&server=desktop-commander&status=error
+```
+
+List filters include `server`, `tool`, `status`, `sessionId`, `conversationId`, `pinned`, `startDate`, and `endDate`. The list response omits RAW content and includes pagination metadata.
+
+## Search and retrieval
+
+```http
+GET /api/tool-results/search?q=failed+deployment&limit=20
+GET /api/tool-results/:resultId
+GET /api/tool-results/:resultId/raw
+GET /api/tool-results/:resultId/range?start=0&end=4096
+```
+
+Search uses hybrid vector plus PostgreSQL full-text retrieval when the vector path is available and falls back to lexical search when it is not. The response exposes `meta.mode`. The range endpoint returns UTF-8 bytes with `206 Partial Content`, `Accept-Ranges`, and `Content-Range` headers.
+
+RAW is never returned by list, search, or metadata endpoints. Metadata-only records return `409` from RAW endpoints with the configured omission reason.
+
+## Sessions, lineage, pinning, and comparison
+
+```http
+GET /api/tool-results/timeline/:sessionId?limit=100
+POST /api/tool-results/compare
+PATCH /api/tool-results/:resultId/pin
+```
+
+Comparison accepts two to ten `resultIds`:
+
+```json
+{ "resultIds": ["9c4…", "b72…"] }
+```
+
+Pinning accepts `{ "pinned": true }` or `{ "pinned": false }`. Tool calls may provide `x-conversation-id` and `x-mcphub-parent-result-id` headers to preserve conversation and parent-result lineage.
+
+## Metrics
+
+```http
+GET /api/tool-results/stats?server=desktop-commander
+```
+
+Stats include total records, pinned records, RAW availability, storage bytes, oldest/newest timestamps, and retrieval counters for hybrid searches, lexical fallbacks, and index failures.
