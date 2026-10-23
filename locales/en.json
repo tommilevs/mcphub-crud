@@ -1,6 +1,8 @@
 {
   "attribution": {
     "loopSummary": "LoopGuard feedback",
+    "toolPilotAdvice": "Internal ToolPilot suggestion",
+    "toolPilotLimit": "Based on metadata only; unverified advice from a separate internal model. No tool was executed.",
     "loopReactionHelp": "Agent reactions are explicit self-reports, not verified behavior or outcomes. Counts represent reports; one warning may have several.",
     "loopReactionWarnings": "Warnings with reported reaction",
     "loopReactionAccepted": "Accepted reports",

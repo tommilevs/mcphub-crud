@@ -929,7 +929,8 @@ export type ToolResultStatus = 'success' | 'error';
 
 export interface ToolResultSummary {
   loopGuardFeedback?: { verdict: 'helpful' | 'false_positive' | 'ignored'; reviewedBy: string; reviewedAt: string };
-  loopGuardAdvice?: { trigger: string; resultIds: string[]; recommendation: string };
+  loopGuardAdvice?: { trigger: string; resultIds: string[]; recommendation: string;
+    toolPilot?: { role: 'internal_toolpilot'; model: string; reportedModel?: string; suggestion: string; evidence: 'metadata_only' } };
   taskReview?: { revision: number; outcome: string; trainingConsent: boolean; reviewedBy: string; reviewedAt: string };
   trainingReadiness?: {
     tier: 'trusted' | 'unverified' | 'unknown' | 'conflicted' | 'excluded';

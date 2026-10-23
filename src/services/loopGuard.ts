@@ -1,4 +1,5 @@
 export interface LoopGuardAdvice {
+  toolPilot?: import('./toolPilot.js').ToolPilotSuggestion;
   trigger: 'repeated_identical_failure' | 'alternating_failure_cycle';
   resultIds: string[];
   recommendation: string;

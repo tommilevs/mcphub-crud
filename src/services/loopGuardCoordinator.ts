@@ -2,6 +2,7 @@ import type { ToolResultRecord } from '../types/toolResult.js';
 import { getAppDataSource } from '../db/connection.js';
 import { detectRepeatedFailure, type LoopGuardAdvice } from './loopGuard.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
+import { escalateLoopGuard } from './toolPilot.js';
 
 export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGuardAdvice | null> {
   const context = record.attribution;
@@ -30,7 +31,12 @@ export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGu
       status: row.status, arguments: row.arguments, resultDigest: row.raw_sha256, repeatIntent: row.repeat_intent }))], { repetitions });
     if (advice && rows.some((row: any) => advice.resultIds.includes(row.result_id) &&
       config.loopGuardIgnoredTools?.includes(`${row.server}/${row.tool}`))) return null;
-    if (advice) await db.query('UPDATE tool_result_state SET loop_guard_advice=$2::jsonb WHERE result_id=$1', [record.resultId, JSON.stringify(advice)]);
+    if (advice) {
+      const suggestion = await escalateLoopGuard(advice, { server: record.server, tool: record.tool },
+        { traceId: context.traceId, branchId: context.branchId });
+      if (suggestion) advice.toolPilot = suggestion;
+      await db.query('UPDATE tool_result_state SET loop_guard_advice=$2::jsonb WHERE result_id=$1', [record.resultId, JSON.stringify(advice)]);
+    }
     return advice;
   } catch { return null; }
 }

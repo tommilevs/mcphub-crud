@@ -208,6 +208,11 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           : t('attribution.loopAdviceCount', { count: detail.loopGuardAdvice.resultIds.length, defaultValue: '{{count}} identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.' })}</p>
         <div className="flex flex-wrap gap-2">{detail.loopGuardAdvice.resultIds.map((id) => <Link key={id} className="hub-mono text-xs text-[var(--hub-accent)] break-all" to={`/tool-results/${encodeURIComponent(id)}`}>{id}</Link>)}</div>
         <LoopGuardFeedbackButtons key={detail.resultId} resultId={detail.resultId} initialVerdict={detail.loopGuardFeedback?.verdict} />
+        {detail.loopGuardAdvice.toolPilot && <aside className="border-t border-[var(--hub-line)] pt-2 text-xs space-y-1">
+          <h3 className="font-medium">{t('attribution.toolPilotAdvice', 'Internal ToolPilot suggestion')} · {detail.loopGuardAdvice.toolPilot.model}</h3>
+          <p className="text-[var(--hub-ink-3)]">{t('attribution.toolPilotLimit', 'Based on metadata only; unverified advice from a separate internal model. No tool was executed.')}</p>
+          <p className="whitespace-pre-wrap break-words">{detail.loopGuardAdvice.toolPilot.suggestion}</p>
+        </aside>}
       </section>}
       {detail.trainingReadiness && <section className="hub-card p-3 space-y-2">
         <h2 className="text-sm font-medium">{t('attribution.trainingReadiness', 'Training readiness')}</h2>

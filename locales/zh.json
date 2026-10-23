@@ -1,6 +1,8 @@
 {
   "attribution": {
     "loopSummary": "LoopGuard 反馈",
+    "toolPilotAdvice": "内部 ToolPilot 建议",
+    "toolPilotLimit": "仅基于元数据；来自独立内部模型的未验证建议。未执行任何工具。",
     "loopReactionHelp": "代理反应是明确的自行报告，并非已验证的行为或结果。计数代表报告；一条警告可有多份报告。",
     "loopReactionWarnings": "有反应报告的警告",
     "loopReactionAccepted": "接受报告",

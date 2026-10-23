@@ -6,7 +6,7 @@ description: Conservative advice for repeated identical tool failures
 The initial deterministic LoopGuard is opt-in with
 `MCPHUB_LOOP_GUARD_ENABLED=true`. It requires enabled attribution, a known trace
 and branch, and saved Tool Result History. It never blocks, replays or executes
-tools. There is no internal LLM call in this first implementation.
+tools. Optional internal reasoning is disabled by default (configuration below).
 
 An agent may declare an intentional repeat on a particular Smart call:
 `hub_context: { trace_key: "k_RETURNED_KEY", repeat_intent: "retry" }`.
@@ -75,5 +75,27 @@ future advice; deliberate-repeat intent remains a separate call-local field.
 These are observations of repeated technical failures, not verified task failures
 or training labels. Intentional repeats can still occur and remain permitted.
 Unchanged successful states, independently verified agent behavior/outcomes,
-and optional ToolPilot reasoning escalation are
+and richer reviewed task/error context for reasoning are
 subsequent parts of the broader ToolPilot design, not completed features here.
+
+## Optional internal ToolPilot
+
+Explicitly configure `MCPHUB_TOOLPILOT_ENABLED=true`, `MCPHUB_TOOLPILOT_BASE_URL`
+(OpenAI-compatible endpoint), `MCPHUB_TOOLPILOT_MODEL` and, if required,
+`MCPHUB_TOOLPILOT_API_KEY` in the runtime environment. This is a **separate**
+internal model configuration; it does not borrow the embedding provider or change
+the caller's model segment. Keep credentials outside project files.
+
+Only a deterministic LoopGuard warning triggers reasoning. Requests contain the
+trigger, count and bounded server/tool names, never RAW, arguments, task text or
+trace keys. The returned suggestion is therefore explicitly metadata-only and
+unverified. No tools or execution callbacks are provided to the model. Advice is
+stored with the warning and shown in result details under `internal_toolpilot`,
+alongside configured and provider-reported model identity. It is not attributed
+to the user's agent or treated as training truth.
+
+Calls have a three-second timeout, no automatic provider retries, a four-request
+concurrency ceiling, and a one-minute per-branch cooldown (including failures).
+Cooldown bookkeeping is bounded to 1000 branches per process. Failed or empty
+responses leave the deterministic warning intact. The current HTTP execution
+response may wait up to the configured client timeout for optional advice.
