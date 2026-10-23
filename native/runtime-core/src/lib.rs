@@ -59,6 +59,7 @@ struct ManagedProcess {
     restarts: u32,
     last_start: Instant,
     unhealthy: bool,
+    protocol_ready: bool,
     #[cfg(windows)]
     job: windows::JobHandle,
 }
@@ -73,6 +74,8 @@ pub struct ProcessStatus {
     pub pid: Option<u32>,
     pub restarts: u32,
     pub restart_limit: u32,
+    #[serde(rename = "protocolReady")]
+    pub protocol_ready: bool,
 }
 
 pub struct RuntimeSupervisor {
@@ -149,6 +152,7 @@ impl RuntimeSupervisor {
             pid: Some(child.id()),
             restarts: 0,
             restart_limit: spec.restart_limit,
+            protocol_ready: false,
         };
         self.processes.insert(
             id,
@@ -160,6 +164,7 @@ impl RuntimeSupervisor {
                 restarts: 0,
                 last_start: Instant::now(),
                 unhealthy: false,
+                protocol_ready: false,
                 #[cfg(windows)]
                 job,
             },
@@ -230,6 +235,7 @@ impl RuntimeSupervisor {
                     process.restarts += 1;
                     process.last_start = Instant::now();
                     process.unhealthy = false;
+                    process.protocol_ready = false;
                 }
             }
             let running = process.child.try_wait().ok().flatten().is_none();
@@ -243,6 +249,8 @@ impl RuntimeSupervisor {
                     }
                 } else if process.unhealthy {
                     "UNHEALTHY"
+                } else if !process.protocol_ready {
+                    "STARTING"
                 } else {
                     "RUNNING"
                 },
@@ -250,6 +258,7 @@ impl RuntimeSupervisor {
                 pid: Some(process.child.id()),
                 restarts: process.restarts,
                 restart_limit: process.spec.restart_limit,
+                protocol_ready: process.protocol_ready,
             });
         }
         for id in self.stopped.iter() {
@@ -263,6 +272,7 @@ impl RuntimeSupervisor {
                 pid: None,
                 restarts: 0,
                 restart_limit: 0,
+                protocol_ready: false,
             });
         }
         statuses
@@ -289,12 +299,14 @@ impl RuntimeSupervisor {
             .and_then(|_| process.stdin.flush())
         {
             process.unhealthy = true;
+            process.protocol_ready = false;
             return Err(SupervisorError::Spawn {
                 id: id.to_owned(),
                 source,
             });
         }
         process.unhealthy = false;
+        process.protocol_ready = true;
         // JSON-RPC notifications do not have a response. Waiting on stdout
         // for them would deadlock the named-pipe request/response loop.
         if serde_json::from_str::<serde_json::Value>(message)
@@ -314,6 +326,7 @@ impl RuntimeSupervisor {
                 Ok(bytes) => bytes,
                 Err(source) => {
                     process.unhealthy = true;
+                    process.protocol_ready = false;
                     return Err(SupervisorError::Spawn {
                         id: id.to_owned(),
                         source,
@@ -322,6 +335,7 @@ impl RuntimeSupervisor {
             };
             if bytes == 0 {
                 process.unhealthy = true;
+                process.protocol_ready = false;
                 break;
             }
             let trimmed = response.trim_end().to_owned();

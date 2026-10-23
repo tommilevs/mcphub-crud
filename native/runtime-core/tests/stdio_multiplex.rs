@@ -36,6 +36,9 @@ fn collects_notifications_before_matching_response() {
         serde_json::from_str::<serde_json::Value>(&frames[1]).unwrap()["id"],
         7
     );
+    let ready = supervisor.statuses();
+    assert_eq!(ready[0].state, "RUNNING");
+    assert!(ready[0].protocol_ready);
     supervisor.stop("fixture").expect("fixture stops");
     let stopped = supervisor.statuses();
     assert_eq!(stopped.len(), 1);
