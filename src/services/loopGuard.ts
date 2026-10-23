@@ -1,5 +1,5 @@
 export interface LoopGuardAdvice {
-  trigger: 'repeated_identical_failure';
+  trigger: 'repeated_identical_failure' | 'alternating_failure_cycle';
   resultIds: string[];
   recommendation: string;
 }
@@ -14,22 +14,36 @@ export interface LoopGuardObservation {
 }
 
 /** Conservative advisory only. Never authorizes, suppresses or replays a tool. */
-export function detectRepeatedFailure(recent: LoopGuardObservation[]): LoopGuardAdvice | null {
-  const calls = recent.slice(0, 3);
-  const first = calls[0];
-  if (calls.length < 3 || !first?.resultDigest || !first.arguments ||
-    /(?:poll|wait|read_process_output|status)/i.test(first.tool)) return null;
+const eligible = (call: LoopGuardObservation): boolean => {
+  if (call.status !== 'error' || !call.resultDigest || !call.arguments ||
+    !Number.isFinite(call.timestamp.getTime()) || /(?:poll|wait|read_process_output|status)/i.test(call.tool)) return false;
   try {
-    const args = JSON.parse(first.arguments);
-    if (args && typeof args === 'object' && ['page', 'cursor', 'offset', 'continuationToken'].some((key) => key in args)) return null;
-  } catch { return null; }
+    const args = JSON.parse(call.arguments);
+    return !(args && typeof args === 'object' && ['page', 'cursor', 'offset', 'continuationToken'].some((key) => key in args));
+  } catch { return false; }
+};
+const same = (a: LoopGuardObservation, b: LoopGuardObservation) => a.server === b.server &&
+  a.tool === b.tool && a.arguments === b.arguments && a.resultDigest === b.resultDigest;
+const rapidFailures = (calls: LoopGuardObservation[]) => {
   for (let index = 0; index < calls.length; index++) {
     const call = calls[index];
-    if (call.status !== 'error' || call.server !== first.server || call.tool !== first.tool ||
-      call.arguments !== first.arguments || call.resultDigest !== first.resultDigest) return null;
+    if (!eligible(call)) return false;
     if (index && (calls[index - 1].timestamp.getTime() - call.timestamp.getTime() >= 10_000 ||
-      calls[index - 1].timestamp.getTime() < call.timestamp.getTime())) return null;
+      calls[index - 1].timestamp.getTime() < call.timestamp.getTime())) return false;
   }
-  return { trigger: 'repeated_identical_failure', resultIds: calls.map((call) => call.resultId),
-    recommendation: 'Three identical rapid failures were observed. Review the saved error and tool schema, then consider a different diagnostic step before retrying. Intentional retries may continue.' };
+  return true;
+};
+export function detectRepeatedFailure(recent: LoopGuardObservation[]): LoopGuardAdvice | null {
+  const firstThree = recent.slice(0, 3);
+  if (firstThree.length < 3 || !rapidFailures(firstThree)) return null;
+  if (firstThree.every((call) => same(call, firstThree[0]))) {
+    return { trigger: 'repeated_identical_failure', resultIds: firstThree.map((call) => call.resultId),
+      recommendation: 'Three identical rapid failures were observed. Review the saved error and tool schema, then consider a different diagnostic step before retrying. Intentional retries may continue.' };
+  }
+  const cycle = recent.slice(0, 6);
+  if (cycle.length === 6 && rapidFailures(cycle) && cycle.every((call, index) => same(call, cycle[index % 2]))) {
+    return { trigger: 'alternating_failure_cycle', resultIds: cycle.map((call) => call.resultId),
+      recommendation: 'A two-step failure cycle repeated three times. Review both saved errors and consider changing the diagnostic strategy. Intentional retries may continue.' };
+  }
+  return null;
 }

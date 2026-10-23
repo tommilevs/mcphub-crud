@@ -168,6 +168,18 @@ suite('attribution PostgreSQL isolated schema', () => {
       expect(advice?.trigger).toBe('repeated_identical_failure');
       expect((await pool.query('SELECT loop_guard_advice FROM tool_result_state WHERE result_id=$1', [record.resultId])).rows[0].loop_guard_advice).toEqual(advice);
       expect(await observeLoopGuard({ ...record, attribution: { traceId, branchId: randomUUID() } })).toBeNull();
+      const cycleBranch = randomUUID();
+      for (let index = 0; index < 6; index++) {
+        record = { ...record, resultId: randomUUID(), timestamp: new Date(Date.now() - 6000 + index * 1000),
+          tool: index % 2 ? 'diagnose-b' : 'diagnose-a', rawSha256: index % 2 ? 'error-b' : 'error-a',
+          attribution: { traceId, branchId: cycleBranch } };
+        await pool.query(`INSERT INTO tool_results (result_id,timestamp,server,tool,status,arguments,raw_sha256,username,attribution)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [record.resultId, record.timestamp, record.server, record.tool,
+          record.status, record.arguments, record.rawSha256, record.username, JSON.stringify(record.attribution)]);
+        await pool.query('INSERT INTO tool_result_state (result_id) VALUES ($1)', [record.resultId]);
+      }
+      expect((await observeLoopGuard(record))?.trigger).toBe('alternating_failure_cycle');
+      expect(await observeLoopGuard({ ...record, rawSha256: 'new-progress' })).toBeNull();
     } finally {
       if (oldFlag === undefined) delete process.env.MCPHUB_LOOP_GUARD_ENABLED;
       else process.env.MCPHUB_LOOP_GUARD_ENABLED = oldFlag;

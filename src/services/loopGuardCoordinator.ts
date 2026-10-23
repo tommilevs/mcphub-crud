@@ -11,7 +11,7 @@ export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGu
     const rows = await db.query(`SELECT result_id, timestamp, server, tool, status, arguments, raw_sha256
       FROM tool_results WHERE username IS NOT DISTINCT FROM $1 AND key_id IS NOT DISTINCT FROM $2
         AND attribution->>'traceId' = $3 AND attribution->>'branchId' = $4
-        AND timestamp <= $5 AND result_id <> $6 ORDER BY timestamp DESC, result_id DESC LIMIT 2`,
+        AND timestamp <= $5 AND result_id <> $6 ORDER BY timestamp DESC, result_id DESC LIMIT 5`,
     [record.username ?? null, record.keyId ?? null, context.traceId, context.branchId, record.timestamp, record.resultId]);
     const advice = detectRepeatedFailure([{ resultId: record.resultId, timestamp: record.timestamp,
       server: record.server, tool: record.tool, status: record.status, arguments: record.arguments,

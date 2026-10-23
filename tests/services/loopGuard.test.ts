@@ -18,3 +18,22 @@ test('does not flag success, changed output, pagination, polling or backoff retr
     [observation(30), observation(15), observation(1)],
   ]) expect(detectRepeatedFailure(entries)).toBeNull();
 });
+
+test('detects three rapid repetitions of a two-step error cycle', () => {
+  const calls = Array.from({ length: 6 }, (_, index) => observation(6 - index, {
+    tool: index % 2 ? 'diagnose-b' : 'diagnose-a', resultDigest: index % 2 ? 'error-b' : 'error-a',
+  }));
+  expect(detectRepeatedFailure(calls)?.trigger).toBe('alternating_failure_cycle');
+  calls[3].resultDigest = 'new-evidence';
+  expect(detectRepeatedFailure(calls)).toBeNull();
+});
+
+test('successful intermediate calls and backoff in older cycle steps suppress advice', () => {
+  for (const change of [{ status: 'success' }, { timestamp: new Date(-20000) }, { tool: 'poll_device' }]) {
+    const calls = Array.from({ length: 6 }, (_, index) => observation(6 - index, {
+      tool: index % 2 ? 'diagnose-b' : 'diagnose-a', resultDigest: index % 2 ? 'error-b' : 'error-a',
+    }));
+    Object.assign(calls[4], change);
+    expect(detectRepeatedFailure(calls)).toBeNull();
+  }
+});
