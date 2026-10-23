@@ -103,6 +103,7 @@ describe('ToolResultRepositoryDb', () => {
 
     const [sql, params] = query.mock.calls[0];
     expect(sql).toContain('chunks.result_id = $1');
+    expect(sql).toContain('vector_dims(embedding) = vector_dims($3::vector)');
     expect(sql).toContain('retrieval_score');
     expect(params).toEqual(['result-1', 'Xid 79', '[0.1,0.2]', 5]);
   });

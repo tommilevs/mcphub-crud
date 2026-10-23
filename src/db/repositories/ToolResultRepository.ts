@@ -210,7 +210,10 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
        ), semantic AS (
          SELECT result_id, chunk_index, chunk_version, ROW_NUMBER() OVER (ORDER BY embedding <=> $3::vector) AS vector_rank
          FROM tool_result_chunks
-         WHERE result_id = $1 AND $3::vector IS NOT NULL AND embedding IS NOT NULL
+         WHERE result_id = $1
+           AND $3::vector IS NOT NULL
+           AND embedding IS NOT NULL
+           AND vector_dims(embedding) = vector_dims($3::vector)
        ), ranked AS (
          SELECT ids.result_id, ids.chunk_index, ids.chunk_version,
            COALESCE(1.0 / (60 + lexical.lexical_rank), 0) +
