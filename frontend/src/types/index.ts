@@ -934,6 +934,7 @@ export interface ToolResultSummary {
   taskReview?: { revision: number; outcome: string; trainingConsent: boolean; reviewedBy: string; reviewedAt: string };
   resultReview?: { revision: number; rawSha256: string; quality: 'unknown' | 'correct' | 'incorrect' | 'uncertain';
     privacy: 'unreviewed' | 'approved' | 'rejected'; reviewedBy: string; reviewedAt: string };
+  trainingContext?: { revision: number; discoveryCallId: string; privacyApproved: boolean; reviewedBy: string; reviewedAt: string };
   trainingReadiness?: {
     tier: 'trusted' | 'unverified' | 'unknown' | 'conflicted' | 'excluded';
     eligible: boolean;

@@ -8,5 +8,16 @@ export async function ensureToolResultReviewSchema(db: { query(sql: string): Pro
     reviewed_by text NOT NULL,
     reviewed_at timestamptz NOT NULL DEFAULT NOW(),
     PRIMARY KEY (result_id,revision)
+  );
+  CREATE TABLE IF NOT EXISTS tool_result_training_contexts (
+    result_id uuid NOT NULL REFERENCES tool_results(result_id) ON DELETE CASCADE,
+    revision integer NOT NULL CHECK (revision > 0),
+    discovery_call_id uuid NOT NULL,
+    objective text NOT NULL,
+    tool_catalogue jsonb NOT NULL,
+    privacy_approved boolean NOT NULL DEFAULT FALSE,
+    reviewed_by text NOT NULL,
+    reviewed_at timestamptz NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (result_id,revision)
   )`);
 }

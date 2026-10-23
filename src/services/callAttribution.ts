@@ -15,6 +15,7 @@ export interface CallAttribution {
   clientClaims?: AttributionClientClaims;
   conflictReason?: string;
   repeatIntent?: 'poll' | 'pagination' | 'wait' | 'retry';
+  invokedToolName?: string;
 }
 
 const storage = new AsyncLocalStorage<CallAttribution>();

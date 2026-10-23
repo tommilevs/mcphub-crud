@@ -14,6 +14,8 @@ import { createGatewayProof } from '../../src/services/gatewayProvenance.js';
 import { runWithAttribution } from '../../src/services/attributionRuntime.js';
 import { getCallAttribution } from '../../src/services/callAttribution.js';
 import { RequestContextService } from '../../src/services/requestContextService.js';
+import { saveTrainingContext } from '../../src/controllers/trainingContextController.js';
+import { extractDiscoveryEvidence } from '../../src/services/discoveryEvidence.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
@@ -89,6 +91,7 @@ suite('attribution PostgreSQL isolated schema', () => {
         const result=await runWithAttribution({params:request.params},async(cleaned)=>{
           expect(cleaned.params._meta['dev.mcphub/provenance']).toBeUndefined();
           expect(getCallAttribution()?.identity).toMatchObject({source:'gateway_observed',verified:true,modelId:'observed'});
+          expect(getCallAttribution()?.invokedToolName).toBe('demo');
           verifiedCallId=getCallAttribution()?.callId; return {content:[]};
         },request.id);
         expect(result._meta['dev.mcphub/provenance'].causalCorrelationVerified).toBe(true);
@@ -306,5 +309,36 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect((await pool.query('SELECT count(*) FROM tool_result_reviews WHERE result_id=$1',[id])).rows[0].count).toBe('2');
     await pool.query('DELETE FROM tool_results WHERE result_id=$1',[id]);
     expect((await pool.query('SELECT count(*) FROM tool_result_reviews WHERE result_id=$1',[id])).rows[0].count).toBe('0');
+  });
+  test('training context must match complete prior discovery and can be revoked after source retention',async()=>{
+    await pool.query('ALTER TABLE tool_results ADD COLUMN objective text');
+    const context=await service.start('training-context-user'), id=randomUUID(), callId=randomUUID();
+    const tools=[{name:'demo-read',description:'Read a record',inputSchema:{type:'object',properties:{}}}];
+    const evidence=extractDiscoveryEvidence('search_tools',{content:[{type:'text',text:JSON.stringify({tools})}]})!;
+    await service.recordDiscovery(context,callId,evidence);
+    await pool.query(`INSERT INTO tool_results(result_id,timestamp,objective,attribution) VALUES($1,NOW()+INTERVAL '1 second','actual objective',$2)`,
+      [id,JSON.stringify({traceId:context.traceId,branchId:context.branchId,invokedToolName:'demo-read'})]);
+    await pool.query('INSERT INTO tool_result_state(result_id) VALUES($1)',[id]);
+    const save=async(revision:number, supplied=tools, privacyApproved=true)=>{
+      let status=200;
+      await saveTrainingContext({user:{isAdmin:true,username:'reviewer'},params:{id},body:{revision,tools:supplied,discoveryCallId:callId,privacyApproved}} as unknown as Request,
+        {json:()=>{},status:(value:number)=>{status=value;return {json:()=>{}};}} as unknown as Response);
+      return status;
+    };
+    expect(await save(0,[{...tools[0],description:'fabricated description'}])).toBe(409);
+    await pool.query('UPDATE attribution_discovery_events SET branch_id=$2 WHERE call_id=$1',[callId,randomUUID()]);
+    expect(await save(0)).toBe(409);
+    await pool.query('UPDATE attribution_discovery_events SET branch_id=$2,occurred_at=NOW()+INTERVAL \'1 hour\' WHERE call_id=$1',[callId,context.branchId]);
+    expect(await save(0)).toBe(409);
+    await pool.query('UPDATE attribution_discovery_events SET occurred_at=NOW() WHERE call_id=$1',[callId]);
+    expect((await Promise.all([save(0),save(0)])).sort()).toEqual([200,409]);
+    const repo=new ToolResultRepositoryDb(mockSummaryDb as never);
+    expect((await repo.findById(id))?.trainingContext).toMatchObject({revision:1,privacyApproved:true});
+    await pool.query('DELETE FROM attribution_discovery_events WHERE call_id=$1',[callId]);
+    expect(await save(1,[],false)).toBe(200);
+    expect((await repo.findById(id))?.trainingContext).toMatchObject({revision:2,privacyApproved:false});
+    expect((await pool.query('SELECT count(*) FROM tool_result_training_contexts WHERE result_id=$1',[id])).rows[0].count).toBe('2');
+    await pool.query('DELETE FROM tool_results WHERE result_id=$1',[id]);
+    expect((await pool.query('SELECT count(*) FROM tool_result_training_contexts WHERE result_id=$1',[id])).rows[0].count).toBe('0');
   });
 });

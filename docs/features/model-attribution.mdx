@@ -125,6 +125,8 @@ its review is complete; dataset-specific selection still applies.
 
 ## Optional instrumented gateway adapter
 
+See the training-context API below for an independent discovery/privacy gate.
+
 `src/services/gatewayProvenance.ts` provides an instrumented OpenAI-compatible
 gateway reference. `createGatewayProof` accepts the concrete provider response,
 selects exactly one response tool-call ID and requires its function name and JSON
@@ -165,3 +167,29 @@ An HMAC proves that a trusted adapter signed the
 correlation; it cannot independently prove the provider or a compromised adapter
 truthful. Merely passing a configured model or attaching unsigned client metadata
 must never upgrade attribution. Unsigned calls remain self-reported/unknown.
+
+## Reviewed training-context API
+
+`PUT /api/tool-results/:id/training-context` accepts `revision` (zero initially),
+`discoveryCallId`, `tools` (the exact discovered catalogue, at most 100 tools and
+512 KiB), and explicit `privacyApproved`. Each tool contains `name`, `inputSchema`
+and optional `description`. Schema and description fingerprints must exactly
+match one complete, non-truncated `search_tools` event from the same trace/branch
+before the execution. The catalogue must include the actual invoked Smart tool
+name. New calls snapshot that name; older records without it cannot be approved
+by reconstructing names from today's server configuration.
+
+The task objective is copied from the immutable result, never supplied later by
+the reviewer. Results without a saved objective, full schemas or matching source
+cannot pass this gate. Descriptions are now fingerprinted without retaining their
+text in ordinary discovery events; old events cannot certify a later invented
+description. Catalogue privacy approval is separate from call RAW/privacy review
+and task consent. Unknown/conflicted model attribution remains ineligible.
+
+Revisions are append-only through the admin API with optimistic concurrency;
+stale or unmatched context returns 409. Revoke with `{ "revision": N,
+"privacyApproved": false }`, even after source discovery retention. The latest
+revision controls readiness and result retention deletes its context revisions.
+This API stores an explicitly submitted reviewed snapshot; automatic full-schema
+capture, a dedicated context editor and Dataset Builder export are not yet
+implemented by this slice. It does not reconstruct unknown historical context.

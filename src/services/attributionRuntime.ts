@@ -1,7 +1,7 @@
 import { AttributionContextService } from './attributionContextService.js';
 import { withAttributionHandshake, stripAttributionInput } from './attributionHandshake.js';
 import { RequestContextService } from './requestContextService.js';
-import { runWithCallAttribution } from './callAttribution.js';
+import { runWithCallAttribution, withCallAttributionOverride } from './callAttribution.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
 import { maintainAttributionRetention } from './attributionRetention.js';
 import { withGatewayAttribution } from './gatewayAttribution.js';
@@ -33,7 +33,9 @@ export async function runWithAttribution(request: any, handler: (request: any) =
     const service = new AttributionContextService(repository,
       undefined, (config.attributionTtlHours ?? 168) * 60 * 60 * 1000);
     return runWithCallAttribution(null, () => withAttributionHandshake(request, principal, service,
-      cleaned => withGatewayAttribution(gatewayInvocation(request, transportRequestId), stripAttributionInput(cleaned), principal, repository, handler)));
+      cleaned => withCallAttributionOverride({ invokedToolName: request.params?.name === 'call_tool' &&
+        typeof request.params?.arguments?.toolName === 'string' ? request.params.arguments.toolName.slice(0,1024) : undefined },
+        () => withGatewayAttribution(gatewayInvocation(request, transportRequestId), stripAttributionInput(cleaned), principal, repository, handler))));
   } catch {
     return runWithCallAttribution(null, () => handler(stripAttributionInput(request)));
   }

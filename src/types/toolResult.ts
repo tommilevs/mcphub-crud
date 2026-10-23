@@ -2,6 +2,7 @@ import type { CallAttribution } from '../services/callAttribution.js';
 export type ToolResultStatus = 'success' | 'error';
 
 export interface ToolResultRecord {
+  trainingContext?: { revision: number; discoveryCallId: string; privacyApproved: boolean; reviewedBy: string; reviewedAt: string };
   resultReview?: { revision: number; rawSha256: string; quality: 'unknown' | 'correct' | 'incorrect' | 'uncertain';
     privacy: 'unreviewed' | 'approved' | 'rejected'; reviewedBy: string; reviewedAt: string };
   loopGuardFeedback?: { verdict: 'helpful' | 'false_positive' | 'ignored'; reviewedBy: string; reviewedAt: string };

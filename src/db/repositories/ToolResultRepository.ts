@@ -18,6 +18,7 @@ type Queryable = {
 type ToolResultRow = Record<string, unknown>;
 
 const mapRow = (row: ToolResultRow): ToolResultRecord => ({
+  trainingContext: row.training_context as ToolResultRecord['trainingContext'] ?? undefined,
   resultReview: row.result_review as ToolResultRecord['resultReview'] ?? undefined,
   loopGuardFeedback: row.loop_guard_feedback as ToolResultRecord['loopGuardFeedback'] ?? undefined,
   loopGuardAdvice: row.loop_guard_advice as ToolResultRecord['loopGuardAdvice'] ?? undefined,
@@ -53,7 +54,7 @@ const mapRow = (row: ToolResultRow): ToolResultRecord => ({
 });
 
 const SELECT_COLUMNS = `
-  result.*, state.pinned, state.use_count, state.last_referenced_at, state.loop_guard_advice, state.loop_guard_feedback, review.task_review, call_review.result_review
+  result.*, state.pinned, state.use_count, state.last_referenced_at, state.loop_guard_advice, state.loop_guard_feedback, review.task_review, call_review.result_review, training.training_context
   FROM tool_results result
   JOIN tool_result_state state ON state.result_id = result.result_id
   LEFT JOIN LATERAL (
@@ -67,6 +68,11 @@ const SELECT_COLUMNS = `
       'privacy',privacy,'reviewedBy',reviewed_by,'reviewedAt',reviewed_at) AS result_review
     FROM tool_result_reviews WHERE result_id=result.result_id ORDER BY revision DESC LIMIT 1
   ) call_review ON TRUE
+  LEFT JOIN LATERAL (
+    SELECT jsonb_build_object('revision',revision,'discoveryCallId',discovery_call_id,
+      'privacyApproved',privacy_approved,'reviewedBy',reviewed_by,'reviewedAt',reviewed_at) AS training_context
+    FROM tool_result_training_contexts WHERE result_id=result.result_id ORDER BY revision DESC LIMIT 1
+  ) training ON TRUE
 `;
 
 export class ToolResultRepositoryDb implements ToolResultRepository {
