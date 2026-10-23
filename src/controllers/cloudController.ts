@@ -12,6 +12,7 @@ import {
   filterCloudServersByCategory,
   filterCloudServersByTag,
 } from '../services/cloudService.js';
+import { getToolResultHistoryCoordinator } from '../services/toolResultHistoryCoordinator.js';
 
 // Get all cloud market servers
 export const getAllCloudServers = async (_: Request, res: Response): Promise<void> => {
@@ -259,10 +260,27 @@ export const callCloudTool = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const result = await callCloudServerTool(serverName, toolName, args || {});
+    const startTime = Date.now();
+    const toolArguments = args || {};
+    const result = await callCloudServerTool(serverName, toolName, toolArguments);
+    const resultWithHistory = await getToolResultHistoryCoordinator().captureAndAnnotate(
+      result as unknown as Record<string, unknown>,
+      {
+        server: serverName,
+        tool: toolName,
+        arguments: toolArguments,
+        durationMs: Date.now() - startTime,
+        status: result.isError ? 'error' : 'success',
+        group: 'cloud',
+        username: (req as Request & { user?: { username?: string } }).user?.username,
+        sessionId: typeof req.headers['x-session-id'] === 'string'
+          ? req.headers['x-session-id']
+          : undefined,
+      },
+    );
     const response: ApiResponse = {
       success: true,
-      data: result,
+      data: resultWithHistory,
     };
     res.json(response);
   } catch (error) {
