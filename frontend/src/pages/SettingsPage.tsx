@@ -3052,6 +3052,11 @@ const SettingsPage: React.FC = () => {
                       checked={smartRoutingConfig.loopGuardEnabled ?? false}
                       onCheckedChange={(checked) => updateSmartRoutingConfig('loopGuardEnabled', checked)} />
                   </div>
+                  <label className="block text-xs">{t('attribution.loopRepetitions', 'Repetitions before advice (3–100)')}
+                    <input className="hub-input mt-1 block w-full" type="number" min={3} max={100} step={1} disabled={loading}
+                      value={smartRoutingConfig.loopGuardRepetitions ?? 3}
+                      onChange={(event) => updateSmartRoutingConfig('loopGuardRepetitions', Number(event.target.value))} />
+                  </label>
                   <label className="block text-xs">{t('attribution.loopIgnoredTools', 'Tools excluded from LoopGuard, one server/tool per line')}
                     <textarea className="hub-input mt-1 block w-full" rows={3} disabled={loading}
                       value={(smartRoutingConfig.loopGuardIgnoredTools ?? []).join('\n')}

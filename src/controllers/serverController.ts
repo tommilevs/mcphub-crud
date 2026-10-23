@@ -2032,6 +2032,7 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         typeof smartRouting.mcpZeroEnabled === 'boolean' ||
         smartRouting.attributionMode !== undefined ||
         smartRouting.loopGuardEnabled !== undefined ||
+        smartRouting.loopGuardRepetitions !== undefined ||
         smartRouting.loopGuardIgnoredTools !== undefined ||
         smartRouting.attributionTtlHours !== undefined ||
         typeof smartRouting.mcpZeroTopServers === 'number' ||
@@ -2463,6 +2464,12 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
           res.status(400).json({ success: false, message: 'Invalid LoopGuard switch' }); return;
         }
         systemConfig.smartRouting.loopGuardEnabled = smartRouting.loopGuardEnabled;
+      }
+      if (smartRouting.loopGuardRepetitions !== undefined) {
+        if (!Number.isSafeInteger(smartRouting.loopGuardRepetitions) || smartRouting.loopGuardRepetitions < 3 || smartRouting.loopGuardRepetitions > 100) {
+          res.status(400).json({ success: false, message: 'LoopGuard repetitions must be 3–100' }); return;
+        }
+        systemConfig.smartRouting.loopGuardRepetitions = smartRouting.loopGuardRepetitions;
       }
       if (smartRouting.loopGuardIgnoredTools !== undefined) {
         const entries = smartRouting.loopGuardIgnoredTools;

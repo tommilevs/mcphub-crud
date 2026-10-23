@@ -71,6 +71,7 @@ export interface SmartRoutingConfig {
   attributionMode?: 'off' | 'compatible';
   attributionTtlHours?: number;
   loopGuardEnabled?: boolean;
+  loopGuardRepetitions?: number;
   loopGuardIgnoredTools?: string[];
   /**
    * Controls how available servers are listed in the search_tools meta-tool description.
@@ -379,6 +380,12 @@ export async function getSmartRoutingConfig(): Promise<SmartRoutingConfig> {
     loopGuardEnabled: cfg('loopGuardEnabled',
       { MCPHUB_LOOP_GUARD_ENABLED: process.env.MCPHUB_LOOP_GUARD_ENABLED },
       smartRoutingSettings.loopGuardEnabled, false, parseBooleanEnvVar),
+    loopGuardRepetitions: cfg<number>('loopGuardRepetitions',
+      { MCPHUB_LOOP_GUARD_REPETITIONS: process.env.MCPHUB_LOOP_GUARD_REPETITIONS },
+      smartRoutingSettings.loopGuardRepetitions, 3, (value: unknown) => {
+        const parsed = Number(value);
+        return Number.isSafeInteger(parsed) && parsed >= 3 && parsed <= 100 ? parsed : 3;
+      }),
     loopGuardIgnoredTools: cfg<string[]>('loopGuardIgnoredTools',
       { MCPHUB_LOOP_GUARD_IGNORED_TOOLS: process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS },
       smartRoutingSettings.loopGuardIgnoredTools, [], (value: unknown) => {

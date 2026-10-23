@@ -51,6 +51,7 @@ interface SmartRoutingConfig {
   attributionMode?: 'off' | 'compatible';
   attributionTtlHours?: number;
   loopGuardEnabled?: boolean;
+  loopGuardRepetitions?: number;
   loopGuardIgnoredTools?: string[];
   embeddingMaxTokens?: number;
   embeddingQueryPrefix?: string;

@@ -44,6 +44,15 @@ const SMART_ROUTING_ENV_VARS = [
 ];
 
 describe('smartRouting config resolution', () => {
+  it('bounds saved LoopGuard repetition budgets and resolves environment override', async () => {
+    mockGet.mockResolvedValue({ smartRouting: { loopGuardRepetitions: 5 } });
+    expect((await getSmartRoutingConfig()).loopGuardRepetitions).toBe(5);
+    process.env.MCPHUB_LOOP_GUARD_REPETITIONS = '8';
+    try { expect((await getSmartRoutingConfig()).loopGuardRepetitions).toBe(8); }
+    finally { delete process.env.MCPHUB_LOOP_GUARD_REPETITIONS; }
+    mockGet.mockResolvedValue({ smartRouting: { loopGuardRepetitions: 101 } });
+    expect((await getSmartRoutingConfig()).loopGuardRepetitions).toBe(3);
+  });
   it('resolves the saved LoopGuard switch and exact ignored-tool list', async () => {
     mockGet.mockResolvedValue({ smartRouting: { loopGuardEnabled: true, loopGuardIgnoredTools: ['demo/inspect'] } });
     const config = await getSmartRoutingConfig();
@@ -342,6 +351,7 @@ describe('smartRouting config resolution', () => {
         attributionMode: 'off',
         attributionTtlHours: 168,
         loopGuardEnabled: false,
+        loopGuardRepetitions: 3,
         loopGuardIgnoredTools: [],
         mcpZeroTopServers: 5,
         serverDescriptionMode: 'names',

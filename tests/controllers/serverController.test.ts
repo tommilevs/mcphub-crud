@@ -844,6 +844,21 @@ describe('serverController - updateSystemConfig', () => {
     }
   });
 
+  it('persists a LoopGuard repetition budget submitted alone', async () => {
+    mockRequest.body = { smartRouting: { loopGuardRepetitions: 8 } };
+    await updateSystemConfig(mockRequest as Request, mockResponse as Response);
+    expect(mockSystemConfigDao.update).toHaveBeenCalledWith(expect.objectContaining({
+      smartRouting: expect.objectContaining({ loopGuardRepetitions: 8 }),
+    }));
+  });
+
+  it.each([2, 101, 3.5, '4', null])('rejects invalid LoopGuard repetition budget %s', async (loopGuardRepetitions) => {
+    mockRequest.body = { smartRouting: { loopGuardRepetitions } };
+    await updateSystemConfig(mockRequest as Request, mockResponse as Response);
+    expect(mockStatus).toHaveBeenCalledWith(400);
+    expect(mockSystemConfigDao.update).not.toHaveBeenCalled();
+  });
+
   it.each([null, {}, { allowedCidrs: '192.168.1.0/24' }, { allowedCidrs: ['192.168.1.0/33'] }])(
     'rejects invalid network configuration %s without saving',
     async (network) => {
