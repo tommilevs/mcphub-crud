@@ -1,6 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use std::process::Command;
+use std::{
+    net::{SocketAddr, TcpStream},
+    process::{Command, Stdio},
+    time::Duration,
+};
 use tauri::{
     menu::{CheckMenuItemBuilder, MenuBuilder, MenuItemBuilder},
     tray::TrayIconBuilder,
@@ -8,6 +12,13 @@ use tauri::{
 };
 
 fn start_gateway(app: &AppHandle) {
+    // Autostart and manual launches can overlap. Reuse an already listening
+    // gateway instead of creating a second process that will lose the port
+    // race and leave the tray pointing at an unhealthy instance.
+    let gateway_addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    if TcpStream::connect_timeout(&gateway_addr, Duration::from_millis(250)).is_ok() {
+        return;
+    }
     let Ok(resource_dir) = app.path().resource_dir() else {
         return;
     };
@@ -28,6 +39,9 @@ fn start_gateway(app: &AppHandle) {
     let _ = Command::new(node)
         .arg(backend)
         .current_dir(resource_dir.join("runtime"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .env("PORT", "3000")
         .env("DISABLE_WEB", "true")
         .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
