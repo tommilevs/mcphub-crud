@@ -43,6 +43,8 @@ export interface AttributionSummary {
 export interface LoopGuardSummary {
   advice: number; reviewed: number; helpful: number; falsePositive: number; ignored: number;
   unreviewed: number; assessed: number; reportedFalsePositiveRate: number | null;
+  agentReactions?: { reported: number; warnings: number; accepted: number; declined: number;
+    changedStrategy: number; intentionalRetry: number; source: 'self_reported' };
 }
 export const getLoopGuardSummary = (days = 30) =>
   apiGet<ApiResponse<LoopGuardSummary>>(`/loopguard/summary?days=${days}`);

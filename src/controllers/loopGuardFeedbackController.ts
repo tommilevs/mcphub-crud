@@ -11,10 +11,12 @@ export async function getLoopGuardSummary(req: Request, res: Response): Promise<
   }
   try {
     const rows = await getAppDataSource().query(`WITH advice AS (
-      SELECT state.loop_guard_feedback->>'verdict' AS verdict
+      SELECT state.result_id, state.loop_guard_feedback->>'verdict' AS verdict
       FROM tool_result_state state JOIN tool_results result USING (result_id)
       WHERE state.loop_guard_advice IS NOT NULL
         AND result.timestamp >= NOW() - ($1::integer * INTERVAL '1 day')
+    ), reactions AS (
+      SELECT reaction.result_id, reaction.action FROM tool_result_loop_reactions reaction JOIN advice USING (result_id)
     ), counts AS (
       SELECT COUNT(*) AS total,
         COUNT(*) FILTER (WHERE verdict IN ('helpful','false_positive','ignored')) AS reviewed,
@@ -25,7 +27,12 @@ export async function getLoopGuardSummary(req: Request, res: Response): Promise<
     ) SELECT json_build_object('advice', total, 'reviewed', reviewed,
       'helpful', helpful, 'falsePositive', false_positive, 'ignored', ignored,
       'unreviewed', total-reviewed, 'assessed', helpful+false_positive,
-      'reportedFalsePositiveRate', false_positive::double precision / NULLIF(helpful+false_positive,0)
+      'reportedFalsePositiveRate', false_positive::double precision / NULLIF(helpful+false_positive,0),
+      'agentReactions', (SELECT json_build_object('reported', COUNT(*), 'warnings', COUNT(DISTINCT result_id),
+        'accepted', COUNT(*) FILTER (WHERE action='accepted'),
+        'declined', COUNT(*) FILTER (WHERE action='declined'),
+        'changedStrategy', COUNT(*) FILTER (WHERE action='changed_strategy'),
+        'intentionalRetry', COUNT(*) FILTER (WHERE action='intentional_retry'), 'source', 'self_reported') FROM reactions)
     ) AS summary FROM counts`, [days]);
     res.json({ success: true, data: rows[0].summary, meta: { days } });
   } catch { res.status(503).json({ success: false, message: 'LoopGuard summary is unavailable' }); }

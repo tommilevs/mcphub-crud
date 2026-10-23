@@ -31,5 +31,15 @@ export default function LoopGuardSummaryPanel() {
         <dt className="text-xs text-[var(--hub-ink-3)]">{label}</dt><dd className="mt-1 text-lg hub-mono">{value}</dd>
       </div>)}
     </dl>
+    {data.agentReactions && <div className="space-y-2 border-t border-[var(--hub-line)] pt-3">
+      <p className="text-xs text-[var(--hub-ink-3)]">{t('attribution.loopReactionHelp', 'Agent reactions are explicit self-reports, not verified behavior or outcomes. Counts represent reports; one warning may have several.')}</p>
+      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">{[
+        [t('attribution.loopReactionWarnings', 'Warnings with reported reaction'), data.agentReactions.warnings],
+        [t('attribution.loopReactionAccepted', 'Accepted reports'), data.agentReactions.accepted],
+        [t('attribution.loopReactionDeclined', 'Declined reports'), data.agentReactions.declined],
+        [t('attribution.loopReactionChanged', 'Strategy change reports'), data.agentReactions.changedStrategy],
+        [t('attribution.loopReactionRetry', 'Intentional retry reports'), data.agentReactions.intentionalRetry],
+      ].map(([label, value]) => <div key={label}><dt className="text-xs text-[var(--hub-ink-3)]">{label}</dt><dd className="hub-mono">{value}</dd></div>)}</dl>
+    </div>}
   </section>;
 }

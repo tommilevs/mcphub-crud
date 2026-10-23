@@ -80,6 +80,11 @@ export async function withAttributionHandshake(
     identity: { modelId: null, source: 'unknown' as const, verified: false as const }, repeatIntent,
   };
   const result = await runWithCallAttribution(callContext, async () => {
+    const reactionCallId = getCallAttribution()?.callId;
+    if (context && reactionCallId && input?.loopguard_reaction) {
+      try { await service.recordLoopGuardReaction(context, reactionCallId, input.loopguard_reaction); }
+      catch { /* A reported reaction must never block or replay execution. */ }
+    }
     const result = await handler(cleaned);
     const callId = getCallAttribution()?.callId;
     const evidence = extractDiscoveryEvidence(request.params.name, result);

@@ -21,17 +21,21 @@ both a direct repeat warning and a cycle containing that tool. Environment
 variables override saved settings; `MCPHUB_LOOP_GUARD_IGNORED_TOOLS` accepts a
 comma-separated exclusion list. Exclusions affect advice only, not execution.
 
-After a failed execution, the hub compares the current result with up to five preceding
+The repetition threshold defaults to three, configurable from 3 to 100 in settings
+or `MCPHUB_LOOP_GUARD_REPETITIONS`. Exact `server/tool` budget overrides can be
+added in settings (`smartRouting.loopGuardToolBudgets`, at most 100 entries).
+Cycles honor the larger threshold of both tools. Exclusions still take precedence.
+After a failed execution, the hub compares the current result with bounded preceding
 results in the same authenticated username/key, trace and branch. Advice is
-issued only when all three are failures with the same server, tool, serialized
+issued only when the threshold is met by failures with the same server, tool, serialized
 arguments and RAW digest, and each consecutive gap is less than ten seconds.
 Changed outputs, successful calls, pagination/cursor arguments, polling/status/wait
 tools and retries separated by at least ten seconds are excluded.
-It also detects a six-call A→B→A→B→A→B failure cycle when each corresponding step
+It also detects A→B failure cycles repeated to the configured threshold when each corresponding step
 has the same tool, arguments and output digest. A successful intermediate step,
 changed evidence or backoff in either side suppresses this signal.
 
-Advice links the three original result IDs, is stored in mutable result state,
+Advice links the original result IDs, is stored in mutable result state,
 and is returned in `_meta["dev.mcphub/loopguard"]`. RAW remains unchanged. The
 result-detail page displays the advice and evidence links. Telemetry failures
 leave the execution result untouched. Ordinary result retention also removes
@@ -45,8 +49,31 @@ Feedback cannot create advice on an unrelated result, change RAW or tool
 permissions, suppress future executions, or label task success. These observations
 are evidence for later evaluation, not automatic training preferences.
 
+`GET /api/loopguard/summary?days=30` (admin, 1–3650 days) summarizes retained
+warnings and their latest reviews. The reported false-positive fraction uses only
+Helpful/False positive assessments; ignored and unreviewed warnings are excluded.
+No assessments produces `null`, not zero accuracy. Historical votes do not inflate
+the number of reviewed warnings.
+
+An agent can explicitly report a reaction on its next Smart call:
+
+```json
+{"hub_context":{"trace_key":"k_RETURNED_KEY","loopguard_reaction":{
+  "result_id":"WARNING_RESULT_UUID","action":"changed_strategy"
+}}}
+```
+
+Allowed actions: `accepted`, `declined`, `changed_strategy`, `intentional_retry`.
+The warning must exist in the resolved task trace and branch. Reactions are
+audited by call/context/model segment, deduplicated by call ID, and removed with
+the warning's result. The field is stripped before upstream execution. Storage
+failure never blocks or replays the call. Summary/UI labels these as **self-reported**
+reactions, not verified behavior, success, or training outcomes. One warning may
+have multiple reports. A reaction grants no permissions and does not suppress
+future advice; deliberate-repeat intent remains a separate call-local field.
+
 These are observations of repeated technical failures, not verified task failures
 or training labels. Intentional repeats can still occur and remain permitted.
-Unchanged successful states, per-tool retry policies,
-automatic agent-reaction tracking and optional ToolPilot reasoning escalation are
+Unchanged successful states, independently verified agent behavior/outcomes,
+and optional ToolPilot reasoning escalation are
 subsequent parts of the broader ToolPilot design, not completed features here.

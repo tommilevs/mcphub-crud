@@ -1,6 +1,12 @@
 {
   "attribution": {
     "loopSummary": "LoopGuard 反馈",
+    "loopReactionHelp": "代理反应是明确的自行报告，并非已验证的行为或结果。计数代表报告；一条警告可有多份报告。",
+    "loopReactionWarnings": "有反应报告的警告",
+    "loopReactionAccepted": "接受报告",
+    "loopReactionDeclined": "拒绝报告",
+    "loopReactionChanged": "策略变更报告",
+    "loopReactionRetry": "有意重试报告",
     "loopCycleAdviceCount": "双步骤失败循环重复了{{count}}次。请检查两个错误并考虑改变诊断策略。仍允许有意重试。",
     "loopAdviceCount": "观察到{{count}}次相同的快速失败。重试前请检查已保存的错误和工具模式。仍允许有意重试。",
     "loopSummaryHelp": "最近30天保留的警告。每条警告仅采用最新的明确评价，重复投票不会增加计数。未评价或忽略的警告不属于准确性评价。这些报告不能证明任务结果或代理反应。",

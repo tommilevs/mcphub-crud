@@ -1,6 +1,11 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import type { DiscoveryEvidence } from './discoveryEvidence.js';
 
+export interface LoopGuardReaction {
+  result_id: string;
+  action: 'accepted' | 'declined' | 'changed_strategy' | 'intentional_retry';
+}
+
 export interface AttributionIdentity {
   modelId: string | null;
   source: 'unknown' | 'self_reported';
@@ -34,6 +39,7 @@ export interface AttributionContextStore {
   findByDigest(digest: string): Promise<AttributionContextRecord | null>;
   rotate?(oldDigest: string, next: AttributionContextRecord): Promise<boolean>;
   recordDiscovery?(context: AttributionContextReference, callId: string, evidence: DiscoveryEvidence): Promise<void>;
+  recordLoopGuardReaction?(context: AttributionContextReference, callId: string, reaction: LoopGuardReaction): Promise<void>;
 }
 
 export type AttributionContextReference = Pick<AttributionContextRecord,
@@ -43,6 +49,14 @@ const digestKey = (key: string): string => createHash('sha256').update(key).dige
 
 /** Correlation only: callers must supply their authenticated, tenant-scoped principal. */
 export class AttributionContextService {
+  async recordLoopGuardReaction(context: AttributionContextReference, callId: string, value: unknown) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+    const reaction = value as LoopGuardReaction;
+    if (typeof reaction.result_id !== 'string' ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reaction.result_id) ||
+      !['accepted', 'declined', 'changed_strategy', 'intentional_retry'].includes(reaction.action)) return;
+    await this.store.recordLoopGuardReaction?.(context, callId, { result_id: reaction.result_id, action: reaction.action });
+  }
   async recordDiscovery(context: AttributionContextReference, callId: string, evidence: DiscoveryEvidence) {
     await this.store.recordDiscovery?.(context, callId, evidence);
   }

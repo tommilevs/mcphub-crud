@@ -1,9 +1,20 @@
-import type { AttributionContextRecord, AttributionContextStore, AttributionContextReference } from '../../services/attributionContextService.js';
+import type { AttributionContextRecord, AttributionContextStore, AttributionContextReference, LoopGuardReaction } from '../../services/attributionContextService.js';
 import { randomUUID } from 'node:crypto';
 import type { DiscoveryEvidence } from '../../services/discoveryEvidence.js';
 
 export class AttributionContextRepository implements AttributionContextStore {
   constructor(private readonly db: { query(sql: string, parameters?: unknown[]): Promise<any> }) {}
+
+  async recordLoopGuardReaction(context: AttributionContextReference, callId: string, reaction: LoopGuardReaction): Promise<void> {
+    await this.db.query(`INSERT INTO tool_result_loop_reactions
+      (call_id,result_id,context_id,trace_id,branch_id,model_segment_id,action)
+      SELECT $1,result.result_id,$3,$4::uuid,$5::uuid,$6,$7 FROM tool_results result
+      JOIN tool_result_state state USING (result_id)
+      WHERE result.result_id=$2 AND state.loop_guard_advice IS NOT NULL
+        AND result.attribution->>'traceId'=$4::text AND result.attribution->>'branchId'=$5::text
+      ON CONFLICT (call_id) DO NOTHING`, [callId, reaction.result_id, context.contextId,
+      context.traceId, context.branchId, context.modelSegmentId, reaction.action]);
+  }
 
   async recordDiscovery(context: AttributionContextReference, callId: string, evidence: DiscoveryEvidence): Promise<void> {
     await this.db.query(`INSERT INTO attribution_discovery_events

@@ -214,4 +214,28 @@ suite('attribution PostgreSQL isolated schema', () => {
       { json: (value: any) => { summary = value.data; }, status: () => { throw new Error('Summary failed'); } } as unknown as Response);
     expect(summary).toMatchObject({ reviewed: 1, helpful: 0, falsePositive: 0, ignored: 1, assessed: 0, reportedFalsePositiveRate: null });
   });
+  test('agent reactions require a warning in the resolved branch, deduplicate and expire with the result', async () => {
+    const context = await service.start('reaction-user');
+    const other = await service.start('other-user');
+    const resultId = randomUUID();
+    await pool.query(`INSERT INTO tool_results (result_id,timestamp,raw,attribution) VALUES ($1,NOW(),'untouched',$2)`,
+      [resultId, JSON.stringify({ traceId: context.traceId, branchId: context.branchId })]);
+    await pool.query(`INSERT INTO tool_result_state (result_id,loop_guard_advice) VALUES ($1,'{"trigger":"repeated_identical_failure"}')`, [resultId]);
+    const repo = new AttributionContextRepository({ query: async (sql, args) => (await pool.query(sql, args)).rows });
+    const reaction = { result_id: resultId, action: 'changed_strategy' as const };
+    await repo.recordLoopGuardReaction(other, randomUUID(), reaction);
+    await repo.recordLoopGuardReaction({ ...context, branchId: randomUUID() }, randomUUID(), reaction);
+    expect((await pool.query('SELECT count(*) FROM tool_result_loop_reactions')).rows[0].count).toBe('0');
+    const callId = randomUUID();
+    await repo.recordLoopGuardReaction(context, callId, reaction);
+    await repo.recordLoopGuardReaction(context, callId, reaction);
+    expect((await pool.query('SELECT action,source FROM tool_result_loop_reactions')).rows).toEqual([{ action: 'changed_strategy', source: 'self_reported' }]);
+    let summary: any;
+    await getLoopGuardSummary({ user: { isAdmin: true }, query: {} } as unknown as Request,
+      { json: (value: any) => { summary = value.data; }, status: () => { throw new Error('Summary failed'); } } as unknown as Response);
+    expect(summary.agentReactions).toMatchObject({ reported: 1, warnings: 1, changedStrategy: 1, accepted: 0, source: 'self_reported' });
+    expect((await pool.query('SELECT raw FROM tool_results WHERE result_id=$1', [resultId])).rows[0].raw).toBe('untouched');
+    await pool.query('DELETE FROM tool_results WHERE result_id=$1', [resultId]);
+    expect((await pool.query('SELECT count(*) FROM tool_result_loop_reactions')).rows[0].count).toBe('0');
+  });
 });

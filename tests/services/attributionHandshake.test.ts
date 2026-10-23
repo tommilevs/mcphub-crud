@@ -2,6 +2,29 @@ import { AttributionContextService } from '../../src/services/attributionContext
 import { withAttributionHandshake } from '../../src/services/attributionHandshake.js';
 import { getCallAttribution } from '../../src/services/callAttribution.js';
 
+test('records explicit agent reactions only with resolved context and strips them upstream', async () => {
+  const records = new Map<string, any>();
+  const recordLoopGuardReaction = jest.fn(async () => {});
+  const service = new AttributionContextService({ insert: async r => { records.set(r.keyDigest, r); },
+    findByDigest: async d => records.get(d) ?? null, recordLoopGuardReaction });
+  const issued = await service.start('alice');
+  const reaction = { result_id: 'af3e4f22-cd76-4b99-8cf7-52db210e54de', action: 'changed_strategy' };
+  const request = { params: { name: 'call_tool', arguments: { hub_context: { trace_key: issued.traceKey, loopguard_reaction: reaction } } } };
+  const handler = jest.fn(async (cleaned) => { expect(cleaned.params.arguments.hub_context).toBeUndefined(); return { content: [] }; });
+  await withAttributionHandshake(request, 'alice', service, handler);
+  expect(recordLoopGuardReaction).toHaveBeenCalledWith(expect.objectContaining({ branchId: issued.branchId }), expect.any(String), reaction);
+  recordLoopGuardReaction.mockClear();
+  for (const invalid of [{ result_id: 'bad', action: 'accepted' }, { ...reaction, action: 'task_success' }]) {
+    await service.recordLoopGuardReaction(issued, 'test-call', invalid);
+  }
+  expect(recordLoopGuardReaction).not.toHaveBeenCalled();
+  await withAttributionHandshake(request, 'bob', service, handler);
+  expect(recordLoopGuardReaction).not.toHaveBeenCalled();
+  recordLoopGuardReaction.mockRejectedValue(new Error('offline'));
+  await withAttributionHandshake(request, 'alice', service, handler);
+  expect(handler).toHaveBeenCalledTimes(3);
+});
+
 test('handshake preserves nested content and continues the same context without leaking keys downstream', async () => {
   const records = new Map<string, any>();
   const service = new AttributionContextService({
