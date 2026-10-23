@@ -11,7 +11,107 @@ use std::{thread, time::Duration};
 #[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(windows)]
+use std::net::{SocketAddr, TcpStream};
+#[cfg(windows)]
+use std::process::{Child, Command, Stdio};
+#[cfg(windows)]
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+#[cfg(windows)]
+use std::time::Duration;
+#[cfg(windows)]
 use windows_service::{define_windows_service, service_dispatcher};
+
+#[cfg(windows)]
+fn gateway_port_in_use() -> bool {
+    TcpStream::connect_timeout(
+        &SocketAddr::from(([127, 0, 0, 1], 3000)),
+        Duration::from_millis(250),
+    )
+    .is_ok()
+}
+
+#[cfg(windows)]
+fn spawn_gateway() -> Option<Child> {
+    if gateway_port_in_use() {
+        return None;
+    }
+    let executable = std::env::current_exe().ok()?;
+    let install_dir = executable.parent()?;
+    let resource_dir = install_dir.join("runtime");
+    let node = resource_dir.join("node.exe");
+    let backend = resource_dir.join("dist").join("index.js");
+    if !node.exists() || !backend.exists() {
+        return None;
+    }
+    let data_dir = std::env::var_os("ProgramData")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| install_dir.to_path_buf())
+        .join("MCPHub");
+    std::fs::create_dir_all(&data_dir).ok()?;
+    Command::new(node)
+        .arg(backend)
+        .current_dir(resource_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .env("PORT", "3000")
+        .env("DISABLE_WEB", "true")
+        .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
+        .env("MCPHUB_SETTING_PATH", data_dir.join("mcp_settings.json"))
+        .spawn()
+        .ok()
+}
+
+#[cfg(windows)]
+fn run_gateway_watchdog(
+    child: Arc<Mutex<Option<Child>>>,
+    stopping: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    std::thread::Builder::new()
+        .name("mcphub-gateway-watchdog".to_string())
+        .spawn(move || {
+            while !stopping.load(Ordering::Acquire) {
+                let needs_start = {
+                    let mut guard = match child.lock() {
+                        Ok(guard) => guard,
+                        Err(_) => break,
+                    };
+                    match guard.as_mut() {
+                        Some(process) => match process.try_wait() {
+                            Ok(Some(_)) => {
+                                *guard = None;
+                                true
+                            }
+                            Ok(None) => false,
+                            Err(_) => {
+                                *guard = None;
+                                true
+                            }
+                        },
+                        None => true,
+                    }
+                };
+                if needs_start && !gateway_port_in_use() {
+                    if let Some(process) = spawn_gateway() {
+                        if let Ok(mut guard) = child.lock() {
+                            *guard = Some(process);
+                        }
+                    }
+                }
+                std::thread::sleep(Duration::from_secs(2));
+            }
+            if let Ok(mut guard) = child.lock() {
+                if let Some(mut process) = guard.take() {
+                    let _ = process.kill();
+                    let _ = process.wait();
+                }
+            }
+        })
+        .expect("failed to start gateway watchdog")
+}
 
 fn handle_request(
     supervisor: &mut RuntimeSupervisor,
@@ -88,12 +188,10 @@ fn serve_named_pipe_client(
     secrets: std::sync::Arc<SecretStore>,
 ) {
     use std::os::windows::io::FromRawHandle;
-    use windows_sys::Win32::{
-        Foundation::HANDLE,
-        Storage::FileSystem::WriteFile,
-    };
+    use windows_sys::Win32::{Foundation::HANDLE, Storage::FileSystem::WriteFile};
     let raw_handle = pipe as HANDLE;
-    let mut reader = BufReader::new(unsafe { std::fs::File::from_raw_handle(raw_handle as *mut _) });
+    let mut reader =
+        BufReader::new(unsafe { std::fs::File::from_raw_handle(raw_handle as *mut _) });
     let mut line = String::new();
     loop {
         let read = match reader.read_line(&mut line) {
@@ -136,10 +234,11 @@ fn run_named_pipe(
     supervisor: std::sync::Arc<std::sync::Mutex<RuntimeSupervisor>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use windows_sys::Win32::{
-        Foundation::{
-            CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE,
+        Foundation::{CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE},
+        Security::{
+            Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW,
+            PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
         },
-        Security::{Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW, PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES},
         Storage::FileSystem::PIPE_ACCESS_DUPLEX,
         System::Pipes::{
             ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
@@ -225,9 +324,20 @@ fn service_main(_arguments: Vec<OsString>) {
         service_control_handler::{self, ServiceControlHandlerResult},
     };
 
+    let stopping = Arc::new(AtomicBool::new(false));
+    let gateway_child: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+    let event_stopping = Arc::clone(&stopping);
+    let event_gateway = Arc::clone(&gateway_child);
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
         match control_event {
             ServiceControl::Stop | ServiceControl::Shutdown => {
+                event_stopping.store(true, Ordering::Release);
+                if let Ok(mut guard) = event_gateway.lock() {
+                    if let Some(mut process) = guard.take() {
+                        let _ = process.kill();
+                        let _ = process.wait();
+                    }
+                }
                 // Dropping the supervisor closes each Job Object and takes
                 // managed descendants down with the service process.
                 std::process::exit(0);
@@ -255,6 +365,7 @@ fn service_main(_arguments: Vec<OsString>) {
         eprintln!("failed to publish MCPHub service status: {error}");
         return;
     }
+    let _gateway_watchdog = run_gateway_watchdog(Arc::clone(&gateway_child), Arc::clone(&stopping));
     let supervisor = std::sync::Arc::new(std::sync::Mutex::new(RuntimeSupervisor::new()));
     // Keep restart policy active even when no dashboard/API client is polling
     // status. The named-pipe handlers share the same supervisor lock.
@@ -271,6 +382,7 @@ fn service_main(_arguments: Vec<OsString>) {
     if let Err(error) = run_named_pipe(supervisor) {
         eprintln!("MCPHub runtime service stopped: {error}");
     }
+    stopping.store(true, Ordering::Release);
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
