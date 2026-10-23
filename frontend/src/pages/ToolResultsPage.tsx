@@ -151,6 +151,7 @@ const ToolResultsPage: React.FC = () => {
       {filter.sessionId && <button className="hub-btn active:scale-[0.98]" type="button" onClick={() => void runTimeline()}><Clock3 size={15} /> {t('toolResults.timeline')}</button>}
     </form>
     {error && <div className="hub-card p-4 text-sm text-red-500">{error}</div>}
+    {timelineError && !timeline && <div className="hub-card p-4 text-sm text-red-500">{timelineError}</div>}
     {timeline && <div className="hub-card p-3">
       <div className="flex items-center justify-between gap-2"><div><div className="text-sm font-medium">{t('toolResults.timeline')}</div><div className="hub-mono text-xs text-[var(--hub-ink-3)] truncate">{filter.sessionId}</div></div><button className="hub-btn" onClick={() => setTimeline(null)}>{t('common.close')}</button></div>
       {timelineError && <div className="mt-2 text-sm text-red-500">{timelineError}</div>}
