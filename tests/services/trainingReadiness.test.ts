@@ -31,6 +31,8 @@ test('trusted eligibility requires all server-side evidence gates', () => {
   expect(assessTrainingReadiness(record).tier).toBe('unverified');
   const evidence = { consent: true, outcomeReviewed: true, discoveryAvailable: true,
     redactionReviewed: true, causalCorrelationVerified: true };
+  expect(assessTrainingReadiness(record, evidence).reasons).toContain('call_quality_review_missing');
+  Object.assign(evidence, { callQualityReviewed: true });
   expect(assessTrainingReadiness(record, evidence)).toEqual({ tier: 'trusted', eligible: true, reasons: [] });
   for (const field of Object.keys(evidence)) {
     expect(assessTrainingReadiness(record, { ...evidence, [field]: false }).eligible).toBe(false);

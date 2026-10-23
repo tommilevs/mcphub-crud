@@ -1,5 +1,11 @@
 {
   "attribution": {
+    "resultReview": "Call quality and privacy review",
+    "resultReviewHelp": "Review this call’s tool choice, arguments, metadata and original RAW. Privacy approval asserts that this material is suitable for training; it does not redact RAW, grant task consent, verify model identity or approve other calls.",
+    "callQuality": "Tool choice and argument quality",
+    "callQualityValues": { "unknown": "Not assessed", "correct": "Correct", "incorrect": "Incorrect", "uncertain": "Uncertain" },
+    "privacyReview": "Privacy review",
+    "privacyValues": { "unreviewed": "Not reviewed", "approved": "Reviewed and approved", "rejected": "Rejected for training" },
     "loopSummary": "LoopGuard feedback",
     "toolPilotAdvice": "Internal ToolPilot suggestion",
     "toolPilotLimit": "Based on metadata only; unverified advice from a separate internal model. No tool was executed.",
@@ -41,7 +47,8 @@
       "training_consent_missing": "Permission to use this data for training has not been recorded.",
       "reviewed_outcome_missing": "The task outcome has not been reviewed.",
       "discovery_context_missing": "Tool discovery context is incomplete.",
-      "redaction_review_missing": "Sensitive-data review is incomplete."
+      "redaction_review_missing": "Sensitive-data review is incomplete.",
+      "call_quality_review_missing": "This call’s tool choice and argument quality have not been assessed."
     },
     "summaryHelp": "Retained calls from the last 30 days. Execution errors do not establish tool-selection errors or task outcomes.",
     "totalCalls": "Retained calls",

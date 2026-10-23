@@ -50,6 +50,8 @@ export const getLoopGuardSummary = (days = 30) =>
   apiGet<ApiResponse<LoopGuardSummary>>(`/loopguard/summary?days=${days}`);
 export const saveTaskReview = (taskId: string, review: { outcome: string; trainingConsent: boolean; revision: number }) =>
   apiPut<ApiResponse<unknown>>(`/attribution/tasks/${encodeURIComponent(taskId)}/review`, review);
+export const saveToolResultReview = (id: string, review: { quality: string; privacy: string; revision: number; rawSha256: string }) =>
+  apiPut<ApiResponse<unknown>>(`/tool-results/${encodeURIComponent(id)}/review`, review);
 export const submitLoopGuardFeedback = (resultId: string, verdict: 'helpful' | 'false_positive' | 'ignored') =>
   apiPost<ApiResponse<unknown>>(`/tool-results/${encodeURIComponent(resultId)}/loopguard-feedback`, { verdict });
 export const getAttributionSummary = (days = 30) =>

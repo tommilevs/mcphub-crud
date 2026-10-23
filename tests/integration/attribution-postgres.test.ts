@@ -8,6 +8,8 @@ let mockSummaryDb: { query: (sql: string, parameters?: unknown[]) => Promise<any
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => mockSummaryDb }));
 import { getAttributionSummary } from '../../src/controllers/attributionController.js';
 import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
+import { saveToolResultReview } from '../../src/controllers/toolResultReviewController.js';
+import { ensureToolResultReviewSchema } from '../../src/db/toolResultReviewSchema.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
@@ -128,6 +130,8 @@ suite('attribution PostgreSQL isolated schema', () => {
     await pool.query('INSERT INTO tool_result_state (result_id) VALUES ($1)', [resultId]);
     await pool.query(`INSERT INTO attribution_task_reviews (task_id, revision, outcome, training_consent, reviewed_by)
       VALUES ($1,1,'success',true,'reviewer'),($1,2,'partial',false,'reviewer')`, [task.taskId]);
+    await ensureToolResultReviewSchema(pool);
+    await ensureToolResultReviewSchema(pool);
     const repository = new ToolResultRepositoryDb(mockSummaryDb as never);
     const result = await repository.findById(resultId);
     expect(result?.taskReview).toMatchObject({ revision: 2, outcome: 'partial', trainingConsent: false });
@@ -237,5 +241,27 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect((await pool.query('SELECT raw FROM tool_results WHERE result_id=$1', [resultId])).rows[0].raw).toBe('untouched');
     await pool.query('DELETE FROM tool_results WHERE result_id=$1', [resultId]);
     expect((await pool.query('SELECT count(*) FROM tool_result_loop_reactions')).rows[0].count).toBe('0');
+  });
+  test('result reviews bind RAW digest, preserve audit and reject concurrent stale revisions', async () => {
+    await pool.query('ALTER TABLE tool_results ADD COLUMN payload_available boolean DEFAULT true');
+    const id = randomUUID(), digest = 'a'.repeat(64);
+    await pool.query(`INSERT INTO tool_results(result_id,raw,raw_sha256) VALUES ($1,'original',$2)`, [id,digest]);
+    await pool.query('INSERT INTO tool_result_state(result_id) VALUES ($1)', [id]);
+    const save = async (revision: number, privacy = 'approved', rawSha256 = digest) => {
+      let status = 200;
+      await saveToolResultReview({ user: { isAdmin: true, username: 'reviewer' }, params: { id },
+        body: { revision, privacy, quality: 'correct', rawSha256 } } as unknown as Request,
+      { json: () => {}, status: (value: number) => { status=value; return { json: () => {} }; } } as unknown as Response);
+      return status;
+    };
+    expect(await save(0,'approved','b'.repeat(64))).toBe(409);
+    expect((await Promise.all([save(0),save(0)])).sort()).toEqual([200,409]);
+    expect(await save(1,'rejected')).toBe(200);
+    const record = await new ToolResultRepositoryDb(mockSummaryDb as never).findById(id);
+    expect(record?.resultReview).toMatchObject({ revision: 2, privacy: 'rejected', rawSha256: digest });
+    expect(record?.raw).toBe('original');
+    expect((await pool.query('SELECT count(*) FROM tool_result_reviews WHERE result_id=$1',[id])).rows[0].count).toBe('2');
+    await pool.query('DELETE FROM tool_results WHERE result_id=$1',[id]);
+    expect((await pool.query('SELECT count(*) FROM tool_result_reviews WHERE result_id=$1',[id])).rows[0].count).toBe('0');
   });
 });

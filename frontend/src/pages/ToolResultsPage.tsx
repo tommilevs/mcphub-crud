@@ -6,6 +6,7 @@ import Pagination from '@/components/ui/Pagination';
 import AttributionSummaryPanel from '@/components/AttributionSummaryPanel';
 import LoopGuardSummaryPanel from '@/components/LoopGuardSummaryPanel';
 import TaskReviewForm from '@/components/TaskReviewForm';
+import ToolResultReviewForm from '@/components/ToolResultReviewForm';
 import LoopGuardFeedbackButtons from '@/components/LoopGuardFeedbackButtons';
 import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
@@ -197,6 +198,13 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
       </section>}
       {detail.attribution?.taskId && <TaskReviewForm key={`${detail.resultId}:${detail.taskReview?.revision ?? 0}`}
         taskId={detail.attribution.taskId} review={detail.taskReview} onSaved={async () => {
+          const response = await getToolResult(resultId);
+          if (response.success && response.data) setDetail(response.data);
+          else throw new Error(response.message || t('toolResults.fetchError'));
+        }} />}
+      {detail.payloadAvailable && detail.rawSha256 && <ToolResultReviewForm
+        key={`${detail.resultId}:review:${detail.resultReview?.revision ?? 0}`} resultId={detail.resultId}
+        digest={detail.rawSha256} review={detail.resultReview} onSaved={async () => {
           const response = await getToolResult(resultId);
           if (response.success && response.data) setDetail(response.data);
           else throw new Error(response.message || t('toolResults.fetchError'));

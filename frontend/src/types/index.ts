@@ -932,6 +932,8 @@ export interface ToolResultSummary {
   loopGuardAdvice?: { trigger: string; resultIds: string[]; recommendation: string;
     toolPilot?: { role: 'internal_toolpilot'; model: string; reportedModel?: string; suggestion: string; evidence: 'metadata_only' } };
   taskReview?: { revision: number; outcome: string; trainingConsent: boolean; reviewedBy: string; reviewedAt: string };
+  resultReview?: { revision: number; rawSha256: string; quality: 'unknown' | 'correct' | 'incorrect' | 'uncertain';
+    privacy: 'unreviewed' | 'approved' | 'rejected'; reviewedBy: string; reviewedAt: string };
   trainingReadiness?: {
     tier: 'trusted' | 'unverified' | 'unknown' | 'conflicted' | 'excluded';
     eligible: boolean;

@@ -1,4 +1,5 @@
 ---
+
 title: Model attribution
 description: Optional task correlation and self-reported model identity
 ---
@@ -102,3 +103,22 @@ candidates are recorded and truncation is explicit. A telemetry failure leaves
 the original response unchanged. Evidence follows context retention. Fingerprints
 alone do not satisfy the full discovery-context training gate; a complete,
 privacy-reviewed schema catalogue and task context are still required for SFT.
+
+## Per-call review gates
+
+Result details provide independent tool-choice/argument quality and privacy reviews.
+`PUT /api/tool-results/:id/review` accepts `quality` (`unknown`, `correct`,
+`incorrect`, `uncertain`), `privacy` (`unreviewed`, `approved`, `rejected`),
+the previously observed `revision` (zero initially), and `rawSha256`.
+Only admins may review. The digest must match the retained payload; unavailable
+payloads and stale revisions cannot be approved. Reviews append audit revisions
+and the latest review is returned with history. Result retention cascades reviews.
+
+RAW is never rewritten. Privacy approval asserts a review of this call's original
+payload, arguments and metadata; it does not perform redaction or permit use of
+other calls. Rejection or returning to unreviewed status closes this gate again.
+Task training consent, outcome review, complete discovery/task context and trusted
+causal model provenance remain separate requirements. Correct/incorrect is an
+explicit call assessment, not inferred from execution status or task success.
+An incorrect call must not be used as a positive SFT demonstration merely because
+its review is complete; dataset-specific selection still applies.

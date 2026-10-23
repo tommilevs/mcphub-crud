@@ -1,4 +1,5 @@
 import { ensureLoopGuardFeedbackSchema } from './loopGuardFeedbackSchema.js';
+import { ensureToolResultReviewSchema } from './toolResultReviewSchema.js';
 type Queryable = {
   query(sql: string, parameters?: unknown[]): Promise<unknown>;
 };
@@ -118,4 +119,5 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
       FOR EACH ROW EXECUTE FUNCTION reject_tool_result_update();
   `);
   await ensureLoopGuardFeedbackSchema(dataSource);
+  await ensureToolResultReviewSchema(dataSource);
 };

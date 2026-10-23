@@ -1,5 +1,11 @@
 {
   "attribution": {
+    "resultReview": "调用质量与隐私审核",
+    "resultReviewHelp": "请审核该调用的工具选择、参数、元数据和原始RAW。隐私批准表示这些材料适合训练；它不会修改RAW、授予任务同意、验证模型身份或批准其他调用。",
+    "callQuality": "工具选择与参数质量",
+    "callQualityValues": { "unknown": "未评估", "correct": "正确", "incorrect": "错误", "uncertain": "不确定" },
+    "privacyReview": "隐私审核",
+    "privacyValues": { "unreviewed": "未审核", "approved": "已审核并批准", "rejected": "拒绝用于训练" },
     "loopSummary": "LoopGuard 反馈",
     "toolPilotAdvice": "内部 ToolPilot 建议",
     "toolPilotLimit": "仅基于元数据；来自独立内部模型的未验证建议。未执行任何工具。",
@@ -41,7 +47,8 @@
       "training_consent_missing": "尚未记录使用这些数据进行训练的许可。",
       "reviewed_outcome_missing": "任务结果尚未审核。",
       "discovery_context_missing": "工具发现上下文不完整。",
-      "redaction_review_missing": "敏感数据审核尚未完成。"
+      "redaction_review_missing": "敏感数据审核尚未完成。",
+      "call_quality_review_missing": "该调用的工具选择与参数质量尚未评估。"
     },
     "summaryHelp": "最近 30 天保留的调用。执行错误不代表工具选择错误或任务结果。",
     "totalCalls": "保留的调用",

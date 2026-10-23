@@ -13,6 +13,7 @@ export interface TrainingEvidence {
   discoveryAvailable?: boolean;
   redactionReviewed?: boolean;
   causalCorrelationVerified?: boolean;
+  callQualityReviewed?: boolean;
 }
 
 export function assessTrainingReadiness(record: TrainingReadinessInput, evidence: TrainingEvidence = {}) {
@@ -32,5 +33,6 @@ export function assessTrainingReadiness(record: TrainingReadinessInput, evidence
   if (!evidence.outcomeReviewed) reasons.push('reviewed_outcome_missing');
   if (!evidence.discoveryAvailable) reasons.push('discovery_context_missing');
   if (!evidence.redactionReviewed) reasons.push('redaction_review_missing');
+  if (!evidence.callQualityReviewed) reasons.push('call_quality_review_missing');
   return { tier, eligible: reasons.length === 0, reasons };
 }
