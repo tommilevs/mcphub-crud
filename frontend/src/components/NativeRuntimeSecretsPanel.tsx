@@ -4,7 +4,7 @@ import { useToast } from '@/contexts/ToastContext';
 
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 type NativeProcessStatus = { id: string; state?: string; running: boolean; pid?: number; restarts: number; restart_limit?: number };
-type NativeRuntimeStatusResponse = NativeProcessStatus[];
+type NativeRuntimeStatusResponse = NativeProcessStatus[] | { processes: NativeProcessStatus[]; gatewayHealthy?: boolean };
 
 /** Admin-only enrollment UI. The value is sent once and never rendered back. */
 const NativeRuntimeSecretsPanel: React.FC = () => {
@@ -13,20 +13,24 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
   const [value, setValue] = useState('');
   const [busy, setBusy] = useState(false);
   const [runtimeStatus, setRuntimeStatus] = useState<NativeProcessStatus[] | null>(null);
+  const [gatewayHealthy, setGatewayHealthy] = useState<boolean | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
 
   const refreshStatus = async () => {
     const response = await apiGet<{ success?: boolean; data?: NativeRuntimeStatusResponse; message?: string }>(
       '/native-runtime/status',
     );
-    const processes = response?.data;
+    const payload = response?.data;
+    const processes = Array.isArray(payload) ? payload : payload?.processes;
     if (response?.success === false || !Array.isArray(processes)) {
       setRuntimeStatus(null);
+      setGatewayHealthy(null);
       setStatusError(response?.message || 'Native runtime unavailable');
       return;
     }
     setStatusError(null);
     setRuntimeStatus(processes);
+    setGatewayHealthy(Array.isArray(payload) || !payload ? null : payload.gatewayHealthy ?? null);
   };
 
   useEffect(() => {
@@ -94,7 +98,7 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
       </p>
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
         <span className={statusError ? 'text-red-600' : 'text-green-600'}>
-          {statusError || `Native runtime online · ${runtimeStatus?.length ?? 0} managed process(es)`}
+          {statusError || `Native runtime online · ${runtimeStatus?.length ?? 0} managed process(es)${gatewayHealthy === null ? '' : gatewayHealthy ? ' · gateway healthy' : ' · gateway unhealthy'}`}
         </span>
         <button type="button" onClick={() => void refreshStatus()} className="hub-btn secondary !py-1 !px-2">
           Refresh status
