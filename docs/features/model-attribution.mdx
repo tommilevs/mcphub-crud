@@ -122,3 +122,26 @@ causal model provenance remain separate requirements. Correct/incorrect is an
 explicit call assessment, not inferred from execution status or task success.
 An incorrect call must not be used as a positive SFT demonstration merely because
 its review is complete; dataset-specific selection still applies.
+
+## Gateway proof reference (not yet a runtime adapter)
+
+`src/services/gatewayProvenance.ts` provides an instrumented OpenAI-compatible
+gateway reference. `createGatewayProof` accepts the concrete provider response,
+selects exactly one response tool-call ID and requires its function name and JSON
+arguments to match the outgoing MCP invocation. The signed proof binds the
+provider-reported model/response/tool-call IDs, invocation request ID and content
+digest, authenticated-owner digest, timestamp and random nonce. JSON object key
+order does not change the binding.
+
+`verifyGatewayProof` requires an operator-trusted adapter key resolver and a
+durable, atomic nonce-consumption callback. Proofs expire after 60 seconds, permit
+at most five seconds of clock skew, and reject changed invocations, owners,
+signatures, unknown adapters and replay. Keys must contain at least 32 characters
+and must never be supplied by the model or stored in project files.
+
+This is an adapter foundation, **not an enabled verified-identity path**. Runtime
+wiring, durable replay storage and a reviewed deployment of the instrumented
+gateway are still required. An HMAC proves that a trusted adapter signed the
+correlation; it cannot independently prove the provider or a compromised adapter
+truthful. Merely passing a configured model or attaching unsigned client metadata
+must never upgrade attribution. Existing calls remain self-reported/unknown.
