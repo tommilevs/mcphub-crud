@@ -17,6 +17,7 @@
       "../target/release/mcphub-runtime-service.exe": "mcphub-runtime-service.exe",
       "../staging/node.exe": "runtime/node.exe",
       "../staging/dist": "runtime/dist",
+      "../staging/frontend": "runtime/frontend",
       "../staging/node_modules": "runtime/node_modules"
     },
     "windows": {

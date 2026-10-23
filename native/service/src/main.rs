@@ -75,7 +75,7 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .env("PORT", "3000")
-        .env("DISABLE_WEB", "true")
+        .env("DISABLE_WEB", "false")
         .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
         .env("MCPHUB_SETTING_PATH", data_dir.join("mcp_settings.json"))
         .spawn()

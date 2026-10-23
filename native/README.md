@@ -33,7 +33,7 @@ represented safely by the service.
 
 The Windows Tauri installer can include a self-contained gateway runtime. Run
 `native/package-windows.ps1` before `cargo tauri build` to stage portable
-`node.exe`, the compiled `dist`, and production `node_modules`. The installed
+`node.exe`, the compiled backend `dist`, frontend `frontend/dist`, and production `node_modules`. The installed
 Windows service starts and watches that gateway from the machine runtime
 directory, so it remains available across logoff and tray closure. The tray
 reuses an already listening gateway and only starts a fallback process when

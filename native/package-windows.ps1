@@ -24,8 +24,11 @@ try {
   & corepack pnpm install --prod --node-linker=hoisted --config.dangerouslyAllowAllBuilds=true --dir $staging --ignore-workspace
   if ($LASTEXITCODE -ne 0) { throw "Production dependency staging failed with exit code $LASTEXITCODE" }
   Copy-Item -LiteralPath (Join-Path $repo 'dist') -Destination (Join-Path $staging 'dist') -Recurse -Force
+  $stagedFrontend = Join-Path $staging 'frontend\dist'
+  New-Item -ItemType Directory -Path $stagedFrontend -Force | Out-Null
+  Copy-Item -Path (Join-Path $repo 'frontend\dist\*') -Destination $stagedFrontend -Recurse -Force
   Copy-Item -LiteralPath $NodeExecutable -Destination (Join-Path $staging 'node.exe')
-  Write-Output "Staged backend runtime (dist + production dependencies) in $staging"
+  Write-Output "Staged gateway runtime (backend + frontend + production dependencies) in $staging"
 }
 finally {
   Pop-Location
