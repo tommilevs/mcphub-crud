@@ -8,6 +8,20 @@ development transport on non-Windows and a named-pipe control transport on
 Windows. `tray` keeps the dashboard hidden until requested, exposes
 dashboard/restart/exit actions, and is packaged as an NSIS installer.
 
+Managed Windows children start suspended and hidden. The supervisor enables
+`KILL_ON_JOB_CLOSE`, assigns the child to its job, and only then resumes execution.
+Containment failures terminate the new child rather than leaving an unmanaged
+process. Exited parents have their remaining descendants terminated even when no
+restart budget remains. Failed launch attempts consume the same bounded restart
+budget as successful respawns.
+
+Run `./native/build-windows.ps1 -Action test` for native Windows tests. These
+exercise actual parent/descendant processes, stopping and dropping the supervisor,
+orphan cleanup after parent exit, bounded failed respawns, MCP stdio exchange and
+DPAPI round-trip. Test fixtures clean their temporary executable and processes.
+This is not a substitute for installed SCM service, tray, installer and full
+gateway acceptance testing.
+
 The Node gateway uses the native service only when
 `MCPHUB_NATIVE_RUNTIME_ENABLED=true` is set on Windows. The default SDK stdio
 transport remains unchanged. Install the service after building with:

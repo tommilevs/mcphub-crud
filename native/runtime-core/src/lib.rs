@@ -94,8 +94,79 @@ fn drain_stderr(stderr: Option<std::process::ChildStderr>) {
         .name("mcphub-runtime-stderr".to_string())
         .spawn(move || {
             let mut buffer = [0u8; 4096];
-            while stderr.read(&mut buffer).ok().filter(|size| *size > 0).is_some() {}
+            while stderr
+                .read(&mut buffer)
+                .ok()
+                .filter(|size| *size > 0)
+                .is_some()
+            {}
         });
+}
+
+struct ProcessIo {
+    stdin: ChildStdin,
+    stdout: BufReader<ChildStdout>,
+    #[cfg(windows)]
+    job: windows::JobHandle,
+}
+
+fn spawn_managed(spec: ManagedProcessSpec) -> Result<ManagedProcess, SupervisorError> {
+    let mut command = Command::new(&spec.command);
+    command
+        .args(&spec.args)
+        .envs(&spec.env)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+        // Attach the job before application code can fork an uncontained descendant.
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+    }
+    let mut child = command.spawn().map_err(|source| SupervisorError::Spawn {
+        id: spec.id.clone(),
+        source,
+    })?;
+    let prepared = (|| -> Result<ProcessIo, SupervisorError> {
+        let missing = || SupervisorError::Spawn {
+            id: spec.id.clone(),
+            source: std::io::Error::other("managed stdio unavailable"),
+        };
+        let stdin = child.stdin.take().ok_or_else(missing)?;
+        let stdout = BufReader::new(child.stdout.take().ok_or_else(missing)?);
+        #[cfg(windows)]
+        let job = windows::assign_to_job(child.id())?;
+        Ok(ProcessIo {
+            stdin,
+            stdout,
+            #[cfg(windows)]
+            job,
+        })
+    })();
+    let io = match prepared {
+        Ok(io) => io,
+        Err(error) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+    };
+    drain_stderr(child.stderr.take());
+    Ok(ManagedProcess {
+        spec,
+        child,
+        stdin: io.stdin,
+        stdout: io.stdout,
+        restarts: 0,
+        last_start: Instant::now(),
+        unhealthy: false,
+        protocol_ready: false,
+        last_error: None,
+        #[cfg(windows)]
+        job: io.job,
+    })
 }
 
 impl RuntimeSupervisor {
@@ -126,54 +197,18 @@ impl RuntimeSupervisor {
         }
         let id = spec.id.clone();
         self.stopped.remove(&id);
-        let mut command = Command::new(&spec.command);
-        command
-            .args(&spec.args)
-            .envs(&spec.env)
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let mut child = command.spawn().map_err(|source| SupervisorError::Spawn {
-            id: id.clone(),
-            source,
-        })?;
-        let stdin = child.stdin.take().ok_or_else(|| SupervisorError::Spawn {
-            id: id.clone(),
-            source: std::io::Error::other("stdio stdin unavailable"),
-        })?;
-        let stdout = child.stdout.take().ok_or_else(|| SupervisorError::Spawn {
-            id: id.clone(),
-            source: std::io::Error::other("stdio stdout unavailable"),
-        })?;
-        drain_stderr(child.stderr.take());
-        #[cfg(windows)]
-        let job = windows::assign_to_job(child.id())?;
+        let process = spawn_managed(spec)?;
         let status = ProcessStatus {
             id: id.clone(),
             state: "STARTING",
             running: true,
-            pid: Some(child.id()),
+            pid: Some(process.child.id()),
             restarts: 0,
-            restart_limit: spec.restart_limit,
+            restart_limit: process.spec.restart_limit,
             protocol_ready: false,
             last_error: None,
         };
-        self.processes.insert(
-            id,
-            ManagedProcess {
-                spec,
-                child,
-                stdin,
-                stdout: BufReader::new(stdout),
-                restarts: 0,
-                last_start: Instant::now(),
-                unhealthy: false,
-                protocol_ready: false,
-                last_error: None,
-                #[cfg(windows)]
-                job,
-            },
-        );
+        self.processes.insert(id, process);
         Ok(status)
     }
 
@@ -199,6 +234,8 @@ impl RuntimeSupervisor {
         let _ = process.child.kill();
         let _ = process.child.wait();
         self.stopped.remove(id);
+        #[cfg(windows)]
+        process.job.terminate();
         self.start(process.spec)
     }
 
@@ -210,38 +247,27 @@ impl RuntimeSupervisor {
                 continue;
             };
             let exited = process.child.try_wait().ok().flatten().is_some();
+            #[cfg(windows)]
+            if exited {
+                process.job.terminate();
+            }
             if exited
                 && process.restarts < process.spec.restart_limit
                 && process.last_start.elapsed()
                     >= Duration::from_millis(process.spec.restart_delay_ms)
             {
-                let mut command = Command::new(&process.spec.command);
-                command
-                    .args(&process.spec.args)
-                    .envs(&process.spec.env)
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::piped());
-                if let Ok(mut child) = command.spawn() {
-                    let Some(stdin) = child.stdin.take() else {
-                        continue;
-                    };
-                    let Some(stdout) = child.stdout.take() else {
-                        continue;
-                    };
-                    drain_stderr(child.stderr.take());
-                    process.child = child;
-                    process.stdin = stdin;
-                    process.stdout = BufReader::new(stdout);
-                    #[cfg(windows)]
-                    if let Ok(job) = windows::assign_to_job(process.child.id()) {
-                        process.job = job;
+                process.restarts += 1;
+                process.last_start = Instant::now();
+                match spawn_managed(process.spec.clone()) {
+                    Ok(mut replacement) => {
+                        replacement.restarts = process.restarts;
+                        *process = replacement;
                     }
-                    process.restarts += 1;
-                    process.last_start = Instant::now();
-                    process.unhealthy = false;
-                    process.protocol_ready = false;
-                    process.last_error = None;
+                    Err(error) => {
+                        process.unhealthy = true;
+                        process.protocol_ready = false;
+                        process.last_error = Some(error.to_string().chars().take(1000).collect());
+                    }
                 }
             }
             let running = process.child.try_wait().ok().flatten().is_none();
@@ -375,10 +401,18 @@ impl Default for RuntimeSupervisor {
 mod windows {
     use super::SupervisorError;
     use std::io;
-    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
-    use windows_sys::Win32::System::JobObjects::{AssignProcessToJobObject, CreateJobObjectW};
+    use windows_sys::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+    use windows_sys::Win32::System::JobObjects::{
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+    };
     use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA, PROCESS_TERMINATE,
+        OpenProcess, OpenThread, ResumeThread, PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA,
+        PROCESS_TERMINATE, THREAD_SUSPEND_RESUME,
     };
 
     pub struct JobHandle(HANDLE);
@@ -386,6 +420,13 @@ mod windows {
     // access through its service mutex before moving this owner between the
     // named-pipe client threads.
     unsafe impl Send for JobHandle {}
+    impl JobHandle {
+        pub fn terminate(&self) {
+            unsafe {
+                TerminateJobObject(self.0, 1);
+            }
+        }
+    }
     impl Drop for JobHandle {
         fn drop(&mut self) {
             unsafe {
@@ -409,22 +450,76 @@ mod windows {
             }
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if job.is_null() {
+                let source = io::Error::last_os_error();
                 CloseHandle(process);
                 return Err(SupervisorError::Spawn {
                     id: pid.to_string(),
-                    source: io::Error::last_os_error(),
+                    source,
                 });
             }
-            if AssignProcessToJobObject(job, process) == 0 {
-                CloseHandle(process);
-                CloseHandle(job);
-                return Err(SupervisorError::Spawn {
-                    id: pid.to_string(),
-                    source: io::Error::last_os_error(),
-                });
-            }
+            let job = JobHandle(job);
+            let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+            let result = if SetInformationJobObject(
+                job.0,
+                JobObjectExtendedLimitInformation,
+                &limits as *const _ as *const _,
+                std::mem::size_of_val(&limits) as u32,
+            ) == 0
+                || AssignProcessToJobObject(job.0, process) == 0
+            {
+                Err(io::Error::last_os_error())
+            } else {
+                resume_created_process(pid)
+            };
             CloseHandle(process);
-            Ok(JobHandle(job))
+            result.map_err(|source| SupervisorError::Spawn {
+                id: pid.to_string(),
+                source,
+            })?;
+            Ok(job)
         }
+    }
+
+    // std::process::Child does not expose the initial thread handle. The process
+    // was created suspended; resume its threads only after job assignment succeeds.
+    unsafe fn resume_created_process(pid: u32) -> io::Result<()> {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0);
+        if snapshot == INVALID_HANDLE_VALUE {
+            return Err(io::Error::last_os_error());
+        }
+        let result = (|| {
+            let mut entry: THREADENTRY32 = std::mem::zeroed();
+            entry.dwSize = std::mem::size_of_val(&entry) as u32;
+            let mut available = Thread32First(snapshot, &mut entry);
+            let mut resumed = false;
+            while available != 0 {
+                if entry.th32OwnerProcessID == pid {
+                    let thread = OpenThread(THREAD_SUSPEND_RESUME, 0, entry.th32ThreadID);
+                    if thread.is_null() {
+                        return Err(io::Error::last_os_error());
+                    }
+                    let previous = ResumeThread(thread);
+                    let error = if previous == u32::MAX {
+                        Some(io::Error::last_os_error())
+                    } else {
+                        None
+                    };
+                    CloseHandle(thread);
+                    if let Some(error) = error {
+                        return Err(error);
+                    }
+                    resumed |= previous > 0;
+                }
+                available = Thread32Next(snapshot, &mut entry);
+            }
+            if resumed {
+                Ok(())
+            } else {
+                Err(io::Error::other("created process has no suspended thread"))
+            }
+        })();
+        CloseHandle(snapshot);
+        result
     }
 }
