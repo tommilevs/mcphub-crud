@@ -935,7 +935,10 @@ export interface ToolResultSummary {
   status: ToolResultStatus;
   group?: string;
   username?: string;
+  keyId?: string;
   sessionId?: string;
+  conversationId?: string;
+  parentResultId?: string;
   objective?: string;
   arguments: string | null;
   rawBytes: number;

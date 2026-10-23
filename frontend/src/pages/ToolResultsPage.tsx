@@ -86,6 +86,12 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           [t('toolResults.size'), bytes(detail.rawBytes)],
         ].map(([label, value]) => <div key={label} className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{label}</div><div className="mt-1 text-sm text-[var(--hub-ink)]">{value}</div></div>)}
       </div>
+      {(detail.sessionId || detail.conversationId || detail.parentResultId || detail.rawSha256) && <div className="hub-card grid gap-2 p-3 text-xs md:grid-cols-2">
+        {detail.sessionId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.session')}</div><div className="hub-mono mt-1 break-all">{detail.sessionId}</div></div>}
+        {detail.conversationId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.conversation')}</div><div className="hub-mono mt-1 break-all">{detail.conversationId}</div></div>}
+        {detail.parentResultId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.parent')}</div><Link className="hub-mono mt-1 block break-all text-[var(--hub-accent)]" to={`/tool-results/${detail.parentResultId}`}>{detail.parentResultId}</Link></div>}
+        {detail.rawSha256 && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.rawHash')}</div><div className="hub-mono mt-1 break-all">{detail.rawSha256}</div></div>}
+      </div>}
       {detail.objective && <div className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.objective')}</div><div className="mt-1 text-sm">{detail.objective}</div></div>}
       <div className="hub-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--hub-line)] px-3 py-2">
