@@ -1,4 +1,5 @@
 import { validateAllowedCidrs } from '../utils/ssrf.js';
+import { parseLoopGuardToolBudgets } from '../utils/loopGuardPolicy.js';
 import {
   copyCredentialBindings,
   deleteCredentialBindings,
@@ -2033,6 +2034,7 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         smartRouting.attributionMode !== undefined ||
         smartRouting.loopGuardEnabled !== undefined ||
         smartRouting.loopGuardRepetitions !== undefined ||
+        smartRouting.loopGuardToolBudgets !== undefined ||
         smartRouting.loopGuardIgnoredTools !== undefined ||
         smartRouting.attributionTtlHours !== undefined ||
         typeof smartRouting.mcpZeroTopServers === 'number' ||
@@ -2470,6 +2472,13 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
           res.status(400).json({ success: false, message: 'LoopGuard repetitions must be 3–100' }); return;
         }
         systemConfig.smartRouting.loopGuardRepetitions = smartRouting.loopGuardRepetitions;
+      }
+      if (smartRouting.loopGuardToolBudgets !== undefined) {
+        const budgets = parseLoopGuardToolBudgets(smartRouting.loopGuardToolBudgets);
+        if (!budgets) {
+          res.status(400).json({ success: false, message: 'Invalid LoopGuard tool budgets (server/tool: 3–100, maximum 100 tools)' }); return;
+        }
+        systemConfig.smartRouting.loopGuardToolBudgets = budgets;
       }
       if (smartRouting.loopGuardIgnoredTools !== undefined) {
         const entries = smartRouting.loopGuardIgnoredTools;

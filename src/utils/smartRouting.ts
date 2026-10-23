@@ -2,6 +2,7 @@ import { expandEnvVars } from '../config/index.js';
 import { getSystemConfigDao } from '../dao/DaoFactory.js';
 import { migrateLegacySmartRoutingConfig } from '../dao/SystemConfigDao.js';
 import { logger } from './logger.js';
+import { parseLoopGuardToolBudgets } from './loopGuardPolicy.js';
 import {
   DEFAULT_TOOL_DEFINITION_FIELDS,
   TOOL_DEFINITION_FIELDS,
@@ -72,6 +73,7 @@ export interface SmartRoutingConfig {
   attributionTtlHours?: number;
   loopGuardEnabled?: boolean;
   loopGuardRepetitions?: number;
+  loopGuardToolBudgets?: Record<string, number>;
   loopGuardIgnoredTools?: string[];
   /**
    * Controls how available servers are listed in the search_tools meta-tool description.
@@ -386,6 +388,7 @@ export async function getSmartRoutingConfig(): Promise<SmartRoutingConfig> {
         const parsed = Number(value);
         return Number.isSafeInteger(parsed) && parsed >= 3 && parsed <= 100 ? parsed : 3;
       }),
+    loopGuardToolBudgets: parseLoopGuardToolBudgets(smartRoutingSettings.loopGuardToolBudgets ?? {}) ?? {},
     loopGuardIgnoredTools: cfg<string[]>('loopGuardIgnoredTools',
       { MCPHUB_LOOP_GUARD_IGNORED_TOOLS: process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS },
       smartRoutingSettings.loopGuardIgnoredTools, [], (value: unknown) => {

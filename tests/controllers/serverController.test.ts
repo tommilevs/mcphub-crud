@@ -852,6 +852,23 @@ describe('serverController - updateSystemConfig', () => {
     }));
   });
 
+  it.each([{ 'demo/inspect': 8 }, {}])('persists or clears per-tool LoopGuard budgets %s', async (loopGuardToolBudgets) => {
+    mockRequest.body = { smartRouting: { loopGuardToolBudgets } };
+    await updateSystemConfig(mockRequest as Request, mockResponse as Response);
+    expect(mockSystemConfigDao.update).toHaveBeenCalledWith(expect.objectContaining({
+      smartRouting: expect.objectContaining({ loopGuardToolBudgets }),
+    }));
+  });
+
+  it.each([null, [], { demo: 4 }, { 'demo/inspect': 2 }, { 'demo/inspect': '5' }, { 'demo/inspect': 3.5 },
+    Object.fromEntries(Array.from({ length: 101 }, (_, index) => [`demo/t${index}`, 4]))])(
+    'rejects invalid per-tool LoopGuard policies %s', async (loopGuardToolBudgets) => {
+      mockRequest.body = { smartRouting: { loopGuardToolBudgets } };
+      await updateSystemConfig(mockRequest as Request, mockResponse as Response);
+      expect(mockStatus).toHaveBeenCalledWith(400);
+      expect(mockSystemConfigDao.update).not.toHaveBeenCalled();
+    });
+
   it.each([2, 101, 3.5, '4', null])('rejects invalid LoopGuard repetition budget %s', async (loopGuardRepetitions) => {
     mockRequest.body = { smartRouting: { loopGuardRepetitions } };
     await updateSystemConfig(mockRequest as Request, mockResponse as Response);
