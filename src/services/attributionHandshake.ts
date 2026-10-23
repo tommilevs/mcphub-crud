@@ -21,12 +21,18 @@ export async function withAttributionHandshake(
       return handler(cleaned);
     }
     if (input.action === 'start' && (input.model_claim == null || typeof input.model_claim === 'string')) {
-      const issued = await service.start(principal, { modelClaim: input.model_claim });
+      const issued = await service.start(principal, {
+        modelClaim: input.model_claim, clientNameClaim: input.client_name_claim,
+        clientInstanceHint: input.client_instance_hint, agentRunHint: input.agent_run_hint,
+        taskHint: input.task_hint,
+      });
       context = issued;
       issuedKey = issued.traceKey;
-    } else if (input.action === 'rotate' && typeof input.trace_key === 'string' &&
+    } else if (['rotate', 'fork'].includes(input.action) && typeof input.trace_key === 'string' &&
       (input.model_claim == null || typeof input.model_claim === 'string')) {
-      const issued = await service.rotate(principal, input.trace_key, input.model_claim);
+      const issued = input.action === 'fork'
+        ? await service.fork(principal, input.trace_key, input.model_claim)
+        : await service.rotate(principal, input.trace_key, input.model_claim);
       context = issued;
       issuedKey = issued?.traceKey;
     } else if (!input.action && typeof input.trace_key === 'string') {
@@ -40,6 +46,7 @@ export async function withAttributionHandshake(
   return { ...result, _meta: { ...result._meta, 'dev.mcphub/context': {
     context_id: context.contextId, task_id: context.taskId, trace_id: context.traceId,
     model_segment_id: context.modelSegmentId,
+    branch_id: context.branchId,
     ...(issuedKey ? { trace_key: issuedKey } : {}),
     model_identity: { model_id: context.identity.modelId, source: context.identity.source, verified: false },
   } } };

@@ -15,6 +15,8 @@ export const ensureAttributionContextSchema = async (db: {
       claimed_model_id varchar(255),
       identity_source varchar(32) NOT NULL CHECK (identity_source IN ('unknown', 'self_reported'))
     );
+    ALTER TABLE attribution_contexts ADD COLUMN IF NOT EXISTS branch_id uuid;
+    ALTER TABLE attribution_contexts ADD COLUMN IF NOT EXISTS client_claims jsonb NOT NULL DEFAULT '{}';
     CREATE INDEX IF NOT EXISTS attribution_contexts_expiry_idx ON attribution_contexts (expires_at);
     CREATE INDEX IF NOT EXISTS attribution_contexts_principal_trace_idx
       ON attribution_contexts (principal, trace_id);

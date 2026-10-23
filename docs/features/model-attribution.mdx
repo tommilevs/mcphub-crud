@@ -27,6 +27,13 @@ task and trace, creates a fresh context/segment and key, and revokes the old key
 in one PostgreSQL statement. Concurrent rotation allows only one successor.
 Calls already running retain their original per-call snapshot.
 
+Use `action: "fork"` with a current key to create a parallel branch of the same
+task/trace. The parent key remains valid. The child receives its own branch,
+segment and key; the parent's model and client claims are not inherited.
+Optional `client_name_claim`, `client_instance_hint`, `agent_run_hint` and
+`task_hint` on `start` are bounded unverified claims, stored separately from
+server-generated identifiers. A task hint never becomes a server task ID.
+
 Keys contain 192 random bits; PostgreSQL stores only SHA-256 digests. They expire
 after seven days and are scoped to the authenticated username/API-key pair.
 Keys correlate calls and grant no tool permissions. Missing, expired or foreign
@@ -36,7 +43,7 @@ additional immutable JSON column with a unique call ID.
 
 Model claims are always `self_reported` and `verified: false`. This implementation
 does not detect models from IP addresses, model inventories or request timing.
-Trusted host/gateway adapters, namespaced input metadata, branch identities,
+Trusted host/gateway adapters, namespaced input metadata,
 identity analytics, training export gates and the settings UI are still pending.
 Clients must be able to read MCP result metadata to retain the issued key.
 An interrupted response can lose its newly issued key; start a new context to recover.

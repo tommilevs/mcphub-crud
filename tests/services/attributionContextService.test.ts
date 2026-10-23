@@ -1,6 +1,32 @@
 import { AttributionContextService } from '../../src/services/attributionContextService.js';
 
 describe('attribution contexts', () => {
+  it('forks independent parallel branches without attributing the parent model to the child', async () => {
+    const records = new Map<string, any>();
+    const service = new AttributionContextService({
+      insert: async (r) => { records.set(r.keyDigest, r); },
+      findByDigest: async (d) => records.get(d) ?? null,
+    });
+    const parent = await service.start('alice', { modelClaim: 'parent-model' });
+    const child = await service.fork('alice', parent.traceKey);
+    expect(child?.traceId).toBe(parent.traceId);
+    expect(child?.taskId).toBe(parent.taskId);
+    expect(child?.branchId).not.toBe(parent.branchId);
+    expect(child?.identity.source).toBe('unknown');
+    expect(await service.resolve('alice', parent.traceKey)).not.toBeNull();
+  });
+  it('keeps client claims distinct from server identities and validates their size', async () => {
+    const service = new AttributionContextService({ insert: async () => {}, findByDigest: async () => null });
+    const context = await service.start('alice', { modelClaim: 'model-a',
+      clientNameClaim: 'Codex', clientInstanceHint: 'instance-one',
+      agentRunHint: 'run-one', taskHint: 'client-task',
+    });
+    expect(context.clientClaims.clientNameClaim).toBe('Codex');
+    expect(context.clientClaims.taskHint).toBe('client-task');
+    expect(context.taskId).not.toBe('client-task');
+    expect(context.branchId).toMatch(/^[0-9a-f-]{36}$/);
+    await expect(service.start('alice', { clientNameClaim: 'x'.repeat(256) })).rejects.toThrow('Invalid client claim');
+  });
   it('rotates a model segment while preserving task and trace and revoking the old key', async () => {
     const records = new Map<string, any>();
     const service = new AttributionContextService({

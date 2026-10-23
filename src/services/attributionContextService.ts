@@ -6,11 +6,20 @@ export interface AttributionIdentity {
   verified: false;
 }
 
+export interface AttributionClientClaims {
+  clientNameClaim?: string;
+  clientInstanceHint?: string;
+  agentRunHint?: string;
+  taskHint?: string;
+}
+
 export interface AttributionContextRecord {
   contextId: string;
   taskId: string;
   traceId: string;
   modelSegmentId: string;
+  branchId: string;
+  clientClaims: AttributionClientClaims;
   principal: string;
   keyDigest: string;
   createdAt: Date;
@@ -37,23 +46,53 @@ export class AttributionContextService {
     if (!Number.isSafeInteger(ttlMs) || ttlMs <= 0) throw new Error('Invalid context TTL');
   }
 
-  async start(principal: string, claims: { modelClaim?: string | null } = {}) {
+  async start(principal: string, claims: AttributionClientClaims & { modelClaim?: string | null } = {}) {
     if (!principal) throw new Error('Authenticated principal is required');
     const modelId = claims.modelClaim?.trim() || null;
     if (modelId && (modelId.length > 255 || /[\u0000-\u001f]/.test(modelId))) {
       throw new Error('Invalid model claim');
+    }
+    const clientClaims: AttributionClientClaims = {};
+    for (const name of ['clientNameClaim', 'clientInstanceHint', 'agentRunHint', 'taskHint'] as const) {
+      const value = claims[name];
+      if (value == null) continue;
+      if (typeof value !== 'string' || value.length > 255 || /[\u0000-\u001f]/.test(value)) {
+        throw new Error('Invalid client claim');
+      }
+      if (value.trim()) clientClaims[name] = value.trim();
     }
     const traceKey = `k_${randomBytes(24).toString('base64url')}`;
     const createdAt = this.now();
     const record: AttributionContextRecord = {
       contextId: randomUUID(), taskId: randomUUID(), traceId: randomUUID(),
       modelSegmentId: randomUUID(), principal, keyDigest: digestKey(traceKey),
+      branchId: randomUUID(), clientClaims,
       createdAt, expiresAt: new Date(createdAt.getTime() + this.ttlMs),
       identity: { modelId, source: modelId ? 'self_reported' : 'unknown', verified: false },
     };
     await this.store.insert(record);
     const { keyDigest: _digest, principal: _principal, ...context } = record;
     return { ...context, traceKey };
+  }
+
+  async fork(principal: string, traceKey: string, modelClaim?: string | null) {
+    const previous = await this.resolve(principal, traceKey);
+    if (!previous) return null;
+    const modelId = modelClaim?.trim() || null;
+    if (modelId && (modelId.length > 255 || /[\u0000-\u001f]/.test(modelId))) {
+      throw new Error('Invalid model claim');
+    }
+    const nextKey = `k_${randomBytes(24).toString('base64url')}`;
+    const createdAt = this.now();
+    const next: AttributionContextRecord = {
+      ...previous, contextId: randomUUID(), branchId: randomUUID(), modelSegmentId: randomUUID(),
+      clientClaims: {}, keyDigest: digestKey(nextKey), createdAt,
+      expiresAt: new Date(createdAt.getTime() + this.ttlMs), revokedAt: undefined,
+      identity: { modelId, source: modelId ? 'self_reported' : 'unknown', verified: false },
+    };
+    await this.store.insert(next);
+    const { keyDigest: _digest, principal: _principal, ...context } = next;
+    return { ...context, traceKey: nextKey };
   }
 
   async rotate(principal: string, traceKey: string, modelClaim?: string | null) {

@@ -1,6 +1,6 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
-import type { AttributionIdentity } from './attributionContextService.js';
+import type { AttributionIdentity, AttributionClientClaims } from './attributionContextService.js';
 
 export interface CallAttribution {
   callId: string;
@@ -9,16 +9,19 @@ export interface CallAttribution {
   traceId: string | null;
   modelSegmentId: string | null;
   identity: AttributionIdentity;
+  branchId?: string | null;
+  clientClaims?: AttributionClientClaims;
 }
 
 const storage = new AsyncLocalStorage<CallAttribution>();
 export const getCallAttribution = (): CallAttribution | undefined => storage.getStore();
 export const runWithCallAttribution = <T>(
-  context: Pick<CallAttribution, 'contextId' | 'taskId' | 'traceId' | 'modelSegmentId' | 'identity'> | null,
+  context: Omit<CallAttribution, 'callId'> | null,
   callback: () => T,
 ): T => storage.run({
   callId: randomUUID(), contextId: context?.contextId ?? null,
   taskId: context?.taskId ?? null, traceId: context?.traceId ?? null,
   modelSegmentId: context?.modelSegmentId ?? null,
+  branchId: context?.branchId ?? null, clientClaims: context?.clientClaims ?? {},
   identity: context?.identity ?? { modelId: null, source: 'unknown', verified: false },
 }, callback);

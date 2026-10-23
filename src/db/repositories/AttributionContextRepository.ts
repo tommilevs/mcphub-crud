@@ -6,11 +6,12 @@ export class AttributionContextRepository implements AttributionContextStore {
   async insert(record: AttributionContextRecord): Promise<void> {
     await this.db.query(`INSERT INTO attribution_contexts
       (context_id, task_id, trace_id, model_segment_id, principal, key_digest,
-       created_at, expires_at, claimed_model_id, identity_source)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [
+       created_at, expires_at, claimed_model_id, identity_source, branch_id, client_claims)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [
       record.contextId, record.taskId, record.traceId, record.modelSegmentId,
       record.principal, record.keyDigest, record.createdAt, record.expiresAt,
       record.identity.modelId, record.identity.source,
+      record.branchId, JSON.stringify(record.clientClaims),
     ]);
   }
 
@@ -21,11 +22,11 @@ export class AttributionContextRepository implements AttributionContextStore {
       RETURNING task_id, trace_id
     ) INSERT INTO attribution_contexts
       (context_id, task_id, trace_id, model_segment_id, principal, key_digest,
-       created_at, expires_at, claimed_model_id, identity_source)
-      SELECT $4, task_id, trace_id, $5, $3, $6, $1, $7, $8, $9 FROM revoked
+       created_at, expires_at, claimed_model_id, identity_source, branch_id, client_claims)
+      SELECT $4, task_id, trace_id, $5, $3, $6, $1, $7, $8, $9, $10, $11 FROM revoked
       RETURNING context_id`, [next.createdAt, oldDigest, next.principal,
       next.contextId, next.modelSegmentId, next.keyDigest, next.expiresAt,
-      next.identity.modelId, next.identity.source]);
+      next.identity.modelId, next.identity.source, next.branchId, JSON.stringify(next.clientClaims)]);
     return rows.length === 1;
   }
 
@@ -36,6 +37,7 @@ export class AttributionContextRepository implements AttributionContextStore {
     return {
       contextId: row.context_id, taskId: row.task_id, traceId: row.trace_id,
       modelSegmentId: row.model_segment_id, principal: row.principal, keyDigest: row.key_digest,
+      branchId: row.branch_id ?? null, clientClaims: row.client_claims ?? {},
       createdAt: new Date(row.created_at), expiresAt: new Date(row.expires_at),
       revokedAt: row.revoked_at ? new Date(row.revoked_at) : undefined,
       identity: { modelId: row.claimed_model_id, source: row.identity_source, verified: false },

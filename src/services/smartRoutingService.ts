@@ -368,9 +368,13 @@ Available servers: ${serversList}`,
       tool.inputSchema = { ...tool.inputSchema, properties: {
         ...tool.inputSchema.properties,
         hub_context: { type: 'object', additionalProperties: false, properties: {
-          action: { type: 'string', enum: ['start', 'rotate'] },
+          action: { type: 'string', enum: ['start', 'rotate', 'fork'] },
           model_claim: { type: ['string', 'null'], maxLength: 255 },
           trace_key: { type: 'string', maxLength: 64 },
+          client_name_claim: { type: 'string', maxLength: 255 },
+          client_instance_hint: { type: 'string', maxLength: 255 },
+          agent_run_hint: { type: 'string', maxLength: 255 },
+          task_hint: { type: 'string', maxLength: 255 },
         } },
       } };
       tool.description += '\nOptional attribution: start a task with hub_context.action=start; report model_claim only if known exactly. Retain the returned trace_key for subsequent calls. Never guess your model.';
