@@ -8,12 +8,28 @@ export async function withAttributionHandshake(
   service: AttributionContextService,
   handler: (request: any) => Promise<any>,
 ): Promise<any> {
-  const input = request.params?.arguments?.hub_context;
-  if (!input || !['search_tools', 'describe_tool', 'call_tool'].includes(request.params?.name)) {
+  const hub = request.params?.arguments?.hub_context;
+  const meta = request.params?._meta?.['dev.mcphub/attribution'];
+  if ((!hub && !meta) || !['search_tools', 'describe_tool', 'call_tool'].includes(request.params?.name)) {
     return handler(request);
   }
-  const { hub_context: _context, ...args } = request.params.arguments;
-  const cleaned = { ...request, params: { ...request.params, arguments: args } };
+  const { hub_context: _context, ...args } = request.params.arguments ?? {};
+  const { 'dev.mcphub/attribution': _attribution, ...remainingMeta } = request.params._meta ?? {};
+  const cleaned = { ...request, params: { ...request.params, arguments: args,
+    ...(request.params._meta ? { _meta: remainingMeta } : {}),
+  } };
+  const validObject = (value: any) => value && typeof value === 'object' && !Array.isArray(value);
+  const keyConflict = validObject(hub) && validObject(meta) && hub.trace_key && meta.trace_key && hub.trace_key !== meta.trace_key;
+  const modelConflict = validObject(hub) && validObject(meta) && hub.model_claim && meta.model_id && hub.model_claim !== meta.model_id;
+  if (keyConflict || modelConflict) {
+    return runWithCallAttribution({ contextId: null, taskId: null, traceId: null, modelSegmentId: null,
+      identity: { modelId: null, source: 'unknown', verified: false },
+      conflictReason: keyConflict ? 'conflicting_trace_keys' : 'conflicting_model_claims',
+    }, () => handler(cleaned));
+  }
+  const input = validObject(hub)
+    ? { ...hub, trace_key: hub.trace_key ?? (validObject(meta) ? meta.trace_key : undefined) }
+    : hub ?? (validObject(meta) ? { trace_key: meta.trace_key } : meta);
   let context;
   let issuedKey: string | undefined;
   try {
@@ -37,6 +53,14 @@ export async function withAttributionHandshake(
       issuedKey = issued?.traceKey;
     } else if (!input.action && typeof input.trace_key === 'string') {
       context = await service.resolve(principal, input.trace_key);
+      const currentClaim = input.model_claim ?? meta?.model_id;
+      if (context && typeof currentClaim === 'string' && currentClaim !== context.identity.modelId) {
+        return runWithCallAttribution({ contextId: context.contextId, taskId: context.taskId,
+          traceId: context.traceId, modelSegmentId: null,
+          identity: { modelId: null, source: 'unknown', verified: false },
+          conflictReason: 'model_claim_differs_from_segment',
+        }, () => handler(cleaned));
+      }
     }
   } catch {
     // Attribution persistence must not prevent ordinary execution in compatible mode.

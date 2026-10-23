@@ -11,6 +11,7 @@ export interface CallAttribution {
   identity: AttributionIdentity;
   branchId?: string | null;
   clientClaims?: AttributionClientClaims;
+  conflictReason?: string;
 }
 
 const storage = new AsyncLocalStorage<CallAttribution>();
@@ -23,5 +24,6 @@ export const runWithCallAttribution = <T>(
   taskId: context?.taskId ?? null, traceId: context?.traceId ?? null,
   modelSegmentId: context?.modelSegmentId ?? null,
   branchId: context?.branchId ?? null, clientClaims: context?.clientClaims ?? {},
+  ...(context?.conflictReason ? { conflictReason: context.conflictReason } : {}),
   identity: context?.identity ?? { modelId: null, source: 'unknown', verified: false },
 }, callback);

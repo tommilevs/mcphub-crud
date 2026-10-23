@@ -1,5 +1,6 @@
 import { AttributionContextService } from '../../src/services/attributionContextService.js';
 import { withAttributionHandshake } from '../../src/services/attributionHandshake.js';
+import { getCallAttribution } from '../../src/services/callAttribution.js';
 
 test('handshake preserves nested content and continues the same context without leaking keys downstream', async () => {
   const records = new Map<string, any>();
@@ -48,4 +49,32 @@ test('a foreign key degrades to unknown and preserves execution', async () => {
     toolName: 'demo', hub_context: { trace_key: issued.traceKey },
   } } }, 'bob', service, async () => ({ content: [] }));
   expect(result._meta).toBeUndefined();
+});
+
+test('namespaced metadata continues a context and is removed before upstream invocation', async () => {
+  const records = new Map<string, any>();
+  const service = new AttributionContextService({
+    insert: async (r) => { records.set(r.keyDigest, r); },
+    findByDigest: async (d) => records.get(d) ?? null,
+  });
+  const context = await service.start('alice', { modelClaim: 'model-a' });
+  const result = await withAttributionHandshake({ params: { name: 'call_tool', arguments: { toolName: 'demo' },
+    _meta: { 'dev.mcphub/attribution': { trace_key: context.traceKey, verified: true }, other: 'preserved' },
+  } }, 'alice', service, async (request) => {
+    expect(request.params._meta).toEqual({ other: 'preserved' });
+    expect(getCallAttribution()?.identity.verified).toBe(false);
+    return { content: [] };
+  });
+  expect(result._meta['dev.mcphub/context'].context_id).toBe(context.contextId);
+});
+
+test('conflicting input keys yield unknown attribution instead of selecting either owner', async () => {
+  const service = new AttributionContextService({ insert: async () => {}, findByDigest: async () => null });
+  await withAttributionHandshake({ params: { name: 'call_tool', arguments: {
+    toolName: 'demo', hub_context: { trace_key: 'first' },
+  }, _meta: { 'dev.mcphub/attribution': { trace_key: 'second' } } } }, 'alice', service, async () => {
+    expect(getCallAttribution()?.identity.source).toBe('unknown');
+    expect(getCallAttribution()?.conflictReason).toBe('conflicting_trace_keys');
+    return { content: [] };
+  });
 });

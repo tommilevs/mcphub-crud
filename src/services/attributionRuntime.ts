@@ -9,7 +9,7 @@ export async function runWithAttribution(request: any, handler: (request: any) =
   }
   const current = RequestContextService.getInstance().getRequestContext();
   // Anonymous requests lack a stable authenticated owner for correlation keys.
-  if (!request.params?.arguments?.hub_context || (!current?.username && !current?.keyId)) {
+  if ((!request.params?.arguments?.hub_context && !request.params?._meta?.['dev.mcphub/attribution']) || (!current?.username && !current?.keyId)) {
     return runWithCallAttribution(null, () => handler(request));
   }
   const principal = JSON.stringify([current.username ?? null, current.keyId ?? null]);
