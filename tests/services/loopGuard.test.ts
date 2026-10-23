@@ -4,6 +4,24 @@ const observation = (index: number, overrides = {}) => ({
   resultId: `result-${index}`, server: 'demo', tool: 'inspect', status: 'error',
   arguments: '{}', resultDigest: 'same-error', timestamp: new Date(1000 * index), ...overrides,
 });
+
+test('respects a larger retry budget for identical failures and cycles', () => {
+  const identical = Array.from({ length: 4 }, (_, index) => observation(4 - index));
+  expect(detectRepeatedFailure(identical.slice(0, 3), { repetitions: 4 })).toBeNull();
+  expect(detectRepeatedFailure(identical, { repetitions: 4 })?.resultIds).toHaveLength(4);
+  const cycle = Array.from({ length: 8 }, (_, index) => observation(8 - index, {
+    tool: index % 2 ? 'diagnose-b' : 'diagnose-a',
+  }));
+  expect(detectRepeatedFailure(cycle.slice(0, 6), { repetitions: 4 })).toBeNull();
+  expect(detectRepeatedFailure(cycle, { repetitions: 4 })?.resultIds).toHaveLength(8);
+});
+
+test('rejects invalid retry budgets rather than weakening detection', () => {
+  const calls = [observation(3), observation(2), observation(1)];
+  for (const repetitions of [0, 1, 2, 3.5, 101, NaN, Infinity]) {
+    expect(detectRepeatedFailure(calls, { repetitions })).toBeNull();
+  }
+});
 test('advises after three identical rapid failures without suppressing execution', () => {
   expect(detectRepeatedFailure([observation(3), observation(2), observation(1)])).toMatchObject({
     trigger: 'repeated_identical_failure', resultIds: ['result-3', 'result-2', 'result-1'],

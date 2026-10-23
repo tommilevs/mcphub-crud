@@ -35,17 +35,19 @@ const rapidFailures = (calls: LoopGuardObservation[]) => {
   }
   return true;
 };
-export function detectRepeatedFailure(recent: LoopGuardObservation[]): LoopGuardAdvice | null {
-  const firstThree = recent.slice(0, 3);
-  if (firstThree.length < 3 || !rapidFailures(firstThree)) return null;
-  if (firstThree.every((call) => same(call, firstThree[0]))) {
-    return { trigger: 'repeated_identical_failure', resultIds: firstThree.map((call) => call.resultId),
-      recommendation: 'Three identical rapid failures were observed. Review the saved error and tool schema, then consider a different diagnostic step before retrying. Intentional retries may continue.' };
+export function detectRepeatedFailure(recent: LoopGuardObservation[], policy: { repetitions?: number } = {}): LoopGuardAdvice | null {
+  const repetitions = policy.repetitions ?? 3;
+  if (!Number.isInteger(repetitions) || repetitions < 3 || repetitions > 100) return null;
+  const identical = recent.slice(0, repetitions);
+  if (identical.length < repetitions || !rapidFailures(identical)) return null;
+  if (identical.every((call) => same(call, identical[0]))) {
+    return { trigger: 'repeated_identical_failure', resultIds: identical.map((call) => call.resultId),
+      recommendation: `${repetitions} identical rapid failures were observed. Review the saved error and tool schema, then consider a different diagnostic step before retrying. Intentional retries may continue.` };
   }
-  const cycle = recent.slice(0, 6);
-  if (cycle.length === 6 && rapidFailures(cycle) && cycle.every((call, index) => same(call, cycle[index % 2]))) {
+  const cycle = recent.slice(0, repetitions * 2);
+  if (cycle.length === repetitions * 2 && rapidFailures(cycle) && cycle.every((call, index) => same(call, cycle[index % 2]))) {
     return { trigger: 'alternating_failure_cycle', resultIds: cycle.map((call) => call.resultId),
-      recommendation: 'A two-step failure cycle repeated three times. Review both saved errors and consider changing the diagnostic strategy. Intentional retries may continue.' };
+      recommendation: `A two-step failure cycle repeated ${repetitions} times. Review both saved errors and consider changing the diagnostic strategy. Intentional retries may continue.` };
   }
   return null;
 }
