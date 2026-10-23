@@ -147,8 +147,17 @@ describe('MCP Service - passthrough headers for upstream MCP transports', () => 
       await createTransportFromConfig('args-proxy', config);
       expect(StdioClientTransport).toHaveBeenCalledWith(
         expect.objectContaining({
-          command: '/usr/bin/proxychains4',
-          args: ['-f', '/test-proxy.conf', 'node', `--key=${secret}`, `prefix${secret}`],
+          ...(process.platform === 'win32'
+            ? {
+                // proxychains is unavailable on Windows, so the stdio command
+                // stays direct and no proxy-specific argument normalization runs.
+                command: 'node',
+                args: [`--key=${secret}`, `prefix;${secret}`],
+              }
+            : {
+                command: '/usr/bin/proxychains4',
+                args: ['-f', '/test-proxy.conf', 'node', `--key=${secret}`, `prefix${secret}`],
+              }),
         }),
       );
       expect(JSON.stringify(warn.mock.calls)).not.toContain('opaque');

@@ -33,7 +33,7 @@ jest.mock('../../src/services/oauthClientRegistration.js', () => ({
   getRegisteredClient: jest.fn(),
   removeRegisteredClient: jest.fn(),
 }));
-const issuer = 'http://gitlab.internal.example';
+const issuer = 'https://gitlab.internal.example';
 const mockDefinition: ServerConfigWithName = {
   name: 'gitlab',
   type: 'streamable-http',
