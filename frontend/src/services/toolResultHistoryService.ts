@@ -42,6 +42,8 @@ export interface AttributionSummary {
 }
 export const saveTaskReview = (taskId: string, review: { outcome: string; trainingConsent: boolean; revision: number }) =>
   apiPut<ApiResponse<unknown>>(`/attribution/tasks/${encodeURIComponent(taskId)}/review`, review);
+export const submitLoopGuardFeedback = (resultId: string, verdict: 'helpful' | 'false_positive' | 'ignored') =>
+  apiPost<ApiResponse<unknown>>(`/tool-results/${encodeURIComponent(resultId)}/loopguard-feedback`, { verdict });
 export const getAttributionSummary = (days = 30) =>
   apiGet<ApiResponse<AttributionSummary>>(`/attribution/summary?days=${days}`);
 export const getAttributionEvents = (traceId: string, cursor?: string) =>

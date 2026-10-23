@@ -18,6 +18,7 @@ type Queryable = {
 type ToolResultRow = Record<string, unknown>;
 
 const mapRow = (row: ToolResultRow): ToolResultRecord => ({
+  loopGuardFeedback: row.loop_guard_feedback as ToolResultRecord['loopGuardFeedback'] ?? undefined,
   loopGuardAdvice: row.loop_guard_advice as ToolResultRecord['loopGuardAdvice'] ?? undefined,
   taskReview: row.task_review as ToolResultRecord['taskReview'] ?? undefined,
   attribution: row.attribution as ToolResultRecord['attribution'] ?? undefined,
@@ -51,7 +52,7 @@ const mapRow = (row: ToolResultRow): ToolResultRecord => ({
 });
 
 const SELECT_COLUMNS = `
-  result.*, state.pinned, state.use_count, state.last_referenced_at, state.loop_guard_advice, review.task_review
+  result.*, state.pinned, state.use_count, state.last_referenced_at, state.loop_guard_advice, state.loop_guard_feedback, review.task_review
   FROM tool_results result
   JOIN tool_result_state state ON state.result_id = result.result_id
   LEFT JOIN LATERAL (

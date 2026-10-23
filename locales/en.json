@@ -1,5 +1,6 @@
 {
   "attribution": {
+    "loopFeedback": { "helpful": "Helpful", "false_positive": "False positive", "ignored": "Skipped" },
     "loopSettingsHelp": "Advice for repeated failures within a task branch. Requires attribution; never blocks tools.",
     "loopIgnoredTools": "Tools excluded from LoopGuard, one server/tool per line",
     "loopCycleAdvice": "A two-step failure cycle repeated three times. Review both errors and consider changing the diagnostic strategy. Intentional retries remain allowed.",

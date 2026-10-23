@@ -10,6 +10,8 @@ import { getAttributionSummary } from '../../src/controllers/attributionControll
 import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
+import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
+import { submitLoopGuardFeedback } from '../../src/controllers/loopGuardFeedbackController.js';
 
 const suite = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 suite('attribution PostgreSQL isolated schema', () => {
@@ -117,10 +119,10 @@ suite('attribution PostgreSQL isolated schema', () => {
     const task = await service.start('history-review-user');
     const resultId = randomUUID();
     const raw = '{"content":[{"type":"text","text":"immutable evidence"}]}';
-    await pool.query(`ALTER TABLE tool_results ADD COLUMN result_id uuid;
+    await pool.query(`ALTER TABLE tool_results ADD COLUMN result_id uuid UNIQUE;
       ALTER TABLE tool_results ADD COLUMN raw text;
       CREATE TABLE tool_result_state (result_id uuid PRIMARY KEY, pinned boolean DEFAULT false,
-        use_count integer DEFAULT 0, last_referenced_at timestamptz, loop_guard_advice jsonb)`);
+        use_count integer DEFAULT 0, last_referenced_at timestamptz, loop_guard_advice jsonb, loop_guard_feedback jsonb)`);
     await pool.query('INSERT INTO tool_results (result_id, status, attribution, raw) VALUES ($1,$2,$3,$4)',
       [resultId, 'success', JSON.stringify({ taskId: task.taskId }), raw]);
     await pool.query('INSERT INTO tool_result_state (result_id) VALUES ($1)', [resultId]);
@@ -189,5 +191,18 @@ suite('attribution PostgreSQL isolated schema', () => {
       if (oldIgnored === undefined) delete process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS;
       else process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS = oldIgnored;
     }
+  });
+  test('LoopGuard feedback appends observations and preserves original result data', async () => {
+    await ensureLoopGuardFeedbackSchema(pool);
+    const resultId = (await pool.query('SELECT result_id FROM tool_result_state WHERE loop_guard_advice IS NOT NULL LIMIT 1')).rows[0].result_id;
+    const before = (await pool.query('SELECT raw FROM tool_results WHERE result_id=$1', [resultId])).rows[0].raw;
+    for (const verdict of ['helpful', 'false_positive']) {
+      let payload: any;
+      await submitLoopGuardFeedback({ user: { isAdmin: true, username: 'reviewer' }, params: { id: resultId }, body: { verdict } } as unknown as Request,
+        { json: (value: any) => { payload = value; }, status: () => { throw new Error('Feedback save failed'); } } as unknown as Response);
+      expect(payload.data.verdict).toBe(verdict);
+    }
+    expect((await pool.query('SELECT count(*) FROM tool_result_loop_feedback WHERE result_id=$1', [resultId])).rows[0].count).toBe('2');
+    expect((await pool.query('SELECT raw FROM tool_results WHERE result_id=$1', [resultId])).rows[0].raw).toBe(before);
   });
 });

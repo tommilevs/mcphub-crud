@@ -29,8 +29,16 @@ result-detail page displays the advice and evidence links. Telemetry failures
 leave the execution result untouched. Ordinary result retention also removes
 the associated advice.
 
+Administrators can mark advice Helpful, False positive or Skipped in result
+details. `POST /api/tool-results/:id/loopguard-feedback` accepts `verdict` as
+`helpful`, `false_positive` or `ignored`. Each submission appends a reviewer/time
+observation; the latest submitted observation is also shown with result state.
+Feedback cannot create advice on an unrelated result, change RAW or tool
+permissions, suppress future executions, or label task success. These observations
+are evidence for later evaluation, not automatic training preferences.
+
 These are observations of repeated technical failures, not verified task failures
 or training labels. Intentional repeats can still occur and remain permitted.
 Unchanged successful states, per-tool retry policies,
-false-positive/reaction tracking and optional ToolPilot reasoning escalation are
+automatic agent-reaction tracking and optional ToolPilot reasoning escalation are
 subsequent parts of the broader ToolPilot design, not completed features here.

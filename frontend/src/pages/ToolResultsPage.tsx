@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
 import AttributionSummaryPanel from '@/components/AttributionSummaryPanel';
 import TaskReviewForm from '@/components/TaskReviewForm';
+import LoopGuardFeedbackButtons from '@/components/LoopGuardFeedbackButtons';
 import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
   getToolResult,
@@ -205,6 +206,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           ? t('attribution.loopCycleAdvice', 'A two-step failure cycle repeated three times. Review both errors and consider changing the diagnostic strategy. Intentional retries remain allowed.')
           : t('attribution.loopAdvice', 'Three identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.')}</p>
         <div className="flex flex-wrap gap-2">{detail.loopGuardAdvice.resultIds.map((id) => <Link key={id} className="hub-mono text-xs text-[var(--hub-accent)] break-all" to={`/tool-results/${encodeURIComponent(id)}`}>{id}</Link>)}</div>
+        <LoopGuardFeedbackButtons key={detail.resultId} resultId={detail.resultId} initialVerdict={detail.loopGuardFeedback?.verdict} />
       </section>}
       {detail.trainingReadiness && <section className="hub-card p-3 space-y-2">
         <h2 className="text-sm font-medium">{t('attribution.trainingReadiness', 'Training readiness')}</h2>

@@ -928,6 +928,7 @@ export interface OpenApiToolStats {
 export type ToolResultStatus = 'success' | 'error';
 
 export interface ToolResultSummary {
+  loopGuardFeedback?: { verdict: 'helpful' | 'false_positive' | 'ignored'; reviewedBy: string; reviewedAt: string };
   loopGuardAdvice?: { trigger: string; resultIds: string[]; recommendation: string };
   taskReview?: { revision: number; outcome: string; trainingConsent: boolean; reviewedBy: string; reviewedAt: string };
   trainingReadiness?: {
