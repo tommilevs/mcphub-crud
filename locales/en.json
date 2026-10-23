@@ -1,4 +1,21 @@
 {
+  "attribution": {
+    "title": "Model attribution",
+    "unverified": "Unverified",
+    "unknown": "Unknown",
+    "selfReported": "Self-reported",
+    "model": "Model",
+    "source": "Source",
+    "client": "Client claim",
+    "instance": "Client instance claim",
+    "run": "Agent run claim",
+    "call": "Call",
+    "task": "Task",
+    "trace": "Trace",
+    "branch": "Branch",
+    "segment": "Model segment",
+    "conflict": "Conflicting identity data"
+  },
   "app": {
     "title": "MCPHub Dashboard",
     "error": "Error",

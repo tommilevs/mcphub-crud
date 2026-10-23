@@ -1,4 +1,21 @@
 {
+  "attribution": {
+    "title": "模型归属",
+    "unverified": "未经验证",
+    "unknown": "未知",
+    "selfReported": "自行报告",
+    "model": "模型",
+    "source": "来源",
+    "client": "客户端声明",
+    "instance": "客户端实例声明",
+    "run": "代理运行声明",
+    "call": "调用",
+    "task": "任务",
+    "trace": "轨迹",
+    "branch": "分支",
+    "segment": "模型片段",
+    "conflict": "身份数据冲突"
+  },
   "app": {
     "title": "MCPHub 控制面板",
     "error": "错误",

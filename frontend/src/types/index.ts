@@ -928,6 +928,17 @@ export interface OpenApiToolStats {
 export type ToolResultStatus = 'success' | 'error';
 
 export interface ToolResultSummary {
+  attribution?: {
+    callId: string;
+    contextId: string | null;
+    taskId: string | null;
+    traceId: string | null;
+    modelSegmentId: string | null;
+    branchId?: string | null;
+    identity: { modelId: string | null; source: 'unknown' | 'self_reported'; verified: false };
+    clientClaims?: { clientNameClaim?: string; clientInstanceHint?: string; agentRunHint?: string; taskHint?: string };
+    conflictReason?: string;
+  };
   resultId: string;
   timestamp: string;
   server: string;

@@ -124,6 +124,32 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
         {detail.parentResultId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.parent')}</div><Link className="hub-mono mt-1 block break-all text-[var(--hub-accent)]" to={`/tool-results/${detail.parentResultId}`}>{detail.parentResultId}</Link></div>}
         {detail.rawSha256 && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.rawHash')}</div><div className="hub-mono mt-1 break-all">{detail.rawSha256}</div></div>}
       </div>}
+      {detail.attribution && <section className="hub-card p-3 space-y-3" aria-label={t('attribution.title', 'Model attribution')}>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 className="text-sm font-medium">{t('attribution.title', 'Model attribution')}</h2>
+          <span className="text-xs text-[var(--hub-ink-3)]">{t('attribution.unverified', 'Unverified')}</span>
+        </div>
+        <dl className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
+          {[
+            [t('attribution.model', 'Model'), detail.attribution.identity.modelId || t('attribution.unknown', 'Unknown')],
+            [t('attribution.source', 'Source'), detail.attribution.identity.source === 'self_reported' ? t('attribution.selfReported', 'Self-reported') : t('attribution.unknown', 'Unknown')],
+            [t('attribution.client', 'Client claim'), detail.attribution.clientClaims?.clientNameClaim],
+            [t('attribution.instance', 'Client instance claim'), detail.attribution.clientClaims?.clientInstanceHint],
+            [t('attribution.run', 'Agent run claim'), detail.attribution.clientClaims?.agentRunHint],
+            [t('attribution.call', 'Call'), detail.attribution.callId],
+            [t('attribution.task', 'Task'), detail.attribution.taskId],
+            [t('attribution.trace', 'Trace'), detail.attribution.traceId],
+            [t('attribution.branch', 'Branch'), detail.attribution.branchId],
+            [t('attribution.segment', 'Model segment'), detail.attribution.modelSegmentId],
+          ].filter(([, value]) => value).map(([label, value]) => <div key={label} className="min-w-0">
+            <dt className="text-[var(--hub-ink-3)]">{label}</dt>
+            <dd className="hub-mono mt-1 break-all">{value}</dd>
+          </div>)}
+        </dl>
+        {detail.attribution.conflictReason && <p role="status" className="rounded border border-[var(--hub-line)] p-2 text-xs">
+          {t('attribution.conflict', 'Conflicting identity data')}: {detail.attribution.conflictReason}
+        </p>}
+      </section>}
       {detail.objective && <div className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.objective')}</div><div className="mt-1 text-sm">{detail.objective}</div></div>}
       {lineage && (lineage.ancestors.length > 0 || lineage.children.length > 0) && <div className="hub-card p-3 space-y-3">
         <div className="text-sm font-medium">{t('toolResults.lineage')}</div>
