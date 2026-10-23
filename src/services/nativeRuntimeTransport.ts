@@ -71,10 +71,13 @@ export class NativeRuntimeTransport implements Transport {
 
   async close(): Promise<void> {
     if (this.closed) return;
-    this.closed = true;
     try {
+      // Send the stop command while the pipe is still usable. Marking the
+      // transport closed first makes control() reject before it can flush the
+      // request, leaving the managed child behind in the native service.
       await this.control({ op: 'stop', id: this.spec.id });
     } finally {
+      this.closed = true;
       this.socket?.destroy();
       this.socket = undefined;
       this.onclose?.();
