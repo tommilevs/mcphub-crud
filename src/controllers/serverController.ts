@@ -482,6 +482,7 @@ export const getAllSettings = async (req: Request, res: Response): Promise<void>
         minTokens: 2000,
         maxOutputTokens: 1200,
         strategy: 'auto',
+        policies: {},
       };
     }
 
@@ -2210,6 +2211,7 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         minTokens: 2000,
         maxOutputTokens: 1200,
         strategy: 'auto',
+        policies: {},
       };
     }
 
