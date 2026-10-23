@@ -41,3 +41,21 @@ fn collects_notifications_before_matching_response() {
     assert_eq!(stopped.len(), 1);
     assert_eq!(stopped[0].state, "STOPPED");
 }
+
+#[test]
+fn replaces_a_stale_crashed_child_on_new_start() {
+    let mut supervisor = RuntimeSupervisor::new();
+    let spec = ManagedProcessSpec {
+        id: "crashed".into(),
+        command: "powershell.exe".into(),
+        args: vec!["-NoLogo".into(), "-NoProfile".into(), "-Command".into(), "exit 0".into()],
+        env: HashMap::new(),
+        restart_limit: 0,
+        restart_delay_ms: 0,
+    };
+    supervisor.start(spec.clone()).expect("fixture process starts");
+    std::thread::sleep(std::time::Duration::from_millis(1000));
+    let restarted = supervisor.start(spec).expect("stale child is replaced");
+    assert_eq!(restarted.state, "STARTING");
+    supervisor.stop("crashed").expect("fixture stops");
+}

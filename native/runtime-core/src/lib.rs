@@ -102,7 +102,21 @@ impl RuntimeSupervisor {
 
     pub fn start(&mut self, spec: ManagedProcessSpec) -> Result<ProcessStatus, SupervisorError> {
         if self.processes.contains_key(&spec.id) {
-            return Err(SupervisorError::AlreadyRunning(spec.id));
+            let running = self
+                .processes
+                .get_mut(&spec.id)
+                .and_then(|process| process.child.try_wait().ok())
+                .flatten()
+                .is_none();
+            if running {
+                return Err(SupervisorError::AlreadyRunning(spec.id));
+            }
+            // A crashed child may not have been polled yet. Drop the stale
+            // process record so a new MCP connection can recover immediately.
+            if let Some(mut process) = self.processes.remove(&spec.id) {
+                let _ = process.child.kill();
+                let _ = process.child.wait();
+            }
         }
         let id = spec.id.clone();
         self.stopped.remove(&id);
