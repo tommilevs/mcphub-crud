@@ -2029,6 +2029,8 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         typeof smartRouting.azureOpenaiApiVersion === 'string' ||
         typeof smartRouting.azureOpenaiEmbeddingDeployment === 'string' ||
         typeof smartRouting.progressiveDisclosure === 'boolean' ||
+        typeof smartRouting.mcpZeroEnabled === 'boolean' ||
+        typeof smartRouting.mcpZeroTopServers === 'number' ||
         typeof smartRouting.azureOpenaiEmbeddingModel === 'string' ||
         typeof smartRouting.serverDescriptionMode === 'string' ||
         typeof smartRouting.embeddingQueryPrefix === 'string' ||
@@ -2440,6 +2442,16 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
 
       if (typeof smartRouting.progressiveDisclosure === 'boolean') {
         systemConfig.smartRouting.progressiveDisclosure = smartRouting.progressiveDisclosure;
+      }
+
+      if (typeof smartRouting.mcpZeroEnabled === 'boolean') {
+        systemConfig.smartRouting.mcpZeroEnabled = smartRouting.mcpZeroEnabled;
+      }
+      if (typeof smartRouting.mcpZeroTopServers === 'number') {
+        systemConfig.smartRouting.mcpZeroTopServers = Math.min(
+          50,
+          Math.max(1, Math.floor(smartRouting.mcpZeroTopServers)),
+        );
       }
 
       if (typeof smartRouting.serverDescriptionMode === 'string') {

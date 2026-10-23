@@ -1513,6 +1513,7 @@ export const searchToolsByVector = async (
       'vectorEmbeddings',
     )() as VectorEmbeddingRepository;
     const queryEmbedding = await generateEmbedding(query, 'query');
+    const smartRoutingConfig = await getSmartRoutingConfig();
 
     // Scope the search in SQL, not after the fact: `limit` has to count rows the
     // caller can actually use. Embeddings are keyed per server, and the same tool
@@ -1524,10 +1525,19 @@ export const searchToolsByVector = async (
     // metadata serverName disagrees with their content_id.
     const scopedServerNames = serverNames && serverNames.length > 0 ? serverNames : undefined;
 
-    const [toolResults, rawServerResults] = await Promise.all([
-      vectorRepository.searchSimilar(queryEmbedding, limit, threshold, ['tool'], scopedServerNames),
-      vectorRepository.searchSimilar(queryEmbedding, 50, 0.1, ['server'], scopedServerNames),
-    ]);
+    const rawServerResultsPromise = vectorRepository.searchSimilar(
+      queryEmbedding,
+      50,
+      0.1,
+      ['server'],
+      scopedServerNames,
+    );
+    // Preserve the existing parallel lookup when MCP-Zero is off. With it on,
+    // tool lookup intentionally waits for the server shortlist.
+    const defaultToolResultsPromise = smartRoutingConfig.mcpZeroEnabled
+      ? undefined
+      : vectorRepository.searchSimilar(queryEmbedding, limit, threshold, ['tool'], scopedServerNames);
+    const rawServerResults = await rawServerResultsPromise;
 
     const allowedServerNames = scopedServerNames ? new Set(scopedServerNames) : null;
     const serverScoreMap = new Map<string, number>();
@@ -1545,6 +1555,23 @@ export const searchToolsByVector = async (
         serverScoreMap.set(resultServerName, result.similarity);
       }
     }
+
+    const mcpZeroServers = smartRoutingConfig.mcpZeroEnabled
+      ? [...serverScoreMap.entries()]
+          .sort(([, left], [, right]) => right - left)
+          .slice(0, smartRoutingConfig.mcpZeroTopServers ?? 5)
+          .map(([serverName]) => serverName)
+      : undefined;
+    const toolServerScope = mcpZeroServers?.length ? mcpZeroServers : scopedServerNames;
+    const toolResults = smartRoutingConfig.mcpZeroEnabled
+      ? await vectorRepository.searchSimilar(
+          queryEmbedding,
+          Math.max(limit * 10, limit),
+          threshold,
+          ['tool'],
+          toolServerScope,
+        )
+      : await defaultToolResultsPromise!;
 
     // Filter by server names if provided
     const filteredResults = allowedServerNames
@@ -1566,8 +1593,9 @@ export const searchToolsByVector = async (
             toolName: parsedMetadata.toolName,
             description: parsedMetadata.description || '',
             inputSchema: parsedMetadata.inputSchema || {},
-            similarity:
-              serverSimilarityBoost !== undefined
+            similarity: smartRoutingConfig.mcpZeroEnabled && serverSimilarityBoost !== undefined
+              ? (serverSimilarityBoost * result.similarity) * Math.max(serverSimilarityBoost, result.similarity)
+              : serverSimilarityBoost !== undefined
                 ? result.similarity * 0.8 + serverSimilarityBoost * 0.2
                 : result.similarity,
             toolSimilarity: result.similarity,
@@ -1595,15 +1623,17 @@ export const searchToolsByVector = async (
           toolName,
           description,
           inputSchema: {},
-          similarity:
-            serverSimilarityBoost !== undefined
+          similarity: smartRoutingConfig.mcpZeroEnabled && serverSimilarityBoost !== undefined
+            ? (serverSimilarityBoost * result.similarity) * Math.max(serverSimilarityBoost, result.similarity)
+            : serverSimilarityBoost !== undefined
               ? result.similarity * 0.8 + serverSimilarityBoost * 0.2
               : result.similarity,
           toolSimilarity: result.similarity,
           searchableText: textContent,
         };
       })
-      .sort((a, b) => b.similarity - a.similarity);
+      .sort((a, b) => b.similarity - a.similarity)
+      .slice(0, limit);
   } catch (error) {
     logger.error(
       'Error searching tools by vector',

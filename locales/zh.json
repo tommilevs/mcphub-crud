@@ -961,6 +961,8 @@
     "azureOpenaiEmbeddingModelPlaceholder": "text-embedding-3-small",
     "progressiveDisclosure": "渐进式披露",
     "progressiveDisclosureDescription": "开启后，search_tools 只返回工具名称和描述，通过 describe_tool 获取完整参数定义，可减少 Token 消耗",
+      "mcpZero": "MCP-Zero",
+      "mcpZeroDescription": "先对匹配的服务器排序，再搜索其工具，使智能路由更聚焦。",
     "embeddingMaxTokens": "最大嵌入 Token 数",
     "embeddingMaxTokensDescription": "生成嵌入前截断文本的最大 Token 数。留空将自动使用模型默认值。设置自定义值将始终覆盖模型默认值。当使用本地 LLM 提供商时，手动设置此值特别有用，可防止截断错误。",
     "embeddingMaxTokensPlaceholder": "留空 = 自动（按模型）",

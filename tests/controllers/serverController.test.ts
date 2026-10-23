@@ -992,6 +992,23 @@ describe('serverController - updateSystemConfig', () => {
     );
   });
 
+  it('persists the MCP-Zero toggle with bounded server candidates', async () => {
+    mockRequest.body = {
+      smartRouting: { mcpZeroEnabled: true, mcpZeroTopServers: 100 },
+    };
+
+    await updateSystemConfig(mockRequest as Request, mockResponse as Response);
+
+    expect(mockSystemConfigDao.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        smartRouting: expect.objectContaining({
+          mcpZeroEnabled: true,
+          mcpZeroTopServers: 50,
+        }),
+      }),
+    );
+  });
+
   it.each([
     [' FULL ', 'full'],
     ['names', 'names'],

@@ -46,6 +46,8 @@ interface SmartRoutingConfig {
   azureOpenaiEmbeddingDeployment?: string;
   azureOpenaiEmbeddingModel?: string;
   progressiveDisclosure: boolean;
+  mcpZeroEnabled?: boolean;
+  mcpZeroTopServers?: number;
   embeddingMaxTokens?: number;
   embeddingQueryPrefix?: string;
   embeddingDocumentPrefix?: string;

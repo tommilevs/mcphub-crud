@@ -957,6 +957,8 @@
     "smartRoutingConfigUpdated": "Akıllı yönlendirme yapılandırması başarıyla güncellendi",
     "progressiveDisclosure": "Aşamalı Açıklama",
     "progressiveDisclosureDescription": "Etkinleştirildiğinde, search_tools yalnızca araç adlarını ve açıklamalarını döndürür. Tam parametre şemasını almak için describe_tool kullanın; bu da token kullanımını azaltır.",
+      "mcpZero": "MCP-Zero",
+      "mcpZeroDescription": "Önce eşleşen sunucuları sıralar, ardından daha odaklı akıllı yönlendirme için araçlarını arar.",
     "embeddingMaxTokens": "Maks. Embedding Token Sayısı",
     "embeddingMaxTokensDescription": "Embedding oluşturmadan önce metin kesme için maksimum token sayısı. Model varsayılanını otomatik olarak kullanmak için boş bırakın. Özel bir değer her zaman model varsayılanını geçersiz kılar. Yerel LLM sağlayıcıları kullanırken bu değeri manuel olarak ayarlamak, kesme hatalarını önlemek için özellikle yararlıdır.",
     "embeddingMaxTokensPlaceholder": "Boş = modele göre otomatik",

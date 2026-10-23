@@ -3003,6 +3003,31 @@ const SettingsPage: React.FC = () => {
                     }
                   />
                 </div>
+                <div
+                  className="flex items-center justify-between"
+                  style={{
+                    padding: '12px 14px',
+                    border: '1px solid var(--hub-line)',
+                    borderRadius: 8,
+                    background: 'var(--hub-bg-2)',
+                  }}
+                >
+                  <div>
+                    <h3 className="font-medium" style={{ color: 'var(--hub-ink)', fontSize: 13 }}>
+                      {t('settings.mcpZero')}
+                    </h3>
+                    <p style={{ fontSize: 12, color: 'var(--hub-ink-3)' }}>
+                      {t('settings.mcpZeroDescription')}
+                    </p>
+                  </div>
+                  <Switch
+                    disabled={loading || !smartRoutingConfig.enabled}
+                    checked={smartRoutingConfig.mcpZeroEnabled ?? false}
+                    onCheckedChange={(checked) =>
+                      updateSmartRoutingConfig('mcpZeroEnabled', checked)
+                    }
+                  />
+                </div>
                 {/* end space-y-3 fields wrapper */}
               </div>
 

@@ -62,6 +62,13 @@ export interface SmartRoutingConfig {
    */
   progressiveDisclosure?: boolean;
   /**
+   * Enables MCP-Zero's two-stage active discovery: rank servers first, then
+   * search tools only within the strongest server candidates. Default: false.
+   */
+  mcpZeroEnabled?: boolean;
+  /** Number of server candidates considered by MCP-Zero. Default: 5. */
+  mcpZeroTopServers?: number;
+  /**
    * Controls how available servers are listed in the search_tools meta-tool description.
    * - 'names': only include server names
    * - 'full': include server names and descriptions/instructions when available
@@ -351,6 +358,25 @@ export async function getSmartRoutingConfig(): Promise<SmartRoutingConfig> {
       smartRoutingSettings.progressiveDisclosure,
       false,
       parseBooleanEnvVar,
+    ),
+
+    mcpZeroEnabled: cfg(
+      'mcpZeroEnabled',
+      { SMART_ROUTING_MCP_ZERO_ENABLED: process.env.SMART_ROUTING_MCP_ZERO_ENABLED },
+      smartRoutingSettings.mcpZeroEnabled,
+      false,
+      parseBooleanEnvVar,
+    ),
+
+    mcpZeroTopServers: cfg<number>(
+      'mcpZeroTopServers',
+      { SMART_ROUTING_MCP_ZERO_TOP_SERVERS: process.env.SMART_ROUTING_MCP_ZERO_TOP_SERVERS },
+      smartRoutingSettings.mcpZeroTopServers,
+      5,
+      (value: unknown) => {
+        const parsed = parseInt(String(value), 10);
+        return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, 50) : 5;
+      },
     ),
 
     serverDescriptionMode: cfg(

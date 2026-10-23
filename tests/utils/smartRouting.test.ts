@@ -123,6 +123,14 @@ describe('smartRouting config resolution', () => {
       const config = await getSmartRoutingConfig();
       expect(config.progressiveDisclosure).toBe(true);
     });
+
+    it('reads MCP-Zero from persisted settings and its environment override', async () => {
+      mockGet.mockResolvedValue({ smartRouting: { mcpZeroEnabled: false, mcpZeroTopServers: 9 } });
+      process.env.SMART_ROUTING_MCP_ZERO_ENABLED = 'yes';
+      const config = await getSmartRoutingConfig();
+      expect(config.mcpZeroEnabled).toBe(true);
+      expect(config.mcpZeroTopServers).toBe(9);
+    });
   });
 
   describe('config value priority chain (env > settings > default)', () => {
@@ -316,6 +324,8 @@ describe('smartRouting config resolution', () => {
         azureOpenaiEmbeddingDeployment: '',
         azureOpenaiEmbeddingModel: '',
         progressiveDisclosure: false,
+        mcpZeroEnabled: false,
+        mcpZeroTopServers: 5,
         serverDescriptionMode: 'names',
         embeddingMaxTokens: undefined,
         embeddingQueryPrefix: '',

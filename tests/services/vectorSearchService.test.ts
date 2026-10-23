@@ -188,6 +188,59 @@ describe('vectorSearchService', () => {
     );
   });
 
+  it('uses MCP-Zero two-stage ranking to exclude tools outside the best servers', async () => {
+    mockGetSmartRoutingConfig.mockResolvedValue({
+      enabled: true,
+      dbUrl: 'postgres://localhost/test',
+      embeddingProvider: 'openai',
+      embeddingModel: 'text-embedding-3-small',
+      llmProviderBaseUrl: 'https://api.openai.com/v1',
+      llmProviderApiKey: '',
+      mcpZeroEnabled: true,
+      mcpZeroTopServers: 1,
+    });
+    mockVectorRepository.searchSimilar.mockImplementation(
+      async (
+        _embedding: number[],
+        _limit: number,
+        _threshold: number,
+        contentTypes?: string[],
+        serverNames?: string[],
+      ) => {
+        if (contentTypes?.includes('server')) {
+          return [
+            { embedding: { content_id: 'maps', metadata: JSON.stringify({ serverName: 'maps' }) }, similarity: 0.9 },
+            { embedding: { content_id: 'mail', metadata: JSON.stringify({ serverName: 'mail' }) }, similarity: 0.1 },
+          ];
+        }
+        const rows = [
+          { serverName: 'maps', toolName: 'maps-route', similarity: 0.7 },
+          { serverName: 'mail', toolName: 'mail-send', similarity: 0.99 },
+        ];
+        return rows
+          .filter((row) => !serverNames || serverNames.includes(row.serverName))
+          .map((row) => ({
+            embedding: {
+              metadata: JSON.stringify({ ...row, description: row.toolName, inputSchema: {} }),
+              text_content: row.toolName,
+            },
+            similarity: row.similarity,
+          }));
+      },
+    );
+
+    const results = await searchToolsByVector('plan a route', 10, 0.3);
+
+    expect(results.map((result) => result.toolName)).toEqual(['maps-route']);
+    expect(mockVectorRepository.searchSimilar).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.any(Number),
+      0.3,
+      ['tool'],
+      ['maps'],
+    );
+  });
+
   it('scopes the search to the requested servers in SQL, not after the limit', async () => {
     // Regression: the server filter used to be applied in JS *after* the
     // database had already returned the global top-`limit` rows. Embeddings are

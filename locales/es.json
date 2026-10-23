@@ -958,6 +958,8 @@
     "azureOpenaiEmbeddingModelPlaceholder": "text-embedding-3-small",
     "progressiveDisclosure": "Divulgación progresiva",
     "progressiveDisclosureDescription": "Cuando está habilitada, search_tools solo devuelve nombres y descripciones de herramientas. Usa describe_tool para obtener el esquema de parámetros completo, reduciendo el uso de tokens.",
+      "mcpZero": "MCP-Zero",
+      "mcpZeroDescription": "Primero clasifica los servidores coincidentes y después busca sus herramientas para un enrutamiento más preciso.",
     "embeddingMaxTokens": "Máximo de tokens de embeddings",
     "embeddingMaxTokensDescription": "Máximo de tokens para el truncado de texto antes de generar embeddings. Déjalo vacío para usar automáticamente el predeterminado del modelo. Un valor personalizado siempre anula el predeterminado del modelo. Establecerlo manualmente es especialmente útil con proveedores LLM locales para evitar errores de truncado.",
     "embeddingMaxTokensPlaceholder": "Vacío = automático según el modelo",
