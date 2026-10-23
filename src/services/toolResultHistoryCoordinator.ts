@@ -23,6 +23,38 @@ export interface ToolResultHistoryCapture {
   sensitive?: boolean;
 }
 
+export const TOOL_RESULT_CHUNK_CHARS = 12_000;
+
+export const chunkToolResultText = (
+  text: string,
+  maxChars = TOOL_RESULT_CHUNK_CHARS,
+): string[] => {
+  if (!text) return [];
+  const chunks: string[] = [];
+  let current = '';
+  for (const line of text.split('\n')) {
+    if (line.length > maxChars) {
+      if (current) {
+        chunks.push(current);
+        current = '';
+      }
+      for (let offset = 0; offset < line.length; offset += maxChars) {
+        chunks.push(line.slice(offset, offset + maxChars));
+      }
+      continue;
+    }
+    const candidate = current ? `${current}\n${line}` : line;
+    if (current && candidate.length > maxChars) {
+      chunks.push(current);
+      current = line;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+};
+
 type ToolResultObject = Record<string, unknown>;
 
 export class ToolResultHistoryCoordinator {
@@ -51,7 +83,25 @@ export class ToolResultHistoryCoordinator {
           .slice(0, 64_000);
         void (async () => {
           const repository = getToolResultRepository();
-          if (!repository?.indexContent) return;
+          if (!repository) return;
+          const chunks = chunkToolResultText(searchable);
+          if (repository.indexChunks) {
+            const indexed = [];
+            for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+              recordToolResultIndexAttempt();
+              let embedding: number[] | null = null;
+              try {
+                embedding = await generateEmbedding(chunks[chunkIndex], 'document');
+              } catch (error) {
+                recordToolResultIndexFailure();
+                logger.warn('Failed to generate tool result chunk embedding:', error);
+              }
+              indexed.push({ chunkIndex, chunkVersion: 1, content: chunks[chunkIndex], embedding });
+            }
+            await repository.indexChunks(saved.resultId, indexed);
+            return;
+          }
+          if (!repository.indexContent) return;
           recordToolResultIndexAttempt();
           const embedding = await generateEmbedding(searchable, 'document');
           await repository.indexContent(saved.resultId, searchable, embedding);

@@ -5,6 +5,7 @@ import type {
   ToolResultRecord,
   ToolResultStats,
   ToolResultSearchHit,
+  ToolResultChunkHit,
 } from '../types/toolResult.js';
 
 export interface ToolResultPage {
@@ -22,6 +23,16 @@ export interface ToolResultRepository {
   findPaginated(page: number, limit: number, filter?: ToolResultFilter): Promise<ToolResultPage>;
   search(query: string, limit: number, filter?: ToolResultFilter): Promise<ToolResultRecord[]>;
   indexContent?(resultId: string, content: string, embedding: number[] | null): Promise<void>;
+  indexChunks?(
+    resultId: string,
+    chunks: Array<{ chunkIndex: number; chunkVersion: number; content: string; embedding: number[] | null }>,
+  ): Promise<void>;
+  searchChunks?(
+    resultId: string,
+    query: string,
+    embedding: number[] | null,
+    limit: number,
+  ): Promise<ToolResultChunkHit[]>;
   hybridSearch?(query: string, embedding: number[] | null, limit: number, filter?: ToolResultFilter): Promise<ToolResultSearchHit[]>;
   setPinned(resultId: string, pinned: boolean): Promise<ToolResultRecord | null>;
   incrementUseCount(resultId: string): Promise<void>;

@@ -181,6 +181,7 @@ import {
   getToolResultTimeline,
   getToolResultConversationTimeline,
   getToolResultLineage,
+  searchToolResultChunks,
   compareToolResults,
 } from '../controllers/toolResultController.js';
 import {
@@ -412,6 +413,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.get('/tool-results/timeline/:sessionId', getToolResultTimeline);
   authenticatedRouter.get('/tool-results/conversation-timeline/:conversationId', getToolResultConversationTimeline);
   authenticatedRouter.get('/tool-results/:id/lineage', getToolResultLineage);
+  authenticatedRouter.get('/tool-results/:id/search', searchToolResultChunks);
   authenticatedRouter.post('/tool-results/compare', compareToolResults);
   authenticatedRouter.get('/tool-results/:id', getToolResultById);
   authenticatedRouter.get('/tool-results/:id/raw', getToolResultRaw);

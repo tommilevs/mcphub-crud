@@ -1496,6 +1496,10 @@
     "timelineEmpty": "No results found for this scope",
     "lineage": "Result lineage",
     "ancestors": "Ancestors",
-    "children": "Children"
+    "children": "Children",
+    "searchInside": "Search inside RAW",
+    "searchInsidePlaceholder": "Find evidence in this saved result",
+    "noChunkMatches": "No matching chunks",
+    "chunk": "Chunk"
   }
 }

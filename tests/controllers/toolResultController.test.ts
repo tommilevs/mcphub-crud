@@ -9,6 +9,7 @@ const repository = {
   setPinned: jest.fn(),
   incrementUseCount: jest.fn(),
   getStats: jest.fn(),
+  searchChunks: jest.fn(),
 };
 
 jest.mock('../../src/services/toolResultHistoryRegistry.js', () => ({
@@ -27,6 +28,7 @@ import {
   getToolResultTimeline,
   getToolResultConversationTimeline,
   getToolResultLineage,
+  searchToolResultChunks,
 } from '../../src/controllers/toolResultController.js';
 
 const makeReq = (overrides: Record<string, unknown> = {}) =>
@@ -176,6 +178,16 @@ describe('toolResultController', () => {
     expect(data.ancestors[0]).toEqual(expect.objectContaining({ resultId: 'parent' }));
     expect(data.ancestors[0]).not.toHaveProperty('raw');
     expect(data.children[0]).not.toHaveProperty('raw');
+  });
+
+  it('searches indexed chunks for one result without returning RAW', async () => {
+    repository.findById.mockResolvedValue({ resultId: 'result-id', raw: 'hidden', payloadAvailable: true });
+    repository.searchChunks.mockResolvedValue([{ resultId: 'result-id', chunkIndex: 2, chunkVersion: 1, content: 'Xid 79', retrievalScore: 0.9 }]);
+    const res = makeRes();
+    await searchToolResultChunks(makeReq({ params: { id: 'result-id' }, query: { q: 'Xid 79', limit: '5' } }), res);
+    expect(repository.searchChunks).toHaveBeenCalledWith('result-id', 'Xid 79', null, 5);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: [expect.objectContaining({ chunkIndex: 2 })] }));
+    expect((res.json as jest.Mock).mock.calls[0][0].data[0]).not.toHaveProperty('raw');
   });
 
   it('compares exactly two result records without exposing RAW', async () => {

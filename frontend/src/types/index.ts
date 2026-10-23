@@ -986,6 +986,16 @@ export interface ToolResultCompare {
   totalBytes: number;
 }
 
+export interface ToolResultChunkHit {
+  resultId: string;
+  chunkIndex: number;
+  chunkVersion: number;
+  content: string;
+  retrievalScore: number;
+  lexicalRank?: number;
+  vectorRank?: number;
+}
+
 export interface ToolResultLineage {
   ancestors: ToolResultSummary[];
   children: ToolResultSummary[];

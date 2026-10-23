@@ -72,3 +72,13 @@ export interface ToolResultSearchHit extends ToolResultRecord {
   lexicalRank?: number;
   vectorRank?: number;
 }
+
+export interface ToolResultChunkHit {
+  resultId: string;
+  chunkIndex: number;
+  chunkVersion: number;
+  content: string;
+  retrievalScore: number;
+  lexicalRank?: number;
+  vectorRank?: number;
+}

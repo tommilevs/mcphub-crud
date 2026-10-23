@@ -3,6 +3,7 @@ import type {
   ToolResultRecord,
   ToolResultStats,
   ToolResultSearchHit,
+  ToolResultChunkHit,
 } from '../../types/toolResult.js';
 import type {
   ToolResultPage,
@@ -174,6 +175,69 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
        SET content = EXCLUDED.content, embedding = EXCLUDED.embedding`,
       [resultId, content, vector],
     );
+  }
+
+  async indexChunks(
+    resultId: string,
+    chunks: Array<{ chunkIndex: number; chunkVersion: number; content: string; embedding: number[] | null }>,
+  ): Promise<void> {
+    await this.dataSource.query('DELETE FROM tool_result_chunks WHERE result_id = $1', [resultId]);
+    for (const chunk of chunks) {
+      const vector = chunk.embedding ? `[${chunk.embedding.join(',')}]` : null;
+      await this.dataSource.query(
+        `INSERT INTO tool_result_chunks (result_id, chunk_index, chunk_version, content, embedding)
+         VALUES ($1, $2, $3, $4, $5::vector)`,
+        [resultId, chunk.chunkIndex, chunk.chunkVersion, chunk.content, vector],
+      );
+    }
+  }
+
+  async searchChunks(
+    resultId: string,
+    query: string,
+    embedding: number[] | null,
+    limit: number,
+  ): Promise<ToolResultChunkHit[]> {
+    const vector = embedding ? `[${embedding.join(',')}]` : null;
+    const rows = await this.dataSource.query<ToolResultRow[]>(
+      `WITH lexical AS (
+         SELECT result_id, chunk_index, chunk_version, ROW_NUMBER() OVER (
+           ORDER BY ts_rank_cd(to_tsvector('simple', content), websearch_to_tsquery('simple', $2)) DESC
+         ) AS lexical_rank
+         FROM tool_result_chunks
+         WHERE result_id = $1
+           AND to_tsvector('simple', content) @@ websearch_to_tsquery('simple', $2)
+       ), semantic AS (
+         SELECT result_id, chunk_index, chunk_version, ROW_NUMBER() OVER (ORDER BY embedding <=> $3::vector) AS vector_rank
+         FROM tool_result_chunks
+         WHERE result_id = $1 AND $3::vector IS NOT NULL AND embedding IS NOT NULL
+       ), ranked AS (
+         SELECT ids.result_id, ids.chunk_index, ids.chunk_version,
+           COALESCE(1.0 / (60 + lexical.lexical_rank), 0) +
+           COALESCE(1.0 / (60 + semantic.vector_rank), 0) AS retrieval_score,
+           lexical.lexical_rank, semantic.vector_rank
+         FROM (SELECT result_id, chunk_index, chunk_version FROM lexical UNION SELECT result_id, chunk_index, chunk_version FROM semantic) ids
+         LEFT JOIN lexical USING (result_id, chunk_index, chunk_version)
+         LEFT JOIN semantic USING (result_id, chunk_index, chunk_version)
+       )
+       SELECT chunks.result_id, chunks.chunk_index, chunks.chunk_version, chunks.content,
+         ranked.retrieval_score, ranked.lexical_rank, ranked.vector_rank
+       FROM ranked
+       JOIN tool_result_chunks chunks USING (result_id, chunk_index, chunk_version)
+       WHERE chunks.result_id = $1
+       ORDER BY ranked.retrieval_score DESC, chunks.chunk_index ASC
+       LIMIT $4`,
+      [resultId, query, vector, limit],
+    );
+    return rows.map((row) => ({
+      resultId: String(row.result_id),
+      chunkIndex: Number(row.chunk_index),
+      chunkVersion: Number(row.chunk_version),
+      content: String(row.content),
+      retrievalScore: Number(row.retrieval_score ?? 0),
+      lexicalRank: row.lexical_rank == null ? undefined : Number(row.lexical_rank),
+      vectorRank: row.vector_rank == null ? undefined : Number(row.vector_rank),
+    }));
   }
 
   async hybridSearch(

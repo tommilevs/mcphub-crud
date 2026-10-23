@@ -3,7 +3,7 @@ import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-r
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
-import type { PaginationInfo, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultStats, ToolResultSummary } from '@/types';
+import type { PaginationInfo, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultStats, ToolResultSummary } from '@/types';
 import {
   getToolResult,
   getToolResultRaw,
@@ -14,6 +14,7 @@ import {
   getToolResultTimeline,
   getToolResultConversationTimeline,
   getToolResultLineage,
+  searchToolResultChunks,
   setToolResultPinned,
 } from '@/services/toolResultHistoryService';
 
@@ -33,6 +34,10 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const [rangeOutput, setRangeOutput] = useState('');
   const [rangeError, setRangeError] = useState('');
   const [lineage, setLineage] = useState<ToolResultLineage | null>(null);
+  const [chunkQuery, setChunkQuery] = useState('');
+  const [chunkHits, setChunkHits] = useState<ToolResultChunkHit[]>([]);
+  const [chunkLoading, setChunkLoading] = useState(false);
+  const [chunkError, setChunkError] = useState('');
 
   useEffect(() => {
     Promise.allSettled([getToolResult(resultId), getToolResultRaw(resultId), getToolResultLineage(resultId)]).then(([metadata, payload, related]) => {
@@ -69,6 +74,22 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
     }
   };
 
+  const searchChunks = async () => {
+    const search = chunkQuery.trim();
+    if (!search) return;
+    setChunkLoading(true);
+    setChunkError('');
+    try {
+      const response = await searchToolResultChunks(resultId, search);
+      if (response.success && response.data) setChunkHits(response.data);
+      else setChunkError(response.message || t('toolResults.fetchError'));
+    } catch (cause) {
+      setChunkError(cause instanceof Error ? cause.message : t('toolResults.fetchError'));
+    } finally {
+      setChunkLoading(false);
+    }
+  };
+
   if (!detail) return <div className="p-6 text-sm text-[var(--hub-ink-3)]">{error || t('app.loading')}</div>;
   return (
     <div className="p-5 space-y-4">
@@ -102,6 +123,16 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
         {lineage.ancestors.length > 0 && <div><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.ancestors')}</div><div className="mt-1 space-y-1">{lineage.ancestors.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 text-xs hover:bg-[var(--hub-surface-hover)]"><span className="font-medium">{item.server} / {item.tool}</span><span className="ml-2 text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()}</span></Link>)}</div></div>}
         {lineage.children.length > 0 && <div><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.children')}</div><div className="mt-1 space-y-1">{lineage.children.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 text-xs hover:bg-[var(--hub-surface-hover)]"><span className="font-medium">{item.server} / {item.tool}</span><span className="ml-2 text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()}</span></Link>)}</div></div>}
       </div>}
+      <div className="hub-card p-3">
+        <div className="text-sm font-medium">{t('toolResults.searchInside')}</div>
+        <form className="mt-2 flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void searchChunks(); }}>
+          <input className="hub-input min-w-64 flex-1" value={chunkQuery} onChange={(event) => setChunkQuery(event.target.value)} placeholder={t('toolResults.searchInsidePlaceholder')} />
+          <button className="hub-btn hub-btn-primary" type="submit" disabled={chunkLoading || !detail.payloadAvailable}><Search size={15} /> {chunkLoading ? t('app.loading') : t('common.search')}</button>
+        </form>
+        {chunkError && <div className="mt-2 text-sm text-red-500">{chunkError}</div>}
+        {!chunkLoading && chunkHits.length === 0 && chunkQuery && !chunkError && <div className="mt-2 text-sm text-[var(--hub-ink-3)]">{t('toolResults.noChunkMatches')}</div>}
+        {chunkHits.length > 0 && <div className="mt-3 space-y-2">{chunkHits.map((hit) => <div key={`${hit.chunkIndex}-${hit.chunkVersion}`} className="rounded border border-[var(--hub-line)] p-2"><div className="flex items-center justify-between gap-2 text-xs text-[var(--hub-ink-3)]"><span>{t('toolResults.chunk')} #{hit.chunkIndex}</span><span>{hit.retrievalScore.toFixed(4)}</span></div><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs hub-mono">{hit.content}</pre></div>)}</div>}
+      </div>
       <div className="hub-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--hub-line)] px-3 py-2">
           <span className="text-sm font-medium">RAW</span>

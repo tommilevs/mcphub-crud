@@ -198,6 +198,40 @@ export const getToolResultRange = async (req: Request, res: Response): Promise<v
   res.send(bytes.subarray(start, end));
 };
 
+export const searchToolResultChunks = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
+  const repository = requireRepository(res);
+  if (!repository) return;
+  if (!repository.searchChunks) {
+    res.status(503).json({ success: false, message: 'Tool result chunk search is unavailable' });
+    return;
+  }
+  const resultId = String(req.params.id || '').trim();
+  const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  const limit = Number.parseInt(String(req.query.limit ?? '10'), 10);
+  if (!resultId || !query || !Number.isInteger(limit) || limit < 1 || limit > 100) {
+    res.status(400).json({ success: false, message: 'Invalid result chunk search' });
+    return;
+  }
+  const record = await repository.findById(resultId);
+  if (!record) {
+    res.status(404).json({ success: false, message: 'Tool result not found' });
+    return;
+  }
+  let embedding: number[] | null = null;
+  let mode: 'hybrid' | 'lexical' = 'lexical';
+  try {
+    embedding = await generateEmbedding(query, 'query');
+    mode = 'hybrid';
+  } catch (error) {
+    logger.warn('Chunk search embedding failed; using lexical search:', error);
+  }
+  const data = await repository.searchChunks(resultId, query, embedding, limit);
+  await repository.incrementUseCount(resultId);
+  recordToolResultSearch(mode);
+  res.json({ success: true, data, meta: { mode } });
+};
+
 export const searchToolResults = async (req: Request, res: Response): Promise<void> => {
   if (!(await requireAdmin(req, res))) return;
   const repository = requireRepository(res);

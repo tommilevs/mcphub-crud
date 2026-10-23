@@ -79,4 +79,31 @@ describe('ToolResultRepositoryDb', () => {
     expect(sql).toContain('retrieval_score');
     expect(params).toEqual(['error', 'failed deployment', '[0.3,0.4]', 10]);
   });
+
+  it('replaces derived chunks without touching immutable RAW', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+
+    await repository.indexChunks('result-1', [
+      { chunkIndex: 0, chunkVersion: 1, content: 'first', embedding: null },
+      { chunkIndex: 1, chunkVersion: 1, content: 'second', embedding: [0.1, 0.2] },
+    ]);
+
+    expect(query.mock.calls[0][0]).toContain('DELETE FROM tool_result_chunks');
+    expect(query.mock.calls[1][0]).toContain('INSERT INTO tool_result_chunks');
+    expect(query.mock.calls[2][1]).toEqual(['result-1', 1, 1, 'second', '[0.1,0.2]']);
+    expect(query.mock.calls.map(([sql]) => sql).join('\n')).not.toContain('UPDATE tool_results');
+  });
+
+  it('searches chunks inside one result with fused ranks', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+
+    await repository.searchChunks('result-1', 'Xid 79', [0.1, 0.2], 5);
+
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain('chunks.result_id = $1');
+    expect(sql).toContain('retrieval_score');
+    expect(params).toEqual(['result-1', 'Xid 79', '[0.1,0.2]', 5]);
+  });
 });
