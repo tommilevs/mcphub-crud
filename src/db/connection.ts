@@ -10,6 +10,7 @@ import { isRetryableDbError } from '../utils/dbRetry.js';
 import { withTimeout } from '../utils/withTimeout.js';
 import { logger } from '../utils/logger.js';
 import { ensureToolResultHistorySchema } from './toolResultHistorySchema.js';
+import { ensureAttributionContextSchema } from './attributionContextSchema.js';
 
 // Connection pool and retry configuration
 const CONNECTION_CONFIG = {
@@ -224,6 +225,7 @@ const performDatabaseInitialization = async (): Promise<DataSource> => {
       // Tool result history is managed explicitly because its immutable RAW table
       // must never be rewritten by TypeORM synchronize.
       await ensureToolResultHistorySchema(appDataSource);
+      await ensureAttributionContextSchema(appDataSource);
 
       // Set up vector column and index with a more direct approach
       try {
