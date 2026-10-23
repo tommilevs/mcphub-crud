@@ -3,6 +3,11 @@ import { requireAdmin } from '../utils/requireAdmin.js';
 import { getAppDataSource } from '../db/connection.js';
 import { buildDataset, type DatasetCall } from '../services/datasetBuilder.js';
 
+export async function getDatasetAvailability(req:Request,res:Response):Promise<void>{
+  if(!await requireAdmin(req,res))return;
+  res.json({success:true,data:{enabled:process.env.MCPHUB_DATASET_BUILDER_ENABLED==='true'}});
+}
+
 async function datasetRequest(req:Request,res:Response,download:boolean):Promise<void>{
   if(!await requireAdmin(req,res))return;
   if(process.env.MCPHUB_DATASET_BUILDER_ENABLED!=='true'){res.status(404).json({success:false,message:'Dataset Builder is disabled'});return;}

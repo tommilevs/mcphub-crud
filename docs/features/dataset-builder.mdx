@@ -44,6 +44,13 @@ digest/result ID. RAW contents, trace keys, fictional final answers and automati
 training are excluded. DPO and full trajectories are not implemented by this
 format; execution success/failure alone never creates preference labels.
 
+Select results with the history table checkboxes to open the Dataset Builder
+panel. It checks feature availability, offers the key scope and separate
+self-report opt-in, previews eligibility/exclusion reasons, and downloads one
+split. Changing selection or options invalidates the displayed preview. A stale
+consent that leaves no eligible examples prompts a fresh preview instead of
+saving an empty file. `GET /api/datasets/available` is admin-only.
+
 Downloaded files cannot be recalled after consent withdrawal. Subsequent exports
-re-check current consent rather than serving an old cached artifact. A dedicated
-Dataset Builder dashboard and persisted dataset jobs remain subsequent work.
+re-check current consent rather than serving an old cached artifact. Persisted
+dataset jobs remain subsequent work.

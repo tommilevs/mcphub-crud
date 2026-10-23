@@ -1,4 +1,18 @@
 {
+  "datasets": {
+    "title": "Dataset Builder", "disabled": "Dataset Builder is disabled.",
+    "help": "Export reviewed positive tool-selection examples from your own calls. Each download rechecks consent and reviews; RAW contents are excluded. Select up to 100 results.",
+    "keyScope": "API key ID (blank for calls without a key; never enter a token)", "seed": "Split seed",
+    "allowSelf": "Include self-reported models explicitly; these examples remain unverified.",
+    "preview": "Preview eligibility", "counts": "Eligible: {{eligible}} · Duplicates: {{duplicates}}", "split": "Download split", "download": "Download JSONL",
+    "empty": "No eligible examples remain. Refresh the preview.",
+    "splits": { "train": "Training", "validation": "Validation", "test": "Test" },
+    "reasons": { "tenant_mismatch": "Different owner or key scope", "unavailable_or_out_of_scope": "Unavailable or outside your call scope",
+      "attribution_conflicted": "Conflicting model evidence", "untrusted_model_attribution": "Model identity is not trusted", "trace_context_missing": "Task or model segment is missing",
+      "payload_unavailable": "Original payload is unavailable", "training_consent_missing": "Training consent is missing or withdrawn", "positive_task_outcome_missing": "No reviewed positive task outcome",
+      "call_quality_not_positive": "Call quality is not reviewed as correct", "redaction_review_missing": "Call privacy approval is missing or changed", "discovery_context_missing": "Reviewed discovery context is missing",
+      "invalid_arguments": "Tool arguments cannot form a valid example", "sensitive_data_detected": "Potential credentials or personal information detected" }
+  },
   "attribution": {
     "contextTitle": "Training task and discovery context",
     "contextHelp": "Paste the exact original discovery catalogue. Schema and description fingerprints are checked against the selected source. Approval covers this context only; task consent and call privacy review remain separate.",

@@ -1,7 +1,7 @@
 import type {Request,Response} from 'express';
 const query=jest.fn();
 jest.mock('../../src/db/connection.js',()=>({getAppDataSource:()=>({query})}));
-import {previewDataset,exportDataset} from '../../src/controllers/datasetController.js';
+import {previewDataset,exportDataset,getDatasetAvailability} from '../../src/controllers/datasetController.js';
 const id='af3e4f22-cd76-4b99-8cf7-52db210e54de';
 const response=()=>({status:jest.fn().mockReturnThis(),json:jest.fn(),setHeader:jest.fn(),send:jest.fn()});
 const original=process.env.MCPHUB_DATASET_BUILDER_ENABLED;
@@ -13,6 +13,10 @@ test('requires admin and explicit feature enablement',async()=>{
   delete process.env.MCPHUB_DATASET_BUILDER_ENABLED;
   const disabled=response();await previewDataset({user:{isAdmin:true}} as Request,disabled as unknown as Response);
   expect(disabled.status).toHaveBeenCalledWith(404);expect(query).not.toHaveBeenCalled();
+});
+test('availability reports explicit activation without reading training data',async()=>{
+  const res=response();await getDatasetAvailability({user:{isAdmin:true}} as Request,res as unknown as Response);
+  expect(res.json).toHaveBeenCalledWith({success:true,data:{enabled:true}});expect(query).not.toHaveBeenCalled();
 });
 test.each([{resultIds:[]},{resultIds:['bad']},{resultIds:[id],allowSelfReported:'true'},
   {resultIds:[id],format:'dpo'},{resultIds:[id],split:'all'}])('rejects invalid or unsupported export %s',async body=>{

@@ -1,4 +1,18 @@
 {
+  "datasets": {
+    "title": "数据集构建器", "disabled": "数据集构建器未启用。",
+    "help": "导出您自己调用中已审核的正向工具选择示例。每次下载都会重新检查同意和审核，不包含RAW内容。最多选择100条结果。",
+    "keyScope": "API密钥ID（无密钥调用请留空；切勿输入令牌）", "seed": "划分种子",
+    "allowSelf": "明确包含自行报告的模型；这些示例仍标记为未验证。",
+    "preview": "预览资格", "counts": "符合条件：{{eligible}} · 重复：{{duplicates}}", "split": "下载分区", "download": "下载JSONL",
+    "empty": "已无符合条件的示例。请刷新预览。",
+    "splits": { "train": "训练", "validation": "验证", "test": "测试" },
+    "reasons": { "tenant_mismatch": "所有者或密钥范围不同", "unavailable_or_out_of_scope": "不可用或不在您的调用范围内",
+      "attribution_conflicted": "模型证据冲突", "untrusted_model_attribution": "模型身份不可信", "trace_context_missing": "缺少任务或模型分段",
+      "payload_unavailable": "原始数据不可用", "training_consent_missing": "训练同意缺失或已撤回", "positive_task_outcome_missing": "没有已审核的正向任务结果",
+      "call_quality_not_positive": "调用未被审核为正确", "redaction_review_missing": "调用隐私批准缺失或已改变", "discovery_context_missing": "缺少已审核的发现上下文",
+      "invalid_arguments": "工具参数无法构成有效示例", "sensitive_data_detected": "检测到潜在凭据或个人信息" }
+  },
   "attribution": {
     "contextTitle": "训练任务与发现上下文",
     "contextHelp": "粘贴原始发现目录。系统将对照所选来源检查模式及描述指纹。批准仅适用于该上下文；任务同意和调用隐私审核仍是独立要求。",
