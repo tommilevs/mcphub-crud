@@ -36,7 +36,7 @@ even if evidence expired. Local experience retrieval is a different purpose from
 training export; task training consent is not silently inferred or granted.
 
 This slice provides reviewed proposal storage, audit and lexical retrieval API.
-UI editing, automatic extraction, hybrid vector retrieval and optional Basic Memory
+Automatic extraction, editing proposal text in place, hybrid vector retrieval and optional Basic Memory
 adapter remain subsequent work.
 These entries are advice, never new permissions or commands to execute.
 
@@ -61,3 +61,21 @@ source privacy withdrawal. Existing client responses cannot be recalled. Retriev
 failure leaves deterministic advice intact; no execution permission is added.
 Internal ToolPilot still receives metadata-only input and does not send these
 strategy texts to its model provider.
+
+## Review dashboard and current references
+
+History contains a lazy-loaded Experience Memory panel. Select 1–20 results to
+create a proposal, describe applicability, and explicitly approve it or leave it
+as a draft. Editing proposal fields, evidence selection or key scope clears the
+approval checkbox. Search reads approved/current proposals; loading your proposal
+list includes drafts, retired entries and stale evidence for governance. Invalid
+evidence prevents approval, while retirement remains possible. Status changes
+use the displayed revision and never execute the described workflow.
+
+Admin `GET /api/experiences` lists at most 50 own proposals, optionally filtered
+by status/key. This management view is not agent advice and explicitly exposes
+stale assessment for review. `GET /api/experiences/:id` instead returns only an
+approved entry with current valid evidence in the authenticated owner/key scope;
+missing, foreign, retired or stale entries return 404. Historical LoopGuard
+references use this current-read API on demand instead of storing strategy text
+in warning history. `GET /api/experiences/available` reports the feature flag.

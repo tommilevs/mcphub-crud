@@ -30,7 +30,7 @@ export async function createExperience(value:{username:string;keyId:string|null;
   return {...rows[0],assessment};
 }
 export async function searchExperiences(value:{username:string;keyId:string|null;query:string;taskType?:string;limit:number;server?:string;tool?:string}){
-  const candidates=await getAppDataSource().query(`SELECT experience_id,title,summary,task_type,scope,tool_versions,
+  const candidates=await getAppDataSource().query(`SELECT experience_id,title,summary,task_type,scope,tool_versions,status,
     evidence_ids,revision,reviewed_by,reviewed_at FROM experience_entries
     WHERE username=$1 AND key_id IS NOT DISTINCT FROM $2 AND status='approved'
       AND ($3='' OR search_vector @@ websearch_to_tsquery('simple',$3)) AND ($4::text IS NULL OR task_type=$4)
@@ -41,4 +41,15 @@ export async function searchExperiences(value:{username:string;keyId:string|null
   const evidence=ids.length?await loadExperienceEvidence(ids,value.username,value.keyId):[];
   return entries.map((entry:any)=>({...entry,assessment:assessExperienceEvidence(entry.evidence_ids,evidence)}))
     .filter((entry:any)=>entry.assessment.usable).slice(0,value.limit);
+}
+/** Governance listing intentionally includes stale/draft entries; never use it for agent advice. */
+export async function listExperienceEntries(value:{username:string;keyId:string|null;status?:string;limit:number;id?:string}){
+  const entries=await getAppDataSource().query(`SELECT experience_id,title,summary,task_type,scope,tool_versions,
+    evidence_ids,status,revision,reviewed_by,reviewed_at FROM experience_entries
+    WHERE username=$1 AND key_id IS NOT DISTINCT FROM $2 AND ($3::text IS NULL OR status=$3)
+      AND ($5::uuid IS NULL OR experience_id=$5)
+    ORDER BY reviewed_at DESC,experience_id LIMIT $4`,[value.username,value.keyId,value.status??null,value.limit,value.id??null]);
+  const ids=[...new Set<string>(entries.flatMap((entry:any)=>entry.evidence_ids))];
+  const evidence=ids.length?await loadExperienceEvidence(ids,value.username,value.keyId):[];
+  return entries.map((entry:any)=>({...entry,assessment:assessExperienceEvidence(entry.evidence_ids,evidence)}));
 }

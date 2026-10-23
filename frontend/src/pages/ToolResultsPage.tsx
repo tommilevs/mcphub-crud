@@ -9,6 +9,8 @@ import TaskReviewForm from '@/components/TaskReviewForm';
 import ToolResultReviewForm from '@/components/ToolResultReviewForm';
 import TrainingContextEditor from '@/components/TrainingContextEditor';
 import DatasetBuilderPanel from '@/components/DatasetBuilderPanel';
+import ExperienceMemoryPanel from '@/components/ExperienceMemoryPanel';
+import ExperienceReference from '@/components/ExperienceReference';
 import LoopGuardFeedbackButtons from '@/components/LoopGuardFeedbackButtons';
 import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
@@ -228,6 +230,8 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           : t('attribution.loopAdviceCount', { count: detail.loopGuardAdvice.resultIds.length, defaultValue: '{{count}} identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.' })}</p>
         <div className="flex flex-wrap gap-2">{detail.loopGuardAdvice.resultIds.map((id) => <Link key={id} className="hub-mono text-xs text-[var(--hub-accent)] break-all" to={`/tool-results/${encodeURIComponent(id)}`}>{id}</Link>)}</div>
         <LoopGuardFeedbackButtons key={detail.resultId} resultId={detail.resultId} initialVerdict={detail.loopGuardFeedback?.verdict} />
+        {detail.loopGuardAdvice.experiences?.map(reference=><ExperienceReference key={`${detail.resultId}:${reference.experienceId}`}
+          id={reference.experienceId} keyId={detail.keyId}/>)}
         {detail.loopGuardAdvice.toolPilot && <aside className="border-t border-[var(--hub-line)] pt-2 text-xs space-y-1">
           <h3 className="font-medium">{t('attribution.toolPilotAdvice', 'Internal ToolPilot suggestion')} · {detail.loopGuardAdvice.toolPilot.model}</h3>
           <p className="text-[var(--hub-ink-3)]">{t('attribution.toolPilotLimit', 'Based on metadata only; unverified advice from a separate internal model. No tool was executed.')}</p>
@@ -441,6 +445,7 @@ const ToolResultsPage: React.FC = () => {
       {!timelineLoading && timeline.length === 0 && <div className="mt-3 text-sm text-[var(--hub-ink-3)]">{t('toolResults.timelineEmpty')}</div>}
       <div className="mt-3 space-y-2">{timeline.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 hover:bg-[var(--hub-surface-hover)]"><div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{item.server} / {item.tool}</span><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span></div><div className="mt-1 text-xs text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()} · {item.durationMs} ms · {bytes(item.rawBytes)}</div></Link>)}</div>
     </div>}
+    <ExperienceMemoryPanel resultIds={selected}/>
     {selected.length>0&&<DatasetBuilderPanel resultIds={selected}/>}
     {selected.length >= 2 && <button className="hub-btn hub-btn-primary" onClick={() => void runCompare()}>{t('toolResults.compare')} ({selected.length})</button>}
     {comparison && <div className="hub-card p-3"><div className="flex items-center justify-between"><span className="text-sm font-medium">{t('toolResults.compare')}</span><div className="flex gap-2"><button className="hub-btn" onClick={() => void loadComparisonRaw()} disabled={comparisonRawLoading}>{comparisonRawLoading ? t('app.loading') : t('toolResults.loadRaw')}</button><button className="hub-btn" onClick={() => { setComparison(null); setComparisonRaw({}); }}>{t('common.close')}</button></div></div><div className="mt-2 grid gap-2 md:grid-cols-2">{comparison.results.map((item) => <div key={item.resultId} className="rounded border border-[var(--hub-line)] p-2 text-xs"><div className="font-medium">{item.server} / {item.tool}</div><div className="hub-mono text-[var(--hub-ink-3)]">{item.resultId}</div><div>{new Date(item.timestamp).toLocaleString()} · {bytes(item.rawBytes)}</div>{comparisonRaw[item.resultId] !== undefined && <pre className="mt-2 max-h-48 overflow-auto rounded bg-[var(--hub-surface)] p-2 hub-mono whitespace-pre-wrap break-words">{comparisonRaw[item.resultId]}</pre>}</div>)}</div><div className="mt-2 text-xs text-[var(--hub-ink-3)]">{comparison.sameRaw ? t('toolResults.sameRaw') : t('toolResults.differentRaw')}</div>{comparisonRawError && <div className="mt-2 text-sm text-red-500">{comparisonRawError}</div>}</div>}

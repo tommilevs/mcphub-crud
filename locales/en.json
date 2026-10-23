@@ -1,4 +1,20 @@
 {
+  "experiences": {
+    "selectHelp": "Select 1–20 source results in the history table before saving a proposal.",
+    "empty": "No proposals found in this scope.",
+    "actions": { "draft": "Return to draft", "approved": "Approve", "retired": "Retire" },
+    "title": "Experience Memory", "disabled": "Experience Memory is disabled.",
+    "help": "Reviewed strategy proposals from your own evidence. One task remains a hypothesis; multiple reviewed tasks do not prove generalization. Nothing is executed or installed.",
+    "create": "Propose a strategy", "selected": "selected results", "name": "Title", "summary": "Strategy and limitations", "taskType": "Task category",
+    "servers": "Server scope (one per line; blank means general)", "tools": "Tool scope (one server/tool per line)",
+    "approveNow": "I reviewed this proposal and approve it for scoped advice. Otherwise save as a draft.",
+    "search": "Search approved strategies", "refresh": "Load my proposals", "saved": "Proposal saved.",
+    "status": { "draft": "Draft", "approved": "Approved", "retired": "Retired" },
+    "confidence": { "hypothesis": "Hypothesis", "supported": "Supported by reviewed examples" }, "tasks": "reviewed tasks",
+    "stale": "Evidence is unavailable or its approval changed. This entry is excluded from advice.",
+    "general": "General server scope", "allTools": "General tool scope", "reportedVersions": "Reported version constraints",
+    "viewCurrent": "Load current reviewed strategy"
+  },
   "datasets": {
     "title": "Dataset Builder", "disabled": "Dataset Builder is disabled.",
     "help": "Export reviewed positive tool-selection examples from your own calls. Each download rechecks consent and reviews; RAW contents are excluded. Select up to 100 results.",

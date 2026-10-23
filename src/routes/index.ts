@@ -5,7 +5,7 @@ import { submitLoopGuardFeedback, getLoopGuardSummary } from '../controllers/loo
 import { saveToolResultReview } from '../controllers/toolResultReviewController.js';
 import { saveTrainingContext, getTrainingContext } from '../controllers/trainingContextController.js';
 import { previewDataset,exportDataset,getDatasetAvailability } from '../controllers/datasetController.js';
-import {saveExperience,findExperiences,reviewExperience} from '../controllers/experienceController.js';
+import {saveExperience,findExperiences,reviewExperience,listExperiences,readExperience,getExperienceAvailability} from '../controllers/experienceController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
 import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
 import express from 'express';
@@ -443,7 +443,10 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.get('/datasets/available',getDatasetAvailability);
   authenticatedRouter.post('/datasets/export',exportDataset);
   authenticatedRouter.post('/experiences',saveExperience);
+  authenticatedRouter.get('/experiences',listExperiences);
+  authenticatedRouter.get('/experiences/available',getExperienceAvailability);
   authenticatedRouter.get('/experiences/search',findExperiences);
+  authenticatedRouter.get('/experiences/:id',readExperience);
   authenticatedRouter.patch('/experiences/:id/status',reviewExperience);
 
   // Configuration template routes

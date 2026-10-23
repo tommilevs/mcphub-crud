@@ -930,6 +930,7 @@ export type ToolResultStatus = 'success' | 'error';
 export interface ToolResultSummary {
   loopGuardFeedback?: { verdict: 'helpful' | 'false_positive' | 'ignored'; reviewedBy: string; reviewedAt: string };
   loopGuardAdvice?: { trigger: string; resultIds: string[]; recommendation: string;
+    experiences?: Array<{experienceId:string;revision:number;evidenceResultIds:string[];confidence:string}>;
     toolPilot?: { role: 'internal_toolpilot'; model: string; reportedModel?: string; suggestion: string; evidence: 'metadata_only' } };
   taskReview?: { revision: number; outcome: string; trainingConsent: boolean; reviewedBy: string; reviewedAt: string };
   resultReview?: { revision: number; rawSha256: string; quality: 'unknown' | 'correct' | 'incorrect' | 'uncertain';

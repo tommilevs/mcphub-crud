@@ -18,8 +18,8 @@ import { saveTrainingContext, getTrainingContext } from '../../src/controllers/t
 import { extractDiscoveryEvidence } from '../../src/services/discoveryEvidence.js';
 import { previewDataset,exportDataset } from '../../src/controllers/datasetController.js';
 import {ensureExperienceSchema} from '../../src/db/experienceSchema.js';
-import {createExperience,searchExperiences} from '../../src/services/experienceMemory.js';
-import {reviewExperience} from '../../src/controllers/experienceController.js';
+import {createExperience,searchExperiences,listExperienceEntries} from '../../src/services/experienceMemory.js';
+import {reviewExperience,readExperience} from '../../src/controllers/experienceController.js';
 import {getExperienceAdvice} from '../../src/services/experienceAdvice.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
@@ -401,6 +401,13 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect(entry?.assessment).toMatchObject({usable:true,confidence:'supported',independentTasks:2});
     const search=(username='experience-owner')=>searchExperiences({username,keyId:null,query:'diagnostic',limit:10});
     expect(await search()).toHaveLength(1);expect(await search('other-owner')).toHaveLength(0);
+    const readCurrent=async(username='experience-owner')=>{
+      const previous=process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED;process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED='true';let status=200;
+      try{await readExperience({user:{isAdmin:true,username},params:{id:entry!.experience_id},query:{}} as unknown as Request,
+        {json:()=>{},status:(value:number)=>{status=value;return {json:()=>{}};}} as unknown as Response);return status;}
+      finally{if(previous===undefined)delete process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED;else process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED=previous;}
+    };
+    expect(await readCurrent()).toBe(200);expect(await readCurrent('other-owner')).toBe(404);
     expect(await searchExperiences({username:'experience-owner',keyId:null,query:'diagnostic',server:'other-server',tool:'inspect',limit:10})).toHaveLength(0);
     const memoryFlag=process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED,adviceFlag=process.env.MCPHUB_EXPERIENCE_ADVICE_ENABLED;
     process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED='true';process.env.MCPHUB_EXPERIENCE_ADVICE_ENABLED='true';
@@ -415,6 +422,8 @@ suite('attribution PostgreSQL isolated schema', () => {
     }
     await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,2,$2,'correct','rejected','reviewer')`,[ids[0],digest]);
     expect(await search()).toHaveLength(0);
+    expect(await readCurrent()).toBe(404);
+    expect((await listExperienceEntries({username:'experience-owner',keyId:null,limit:20}))[0].assessment.usable).toBe(false);
     const old=process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED;process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED='true';
     try{
       const retire=async()=>{let status=200;await reviewExperience({user:{isAdmin:true,username:'experience-owner'},params:{id:entry!.experience_id},

@@ -1,7 +1,7 @@
 import type {Request,Response} from 'express';
 import {requireAdmin} from '../utils/requireAdmin.js';
 import {getAppDataSource} from '../db/connection.js';
-import {createExperience,searchExperiences,loadExperienceEvidence} from '../services/experienceMemory.js';
+import {createExperience,searchExperiences,loadExperienceEvidence,listExperienceEntries} from '../services/experienceMemory.js';
 import {assessExperienceEvidence} from '../services/experienceEvidence.js';
 const uuid=(value:unknown):value is string=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 const text=(value:unknown,max:number):value is string=>typeof value==='string'&&Boolean(value.trim())&&value.length<=max;
@@ -13,6 +13,29 @@ async function enabled(req:Request,res:Response){
   if(process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED!=='true'){res.status(404).json({success:false,message:'Experience Memory is disabled'});return false;}
   if(!text((req as any).user?.username,255)){res.status(400).json({success:false,message:'Authenticated owner is required'});return false;}
   return true;
+}
+export async function getExperienceAvailability(req:Request,res:Response):Promise<void>{
+  if(!await requireAdmin(req,res))return;
+  res.json({success:true,data:{enabled:process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED==='true'}});
+}
+export async function listExperiences(req:Request,res:Response):Promise<void>{
+  if(!await enabled(req,res))return;
+  const keyId=req.query.keyId??null,status=req.query.status,limit=Number(req.query.limit??20);
+  if(!key(keyId)||(status!==undefined&&(typeof status!=='string'||!['draft','approved','retired'].includes(status)))||!Number.isInteger(limit)||limit<1||limit>50){
+    res.status(400).json({success:false,message:'Invalid experience listing'});return;
+  }
+  try{res.json({success:true,data:await listExperienceEntries({username:(req as any).user.username,keyId:keyId as string|null,status:status as string|undefined,limit})});}
+  catch{res.status(503).json({success:false,message:'Experience Memory is unavailable'});}
+}
+export async function readExperience(req:Request,res:Response):Promise<void>{
+  if(!await enabled(req,res))return;
+  const keyId=req.query.keyId??null,id=req.params.id;
+  if(!key(keyId)||!uuid(id)){res.status(400).json({success:false,message:'Invalid experience reference'});return;}
+  try{
+    const entries=await listExperienceEntries({username:(req as any).user.username,keyId:keyId as string|null,status:'approved',limit:1,id});
+    if(!entries[0]?.assessment.usable){res.status(404).json({success:false,message:'Experience is unavailable or no longer supported by current evidence'});return;}
+    res.json({success:true,data:entries[0]});
+  }catch{res.status(503).json({success:false,message:'Experience Memory is unavailable'});}
 }
 export async function saveExperience(req:Request,res:Response):Promise<void>{
   if(!await enabled(req,res))return;

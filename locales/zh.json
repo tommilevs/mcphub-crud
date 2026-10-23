@@ -1,4 +1,20 @@
 {
+  "experiences": {
+    "selectHelp": "保存建议前，请在历史表格中选择1–20条来源结果。",
+    "empty": "该范围内未找到建议。",
+    "actions": { "draft": "退回草稿", "approved": "批准", "retired": "停用" },
+    "title": "经验记忆", "disabled": "经验记忆未启用。",
+    "help": "根据您自己的证据审核策略建议。单个任务仍属于假设，多个已审核任务也不能证明可泛化性。不会执行或安装任何内容。",
+    "create": "提出策略", "selected": "条已选结果", "name": "标题", "summary": "策略与局限", "taskType": "任务类别",
+    "servers": "服务器范围（每行一个；留空表示通用）", "tools": "工具范围（每行一个server/tool）",
+    "approveNow": "我已审核该建议并批准用于限定范围内的建议，否则保存为草稿。",
+    "search": "搜索已批准的策略", "refresh": "加载我的建议", "saved": "建议已保存。",
+    "status": { "draft": "草稿", "approved": "已批准", "retired": "已停用" },
+    "confidence": { "hypothesis": "假设", "supported": "有已审核示例支持" }, "tasks": "个已审核任务",
+    "stale": "证据不可用或批准已改变。该条目不会用于建议。",
+    "general": "通用服务器范围", "allTools": "通用工具范围", "reportedVersions": "报告的版本约束",
+    "viewCurrent": "加载当前已审核策略"
+  },
   "datasets": {
     "title": "数据集构建器", "disabled": "数据集构建器未启用。",
     "help": "导出您自己调用中已审核的正向工具选择示例。每次下载都会重新检查同意和审核，不包含RAW内容。最多选择100条结果。",
