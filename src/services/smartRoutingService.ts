@@ -363,6 +363,19 @@ Available servers: ${serversList}`,
     );
   }
 
+  if (process.env.MCPHUB_ATTRIBUTION_MODE === 'compatible') {
+    for (const tool of tools) {
+      tool.inputSchema = { ...tool.inputSchema, properties: {
+        ...tool.inputSchema.properties,
+        hub_context: { type: 'object', additionalProperties: false, properties: {
+          action: { type: 'string', enum: ['start'] },
+          model_claim: { type: ['string', 'null'], maxLength: 255 },
+          trace_key: { type: 'string', maxLength: 64 },
+        } },
+      } };
+      tool.description += '\nOptional attribution: start a task with hub_context.action=start; report model_claim only if known exactly. Retain the returned trace_key for subsequent calls. Never guess your model.';
+    }
+  }
   return tools;
 };
 

@@ -5630,7 +5630,10 @@ export const handleListToolsRequest = withPrincipalServers(
 );
 const callToolWithPrincipal = withPrincipalServers(handleCallToolRequestImpl, 'tool');
 export const handleCallToolRequest = (request: any, extra: any) =>
-  observeToolCall(() => callToolWithPrincipal(request, extra));
+  observeToolCall(async () => {
+    const { runWithAttribution } = await import('./attributionRuntime.js');
+    return runWithAttribution(request, (cleaned) => callToolWithPrincipal(cleaned, extra));
+  });
 export const handleGetPromptRequest = withPrincipalServers(handleGetPromptRequestImpl, 'prompt');
 export const handleListPromptsRequest = withPrincipalServers(
   withCacheHints(handleListPromptsRequestImpl, false, 'prompts'),

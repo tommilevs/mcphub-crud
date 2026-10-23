@@ -59,6 +59,7 @@ export const isSensitiveKey = (key: string): boolean =>
  */
 export const maskSecretPatterns = (value: string): string => {
   let result = value;
+  result = result.replace(/\bk_[A-Za-z0-9_-]{32}\b/g, '[REDACTED]');
   // JWTs (header.payload.signature)
   result = result.replace(
     /\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\b/g,
