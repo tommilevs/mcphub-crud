@@ -5632,7 +5632,7 @@ const callToolWithPrincipal = withPrincipalServers(handleCallToolRequestImpl, 't
 export const handleCallToolRequest = (request: any, extra: any) =>
   observeToolCall(async () => {
     const { runWithAttribution } = await import('./attributionRuntime.js');
-    return runWithAttribution(request, (cleaned) => callToolWithPrincipal(cleaned, extra));
+    return runWithAttribution(request, (cleaned) => callToolWithPrincipal(cleaned, extra), extra?.mcpReq?.id ?? extra?.requestId);
   });
 export const handleGetPromptRequest = withPrincipalServers(handleGetPromptRequestImpl, 'prompt');
 export const handleListPromptsRequest = withPrincipalServers(

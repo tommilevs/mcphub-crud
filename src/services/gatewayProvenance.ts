@@ -1,6 +1,9 @@
 import { createHash, createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 interface Invocation { id: string | number; params: { name: string; arguments?: unknown } }
+/** MCP SDK v2 strips the JSON-RPC envelope ID from its parsed request. */
+export const gatewayInvocation = (request: any, transportRequestId?: string | number): Invocation =>
+  ({ ...request, id: transportRequestId ?? request.id });
 interface GatewayProof {
   version: 1; adapterId: string; modelId: string; responseId: string; toolCallId: string;
   ownerSha256: string; invocationSha256: string; issuedAt: number; nonce: string; signature: string;

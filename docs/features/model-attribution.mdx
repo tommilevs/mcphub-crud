@@ -147,6 +147,10 @@ hub's authenticated principal, serialized as `[username-or-null,key-id-or-null]`
 Anonymous calls cannot establish verified provenance.
 
 Runtime validates the original invocation before stripping hub metadata upstream.
+MCP SDK v2 exposes the original JSON-RPC ID in the handler context (`mcpReq.id`),
+not in the parsed request. The hub uses that transport ID for proof verification;
+older handler contexts fall back to `requestId`. Arguments and the tool name
+remain those of the parsed invocation.
 PostgreSQL consumes each adapter/nonce pair once atomically across workers;
 expired nonce cleanup is bounded. Valid evidence upgrades only the current call's
 snapshot to `gateway_observed`; it does not upgrade stored correlation contexts

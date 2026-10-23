@@ -3,10 +3,12 @@ import { InMemoryTransport, Server } from '@modelcontextprotocol/server';
 import { LegacyMcpClient } from '../../src/clients/legacyMcpClient.js';
 import { LEGACY_PROTOCOL_VERSIONS } from '../../src/utils/mcpProtocol.js';
 import { ResilientJsonSchemaValidator } from '../../src/utils/jsonSchemaValidator.js';
+import { gatewayInvocation, createGatewayProof, verifyGatewayProof } from '../../src/services/gatewayProvenance.js';
 
 describe('SDK v2 with legacy protocol behavior', () => {
   let server: Server;
   let client: LegacyMcpClient;
+  let wireClientTransport: any;
   const listTools = jest.fn();
   const callTool = jest.fn();
   const requests: string[] = [];
@@ -41,6 +43,7 @@ describe('SDK v2 with legacy protocol behavior', () => {
       },
     );
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    wireClientTransport = clientTransport;
     await server.connect(serverTransport);
     const onmessage = serverTransport.onmessage!;
     serverTransport.onmessage = (message, extra) => {
@@ -53,6 +56,40 @@ describe('SDK v2 with legacy protocol behavior', () => {
   afterEach(async () => {
     await client.close();
     await server.close();
+  });
+
+  it('exposes the original JSON-RPC request ID needed by provenance binding', async () => {
+    await client.callTool({ name: 'echo', arguments: {} });
+    const [request, extra] = callTool.mock.calls[0];
+    expect(request.id ?? extra.mcpReq?.id ?? extra.requestId).toBeDefined();
+    expect(request.id).toBeUndefined();
+    const invocation = gatewayInvocation(request,extra.mcpReq?.id ?? extra.requestId);
+    expect(invocation.id).toBeDefined();
+    expect(invocation.params).toBe(request.params);
+  });
+
+  it('preserves signed gateway binding through actual client serialization and SDK request parsing', async () => {
+    const secret='sdk-test-gateway-secret-at-least-32-characters';
+    const send=wireClientTransport.send.bind(wireClientTransport);
+    wireClientTransport.send=async(message: any, options: any)=>{
+      if(message.method==='tools/call'){
+        const provider={id:'sdk-response',model:'sdk-observed-model',choices:[{message:{tool_calls:[{
+          id:'sdk-tool-call',type:'function',function:{name:message.params.name,arguments:JSON.stringify(message.params.arguments)},
+        }]}}]};
+        const proof=createGatewayProof(provider,'sdk-tool-call',message,{adapterId:'sdk-gateway',principal:'sdk-owner',secret});
+        message={...message,params:{...message.params,_meta:{...message.params._meta,'dev.mcphub/provenance':proof}}};
+      }
+      return send(message,options);
+    };
+    callTool.mockImplementation(async(request: any,extra: any)=>{
+      const evidence=await verifyGatewayProof(request.params._meta['dev.mcphub/provenance'],
+        gatewayInvocation(request,extra.mcpReq?.id??extra.requestId),'sdk-owner',()=>secret,async()=>true);
+      expect(evidence).toMatchObject({modelId:'sdk-observed-model',responseId:'sdk-response',toolCallId:'sdk-tool-call'});
+      return {content:[{type:'text',text:'verified'}]};
+    });
+    const result=await client.callTool({name:'echo',arguments:{text:'hello'}});
+    expect(result.content).toEqual([{type:'text',text:'verified'}]);
+    expect(callTool).toHaveBeenCalledTimes(1);
   });
 
   it('does not certify an obsolete discovery response that finishes after a newer refresh', async () => {

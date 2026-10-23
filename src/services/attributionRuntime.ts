@@ -5,8 +5,9 @@ import { runWithCallAttribution } from './callAttribution.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
 import { maintainAttributionRetention } from './attributionRetention.js';
 import { withGatewayAttribution } from './gatewayAttribution.js';
+import { gatewayInvocation } from './gatewayProvenance.js';
 
-export async function runWithAttribution(request: any, handler: (request: any) => Promise<any>) {
+export async function runWithAttribution(request: any, handler: (request: any) => Promise<any>, transportRequestId?: string | number) {
   let config;
   try {
     config = await getSmartRoutingConfig();
@@ -32,7 +33,7 @@ export async function runWithAttribution(request: any, handler: (request: any) =
     const service = new AttributionContextService(repository,
       undefined, (config.attributionTtlHours ?? 168) * 60 * 60 * 1000);
     return runWithCallAttribution(null, () => withAttributionHandshake(request, principal, service,
-      cleaned => withGatewayAttribution(request, stripAttributionInput(cleaned), principal, repository, handler)));
+      cleaned => withGatewayAttribution(gatewayInvocation(request, transportRequestId), stripAttributionInput(cleaned), principal, repository, handler)));
   } catch {
     return runWithCallAttribution(null, () => handler(stripAttributionInput(request)));
   }

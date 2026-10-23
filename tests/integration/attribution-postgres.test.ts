@@ -86,11 +86,11 @@ suite('attribution PostgreSQL isolated schema', () => {
     try {
       await RequestContextService.getInstance().runWithCustomRequestContext({headers:{},username:'gateway-user'},async()=>{
         let verifiedCallId: string | undefined;
-        const result=await runWithAttribution(request,async(cleaned)=>{
+        const result=await runWithAttribution({params:request.params},async(cleaned)=>{
           expect(cleaned.params._meta['dev.mcphub/provenance']).toBeUndefined();
           expect(getCallAttribution()?.identity).toMatchObject({source:'gateway_observed',verified:true,modelId:'observed'});
           verifiedCallId=getCallAttribution()?.callId; return {content:[]};
-        });
+        },request.id);
         expect(result._meta['dev.mcphub/provenance'].causalCorrelationVerified).toBe(true);
         const key=result._meta['dev.mcphub/context'].trace_key;
         await runWithAttribution({params:{name:'call_tool',arguments:{toolName:'demo',hub_context:{trace_key:key}}}},async()=>{
