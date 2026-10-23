@@ -4783,8 +4783,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
     // For unavailable-target errors, surface exactly the unified message (no
     // error-class name, no reason) so hidden vs nonexistent is indistinguishable.
     const safeErrorText = unavailable ? unavailable.message : formatErrorForLogging(error);
-
-    return {
+    const errorResult = {
       content: [
         {
           type: 'text',
@@ -4793,6 +4792,20 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
       ],
       isError: true,
     };
+    const resultWithHistory = await resultHistory.captureAndAnnotate(errorResult, {
+      server: serverInfo?.name || 'unknown',
+      tool: cleanToolName,
+      durationMs: duration,
+      status: 'error',
+      arguments: getActivityInputFromToolRequest(request),
+      group,
+      username,
+      keyId,
+      sessionId,
+      sensitive: hasPersonalAuthentication(serverInfo?.config),
+    });
+
+    return resultWithHistory;
   } finally {
     clientStateLease?.release();
     releaseOnDemandToolCall?.();
