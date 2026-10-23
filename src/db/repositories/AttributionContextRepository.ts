@@ -4,6 +4,18 @@ import { randomUUID } from 'node:crypto';
 export class AttributionContextRepository implements AttributionContextStore {
   constructor(private readonly db: { query(sql: string, parameters?: unknown[]): Promise<any> }) {}
 
+  async pruneExpired(cutoff: Date, limit = 500): Promise<number> {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000 || !Number.isFinite(cutoff.getTime())) {
+      throw new Error('Invalid cleanup batch');
+    }
+    const rows = await this.db.query(`WITH expired AS (
+      SELECT context_id FROM attribution_contexts WHERE expires_at < $1
+      ORDER BY expires_at, context_id LIMIT $2 FOR UPDATE SKIP LOCKED
+    ) DELETE FROM attribution_contexts context USING expired
+      WHERE context.context_id = expired.context_id RETURNING context.context_id`, [cutoff, limit]);
+    return rows.length;
+  }
+
   async insert(record: AttributionContextRecord, event = 'context_started', parentContextId?: string): Promise<void> {
     await this.db.query(`WITH inserted AS (INSERT INTO attribution_contexts
       (context_id, task_id, trace_id, model_segment_id, principal, key_digest,

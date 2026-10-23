@@ -12,3 +12,14 @@ test('context issuance and its identity event are one statement without storing 
   expect(parameters).toContain('context_started');
   expect(JSON.stringify(parameters)).not.toContain(issued.traceKey);
 });
+
+test('bounds cleanup and selects only expired contexts before the retention cutoff', async () => {
+  const query = jest.fn().mockResolvedValue([{ context_id: 'removed' }]);
+  const repository = new AttributionContextRepository({ query });
+  const cutoff = new Date('2026-09-23T00:00:00Z');
+  expect(await repository.pruneExpired(cutoff, 100)).toBe(1);
+  expect(query.mock.calls[0][0]).toContain('expires_at < $1');
+  expect(query.mock.calls[0][0]).toContain('FOR UPDATE SKIP LOCKED');
+  expect(query.mock.calls[0][1]).toEqual([cutoff, 100]);
+  await expect(repository.pruneExpired(cutoff, 10001)).rejects.toThrow('Invalid cleanup batch');
+});

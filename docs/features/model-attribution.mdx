@@ -48,6 +48,13 @@ keys do not block ordinary tool execution in compatible mode. They yield unknown
 attribution. RAW tool results remain unchanged; history stores attribution in an
 additional immutable JSON column with a unique call ID.
 
+On authenticated attributed traffic, background maintenance removes up to 500
+contexts whose expiry is more than 30 days old, at most once per hour per process.
+Their lifecycle events cascade with them. Configure that post-expiry grace period
+with `MCPHUB_ATTRIBUTION_RETENTION_DAYS` (1–3650). Cleanup does not delete tool
+results or their immutable per-call attribution snapshots. No background timer is
+kept alive; an idle hub defers cleanup until new attributed traffic arrives.
+
 Model claims are always `self_reported` and `verified: false`. This implementation
 does not detect models from IP addresses, model inventories or request timing.
 Adapters may also send the correlation key in MCP request

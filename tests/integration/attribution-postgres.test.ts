@@ -64,4 +64,14 @@ suite('attribution PostgreSQL isolated schema', () => {
       await pool.query('DROP TRIGGER reject_test_event ON attribution_identity_events');
     }
   });
+  test('cleanup removes only old expired contexts and cascades their events', async () => {
+    const old = await service.start('retention-user');
+    const live = await service.start('retention-user');
+    await pool.query("UPDATE attribution_contexts SET expires_at = NOW() - INTERVAL '31 days' WHERE context_id=$1", [old.contextId]);
+    const repository = new AttributionContextRepository({ query: async (sql, parameters) => (await pool.query(sql, parameters)).rows });
+    expect(await repository.pruneExpired(new Date(Date.now() - 30 * 86400000), 1)).toBe(1);
+    expect(await service.resolve('retention-user', old.traceKey)).toBeNull();
+    expect(await service.resolve('retention-user', live.traceKey)).not.toBeNull();
+    expect((await pool.query('SELECT 1 FROM attribution_identity_events WHERE context_id=$1', [old.contextId])).rowCount).toBe(0);
+  });
 });

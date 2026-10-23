@@ -3,6 +3,7 @@ import { withAttributionHandshake, stripAttributionInput } from './attributionHa
 import { RequestContextService } from './requestContextService.js';
 import { runWithCallAttribution } from './callAttribution.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
+import { maintainAttributionRetention } from './attributionRetention.js';
 
 export async function runWithAttribution(request: any, handler: (request: any) => Promise<any>) {
   let config;
@@ -24,7 +25,9 @@ export async function runWithAttribution(request: any, handler: (request: any) =
     const [{ getAppDataSource }, { AttributionContextRepository }] = await Promise.all([
       import('../db/connection.js'), import('../db/repositories/AttributionContextRepository.js'),
     ]);
-    const service = new AttributionContextService(new AttributionContextRepository(getAppDataSource()),
+    const repository = new AttributionContextRepository(getAppDataSource());
+    maintainAttributionRetention(repository);
+    const service = new AttributionContextService(repository,
       undefined, (config.attributionTtlHours ?? 168) * 60 * 60 * 1000);
     return withAttributionHandshake(request, principal, service, handler);
   } catch {
