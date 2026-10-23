@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
 import type { PaginationInfo, ToolResultDetail, ToolResultFilter, ToolResultStats, ToolResultSummary } from '@/types';
@@ -88,8 +88,8 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
         ].map(([label, value]) => <div key={label} className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{label}</div><div className="mt-1 text-sm text-[var(--hub-ink)]">{value}</div></div>)}
       </div>
       {(detail.sessionId || detail.conversationId || detail.parentResultId || detail.rawSha256) && <div className="hub-card grid gap-2 p-3 text-xs md:grid-cols-2">
-        {detail.sessionId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.session')}</div><div className="hub-mono mt-1 break-all">{detail.sessionId}</div></div>}
-        {detail.conversationId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.conversation')}</div><div className="hub-mono mt-1 break-all">{detail.conversationId}</div></div>}
+        {detail.sessionId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.session')}</div><Link to={`/tool-results?sessionId=${encodeURIComponent(detail.sessionId)}`} className="hub-mono mt-1 block break-all text-[var(--hub-accent)]">{detail.sessionId}</Link></div>}
+        {detail.conversationId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.conversation')}</div><Link to={`/tool-results?conversationId=${encodeURIComponent(detail.conversationId)}`} className="hub-mono mt-1 block break-all text-[var(--hub-accent)]">{detail.conversationId}</Link></div>}
         {detail.parentResultId && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.parent')}</div><Link className="hub-mono mt-1 block break-all text-[var(--hub-accent)]" to={`/tool-results/${detail.parentResultId}`}>{detail.parentResultId}</Link></div>}
         {detail.rawSha256 && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.rawHash')}</div><div className="hub-mono mt-1 break-all">{detail.rawSha256}</div></div>}
       </div>}
@@ -124,13 +124,16 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
 
 const ToolResultsPage: React.FC = () => {
   const { resultId } = useParams<{ resultId?: string }>();
+  const [searchParams] = useSearchParams();
   const { t } = useTranslation();
+  const initialSessionId = searchParams.get('sessionId') || undefined;
+  const initialConversationId = searchParams.get('conversationId') || undefined;
   const [items, setItems] = useState<ToolResultSummary[]>([]);
   const [stats, setStats] = useState<ToolResultStats | null>(null);
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);
   const [page, setPage] = useState(1);
-  const [draft, setDraft] = useState<ToolResultFilter>({});
-  const [filter, setFilter] = useState<ToolResultFilter>({});
+  const [draft, setDraft] = useState<ToolResultFilter>({ sessionId: initialSessionId, conversationId: initialConversationId });
+  const [filter, setFilter] = useState<ToolResultFilter>({ sessionId: initialSessionId, conversationId: initialConversationId });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
