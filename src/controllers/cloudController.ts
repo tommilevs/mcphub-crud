@@ -238,10 +238,14 @@ export const getCloudServerToolsList = async (req: Request, res: Response): Prom
 
 // Call a tool on a cloud server
 export const callCloudTool = async (req: Request, res: Response): Promise<void> => {
+  const startTime = Date.now();
+  let serverName = '';
+  let toolName = '';
+  let toolArguments: Record<string, any> = {};
   try {
     // Decode URL-encoded parameters to handle slashes in server/tool names
-    const serverName = decodeURIComponent(req.params.serverName);
-    const toolName = decodeURIComponent(req.params.toolName);
+    serverName = decodeURIComponent(req.params.serverName);
+    toolName = decodeURIComponent(req.params.toolName);
     const { arguments: args } = req.body;
 
     if (!serverName) {
@@ -260,8 +264,7 @@ export const callCloudTool = async (req: Request, res: Response): Promise<void> 
       return;
     }
 
-    const startTime = Date.now();
-    const toolArguments = args || {};
+    toolArguments = args || {};
     const result = await callCloudServerTool(serverName, toolName, toolArguments);
     const resultWithHistory = await getToolResultHistoryCoordinator().captureAndAnnotate(
       result as unknown as Record<string, unknown>,
@@ -287,6 +290,26 @@ export const callCloudTool = async (req: Request, res: Response): Promise<void> 
     logger.error('Error calling cloud server tool:', error);
     const errorMessage =
       error instanceof Error ? error.message : 'Failed to call cloud server tool';
+    if (serverName && toolName) {
+      await getToolResultHistoryCoordinator().captureAndAnnotate(
+        {
+          content: [{ type: 'text', text: errorMessage }],
+          isError: true,
+        },
+        {
+          server: serverName,
+          tool: toolName,
+          arguments: toolArguments,
+          durationMs: Date.now() - startTime,
+          status: 'error',
+          group: 'cloud',
+          username: (req as Request & { user?: { username?: string } }).user?.username,
+          sessionId: typeof req.headers['x-session-id'] === 'string'
+            ? req.headers['x-session-id']
+            : undefined,
+        },
+      );
+    }
     res.status(500).json({
       success: false,
       message: errorMessage,

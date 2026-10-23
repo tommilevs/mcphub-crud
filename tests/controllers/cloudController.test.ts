@@ -43,4 +43,30 @@ describe('callCloudTool', () => {
       data: expect.objectContaining({ _meta: { 'mcphub/result_id': 'result-id' } }),
     });
   });
+
+  it('records a failed cloud invocation before returning its error', async () => {
+    const captureAndAnnotate = jest.fn().mockResolvedValue(undefined);
+    jest.mocked(callCloudServerTool).mockRejectedValue(new Error('upstream unavailable'));
+    jest.mocked(getToolResultHistoryCoordinator).mockReturnValue({ captureAndAnnotate } as never);
+    const req = {
+      params: { serverName: 'cloud-server', toolName: 'lookup' },
+      body: { arguments: { query: 'test' } },
+      headers: {},
+      user: { username: 'tommi' },
+    } as unknown as Request;
+    const res = { json: jest.fn(), status: jest.fn().mockReturnThis() } as unknown as Response;
+
+    await callCloudTool(req, res);
+
+    expect(captureAndAnnotate).toHaveBeenCalledWith(expect.objectContaining({
+      isError: true,
+      content: [{ type: 'text', text: 'upstream unavailable' }],
+    }), expect.objectContaining({
+      server: 'cloud-server',
+      tool: 'lookup',
+      status: 'error',
+      username: 'tommi',
+    }));
+    expect(res.status).toHaveBeenCalledWith(500);
+  });
 });
