@@ -3,7 +3,7 @@ import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/fetchInterceptor';
 import { useToast } from '@/contexts/ToastContext';
 
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
-type NativeProcessStatus = { id: string; state?: string; running: boolean; pid?: number; restarts: number; restart_limit?: number };
+type NativeProcessStatus = { id: string; state?: string; running: boolean; pid?: number; restarts: number; restart_limit?: number; protocolReady?: boolean; lastError?: string };
 type NativeRuntimeStatusResponse = NativeProcessStatus[] | { processes: NativeProcessStatus[]; gatewayHealthy?: boolean };
 
 /** Admin-only enrollment UI. The value is sent once and never rendered back. */
@@ -112,6 +112,7 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
               <span className={process.running ? 'text-green-600' : 'text-amber-600'}>
                 {process.state || (process.running ? 'RUNNING' : 'STOPPED')} · {process.restarts}/{process.restart_limit ?? '—'} restarts
               </span>
+              {process.lastError && <span className="basis-full text-xs text-red-600">{process.lastError}</span>}
               <button type="button" disabled={busy} onClick={() => void restart(process.id)} className="hub-btn secondary !py-1 !px-2">Restart</button>
             </div>
           ))}

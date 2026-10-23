@@ -31,6 +31,8 @@ only started and becomes true after a successful MCP stdio exchange. On
 Windows the status response is `{ processes, gatewayHealthy }`, where
 `gatewayHealthy` is an HTTP probe of the bundled gateway `/health` endpoint;
 older non-Windows development responses remain the legacy process array.
+When a managed stdio read or write fails, `lastError` contains the bounded
+diagnostic string until the next successful exchange or restart.
 
 `runtime-core::dpapi` provides the Windows machine-scoped DPAPI
 protect/unprotect primitive used by the credential broker. Native mode accepts
