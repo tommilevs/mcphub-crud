@@ -499,6 +499,14 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
           azureOpenaiEmbeddingModel:
             data.data.systemConfig.smartRouting.azureOpenaiEmbeddingModel || '',
           progressiveDisclosure: data.data.systemConfig.smartRouting.progressiveDisclosure ?? false,
+          mcpZeroEnabled: data.data.systemConfig.smartRouting.mcpZeroEnabled ?? false,
+          mcpZeroTopServers: data.data.systemConfig.smartRouting.mcpZeroTopServers ?? 5,
+          attributionMode: data.data.systemConfig.smartRouting.attributionMode ?? 'off',
+          attributionTtlHours: data.data.systemConfig.smartRouting.attributionTtlHours ?? 168,
+          loopGuardEnabled: data.data.systemConfig.smartRouting.loopGuardEnabled ?? false,
+          loopGuardRepetitions: data.data.systemConfig.smartRouting.loopGuardRepetitions ?? 3,
+          loopGuardToolBudgets: data.data.systemConfig.smartRouting.loopGuardToolBudgets ?? {},
+          loopGuardIgnoredTools: data.data.systemConfig.smartRouting.loopGuardIgnoredTools ?? [],
           embeddingMaxTokens: data.data.systemConfig.smartRouting.embeddingMaxTokens,
           embeddingQueryPrefix: data.data.systemConfig.smartRouting.embeddingQueryPrefix || '',
           embeddingDocumentPrefix:
