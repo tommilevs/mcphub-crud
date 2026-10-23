@@ -18,6 +18,12 @@ import {
 } from '../utils/tokenTruncation.js';
 import { safeStringify, summarizeErrorForLogging } from '../utils/serialization.js';
 import logService from './logService.js';
+import {
+  fuseMcpZeroCandidates,
+  rankMcpZeroServers,
+  scoreMcpZeroCandidate,
+  type RoutingDiagnostics,
+} from './mcpZeroRoutingService.js';
 import { scryptSync } from 'node:crypto';
 import OpenAI from 'openai';
 import axios from 'axios';
@@ -1506,6 +1512,8 @@ export const searchToolsByVector = async (
     /** Raw query-to-tool cosine similarity, the value the threshold is applied to. */
     toolSimilarity: number;
     searchableText: string;
+    /** Internal selection evidence; additive and omitted while MCP-Zero is off. */
+    routingDiagnostics?: RoutingDiagnostics;
   }>
 > => {
   try {
@@ -1534,9 +1542,13 @@ export const searchToolsByVector = async (
     );
     // Preserve the existing parallel lookup when MCP-Zero is off. With it on,
     // tool lookup intentionally waits for the server shortlist.
-    const defaultToolResultsPromise = smartRoutingConfig.mcpZeroEnabled
-      ? undefined
-      : vectorRepository.searchSimilar(queryEmbedding, limit, threshold, ['tool'], scopedServerNames);
+    const baselineToolResultsPromise = vectorRepository.searchSimilar(
+      queryEmbedding,
+      limit,
+      threshold,
+      ['tool'],
+      scopedServerNames,
+    );
     const rawServerResults = await rawServerResultsPromise;
 
     const allowedServerNames = scopedServerNames ? new Set(scopedServerNames) : null;
@@ -1556,34 +1568,15 @@ export const searchToolsByVector = async (
       }
     }
 
-    const mcpZeroServers = smartRoutingConfig.mcpZeroEnabled
-      ? [...serverScoreMap.entries()]
-          .sort(([, left], [, right]) => right - left)
-          .slice(0, smartRoutingConfig.mcpZeroTopServers ?? 5)
-          .map(([serverName]) => serverName)
-      : undefined;
-    const toolServerScope = mcpZeroServers?.length ? mcpZeroServers : scopedServerNames;
-    const toolResults = smartRoutingConfig.mcpZeroEnabled
-      ? await vectorRepository.searchSimilar(
-          queryEmbedding,
-          Math.max(limit * 10, limit),
-          threshold,
-          ['tool'],
-          toolServerScope,
-        )
-      : await defaultToolResultsPromise!;
+    const toCandidates = (toolResults: Awaited<ReturnType<VectorEmbeddingRepository['searchSimilar']>>, useMcpZeroScore: boolean) => {
+      const filteredResults = allowedServerNames
+        ? toolResults.filter((result) => {
+            const parsedMetadata = parseEmbeddingMetadata(result.embedding?.metadata);
+            return !!parsedMetadata?.serverName && allowedServerNames.has(parsedMetadata.serverName);
+          })
+        : toolResults;
 
-    // Filter by server names if provided
-    const filteredResults = allowedServerNames
-      ? toolResults.filter((result) => {
-          const parsedMetadata = parseEmbeddingMetadata(result.embedding?.metadata);
-          return !!parsedMetadata?.serverName && allowedServerNames.has(parsedMetadata.serverName);
-        })
-      : toolResults;
-
-    // Transform results to a more useful format
-    return filteredResults
-      .map((result) => {
+      return filteredResults.map((result) => {
         const parsedMetadata = parseEmbeddingMetadata(result.embedding?.metadata);
 
         if (parsedMetadata?.serverName && parsedMetadata?.toolName) {
@@ -1593,8 +1586,8 @@ export const searchToolsByVector = async (
             toolName: parsedMetadata.toolName,
             description: parsedMetadata.description || '',
             inputSchema: parsedMetadata.inputSchema || {},
-            similarity: smartRoutingConfig.mcpZeroEnabled && serverSimilarityBoost !== undefined
-              ? (serverSimilarityBoost * result.similarity) * Math.max(serverSimilarityBoost, result.similarity)
+            similarity: useMcpZeroScore && serverSimilarityBoost !== undefined
+              ? scoreMcpZeroCandidate(serverSimilarityBoost, result.similarity)
               : serverSimilarityBoost !== undefined
                 ? result.similarity * 0.8 + serverSimilarityBoost * 0.2
                 : result.similarity,
@@ -1623,17 +1616,61 @@ export const searchToolsByVector = async (
           toolName,
           description,
           inputSchema: {},
-          similarity: smartRoutingConfig.mcpZeroEnabled && serverSimilarityBoost !== undefined
-            ? (serverSimilarityBoost * result.similarity) * Math.max(serverSimilarityBoost, result.similarity)
+          similarity: useMcpZeroScore && serverSimilarityBoost !== undefined
+            ? scoreMcpZeroCandidate(serverSimilarityBoost, result.similarity)
             : serverSimilarityBoost !== undefined
               ? result.similarity * 0.8 + serverSimilarityBoost * 0.2
               : result.similarity,
           toolSimilarity: result.similarity,
           searchableText: textContent,
         };
-      })
-      .sort((a, b) => b.similarity - a.similarity)
+      });
+    };
+
+    const baseline = toCandidates(await baselineToolResultsPromise, false)
+      .sort((left, right) => right.similarity - left.similarity)
       .slice(0, limit);
+
+    if (!smartRoutingConfig.mcpZeroEnabled) {
+      return baseline;
+    }
+
+    try {
+      const mcpZeroServers = rankMcpZeroServers(
+        serverScoreMap,
+        smartRoutingConfig.mcpZeroTopServers ?? 5,
+      );
+      if (mcpZeroServers.length === 0) {
+        return baseline;
+      }
+
+      const mcpZeroTools = toCandidates(
+        await vectorRepository.searchSimilar(
+          queryEmbedding,
+          Math.max(limit * 10, limit),
+          threshold,
+          ['tool'],
+          mcpZeroServers,
+        ),
+        true,
+      ).sort((left, right) => right.similarity - left.similarity);
+      const serverRanks = new Map(mcpZeroServers.map((serverName, index) => [serverName, index + 1]));
+      const mcpZeroCandidates = mcpZeroTools.map((candidate, index) => ({
+        candidate,
+        serverRank: serverRanks.get(candidate.serverName) ?? mcpZeroServers.length + 1,
+        serverScore: serverScoreMap.get(candidate.serverName) ?? 0,
+        toolRank: index + 1,
+        toolScore: candidate.toolSimilarity,
+      }));
+
+      return fuseMcpZeroCandidates(baseline, mcpZeroCandidates, limit);
+    } catch (error) {
+      logger.warn(
+        'MCP-Zero ranking failed; returning baseline vector results',
+        safeStringify({ query, error: summarizeErrorForLogging(error) }),
+      );
+      return baseline;
+    }
   } catch (error) {
     logger.error(
       'Error searching tools by vector',

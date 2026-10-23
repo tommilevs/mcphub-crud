@@ -36,6 +36,20 @@ Smart Routing applies several filters:
 - **Tool Availability**: Ensures tools are currently accessible
 - **Permission Filtering**: Respects user access permissions
 
+### Optional MCP-Zero discovery
+
+The **MCP-Zero** toggle in **Settings → Smart Routing** adds a second, hierarchical
+candidate path. It ranks the already-indexed servers first, searches tools inside
+the strongest server candidates, then combines those candidates with the regular
+vector search using Reciprocal Rank Fusion (RRF). The regular search is always
+retained, so an incomplete server shortlist cannot hide a valid tool.
+
+This is an internal TypeScript adaptation of the ideas in
+[xfey/MCP-Zero](https://github.com/xfey/MCP-Zero), using MCPHub's configured
+embedding provider and existing pgvector index. It does not install a Python
+runtime, sidecar, or external MCP server. The setting is off by default and is
+independent from Progressive Disclosure.
+
 ### 4. Tool Execution
 
 Found tools can be directly executed:

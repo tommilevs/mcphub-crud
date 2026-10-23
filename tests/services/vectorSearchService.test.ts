@@ -188,7 +188,7 @@ describe('vectorSearchService', () => {
     );
   });
 
-  it('uses MCP-Zero two-stage ranking to exclude tools outside the best servers', async () => {
+  it('fuses MCP-Zero two-stage candidates with the baseline instead of hiding it', async () => {
     mockGetSmartRoutingConfig.mockResolvedValue({
       enabled: true,
       dbUrl: 'postgres://localhost/test',
@@ -231,7 +231,11 @@ describe('vectorSearchService', () => {
 
     const results = await searchToolsByVector('plan a route', 10, 0.3);
 
-    expect(results.map((result) => result.toolName)).toEqual(['maps-route']);
+    expect(results.map((result) => result.toolName)).toEqual(['maps-route', 'mail-send']);
+    expect(results[0].routingDiagnostics).toMatchObject({
+      mcpZero: { serverRank: 1, serverScore: 0.9, toolScore: 0.7 },
+      fusion: { strategy: 'rrf', rank: 1 },
+    });
     expect(mockVectorRepository.searchSimilar).toHaveBeenCalledWith(
       expect.any(Array),
       expect.any(Number),
@@ -239,6 +243,40 @@ describe('vectorSearchService', () => {
       ['tool'],
       ['maps'],
     );
+  });
+
+  it('falls back to baseline vector results when MCP-Zero discovery fails', async () => {
+    mockGetSmartRoutingConfig.mockResolvedValue({
+      enabled: true,
+      dbUrl: 'postgres://localhost/test',
+      embeddingProvider: 'openai',
+      embeddingModel: 'text-embedding-3-small',
+      llmProviderBaseUrl: 'https://api.openai.com/v1',
+      llmProviderApiKey: '',
+      mcpZeroEnabled: true,
+    });
+    mockVectorRepository.searchSimilar.mockImplementation(
+      async (_embedding: number[], _limit: number, _threshold: number, contentTypes?: string[], serverNames?: string[]) => {
+        if (contentTypes?.includes('server')) {
+          return [{ embedding: { content_id: 'maps', metadata: JSON.stringify({ serverName: 'maps' }) }, similarity: 0.9 }];
+        }
+        if (serverNames) {
+          throw new Error('MCP-Zero candidate lookup failed');
+        }
+        return [{
+          embedding: {
+            metadata: JSON.stringify({ serverName: 'maps', toolName: 'maps-route', description: 'Route', inputSchema: {} }),
+            text_content: 'maps-route Route',
+          },
+          similarity: 0.7,
+        }];
+      },
+    );
+
+    const results = await searchToolsByVector('plan a route', 10, 0.3);
+
+    expect(results.map((result) => result.toolName)).toEqual(['maps-route']);
+    expect(results[0].routingDiagnostics).toBeUndefined();
   });
 
   it('scopes the search to the requested servers in SQL, not after the limit', async () => {
