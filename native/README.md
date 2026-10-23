@@ -26,6 +26,11 @@ process state without returning secret material.
 The status payload includes `STARTING`, `RUNNING`, `UNHEALTHY`, `RESTARTING`,
 `CRASH_LOOP`, and `STOPPED`; `UNHEALTHY` is set after a managed stdio read or
 write fails, while restart attempts remain bounded by the process policy.
+Each process also exposes `protocolReady`: it stays false while the child has
+only started and becomes true after a successful MCP stdio exchange. On
+Windows the status response is `{ processes, gatewayHealthy }`, where
+`gatewayHealthy` is an HTTP probe of the bundled gateway `/health` endpoint;
+older non-Windows development responses remain the legacy process array.
 
 `runtime-core::dpapi` provides the Windows machine-scoped DPAPI
 protect/unprotect primitive used by the credential broker. Native mode accepts
