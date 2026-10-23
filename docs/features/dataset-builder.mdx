@@ -13,6 +13,24 @@ approval unchecked. The existing fingerprint, branch, timestamp, objective,
 per-call review and task-consent gates still apply before dataset export.
 
 Enable `MCPHUB_DATASET_BUILDER_ENABLED=true` explicitly. The default is disabled.
+
+Each download now commits an export receipt and split registry before returning
+bytes. `GET /api/datasets/exports?keyId=...` lists the latest 50 receipts for the
+authenticated owner and exact key scope; the dashboard exposes this history.
+Receipts retain source IDs, manifest, actual file SHA-256 and byte count, not JSONL
+payloads or RAW. An interrupted network delivery may still have a receipt; it
+proves committed generation, not successful delivery to the browser.
+
+Within one owner/key scope, task, trace and duplicate-example fingerprints retain
+their first exported split across seeds and selections. Duplicate source tasks
+retain their linkage even when only one example is emitted. Export transactions
+serialize per scope. A newly observed bridge between two different prior splits
+returns 409 instead of moving previously exported data. Preview consults the same
+registry without reserving assignments; concurrent exports may change a preview.
+The registry stores hashed linkage tokens and outlives result retention to avoid
+reintroducing leakage. It covers exports recorded after this feature was enabled;
+older external files cannot be retroactively inferred or audited. Export receipts
+are synchronous; background jobs and complete original trajectories remain pending.
 Admin `POST /api/datasets/preview` and `/api/datasets/export` accept:
 
 ```json

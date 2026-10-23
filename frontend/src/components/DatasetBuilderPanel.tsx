@@ -1,6 +1,7 @@
 import {useEffect,useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {getDatasetAvailability,previewDataset,downloadDataset,type DatasetManifest} from '@/services/datasetService';
+import DatasetExportHistory from './DatasetExportHistory';
 
 export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
   const {t}=useTranslation();
@@ -48,6 +49,7 @@ export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
         <label className="text-xs">{t('datasets.seed','Split seed')}<input className="hub-input mt-1 w-full" value={seed} maxLength={128} disabled={busy} onChange={event=>setSeed(event.target.value)}/></label>
       </div>
       <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={allowSelfReported} disabled={busy} onChange={event=>setAllowSelfReported(event.target.checked)}/>{t('datasets.allowSelf','Include self-reported models explicitly; these examples remain unverified.')}</label>
+      <p className="text-xs text-[var(--hub-ink-3)]">{t('datasets.registryHelp','Earlier exports keep related tasks, traces and duplicate examples in the same split, even if the seed changes. Conflicting past assignments block export. Previews are provisional until download.')}</p>
       <button type="button" className="hub-btn" disabled={busy||resultIds.length>100||!seed} onClick={()=>run(false)}>{t('datasets.preview','Preview eligibility')}</button>
       {manifest&&<div className="space-y-3">
         <p className="text-xs">{t('datasets.counts','Eligible: {{eligible}} · Duplicates: {{duplicates}}',{eligible:manifest.exported,duplicates:manifest.duplicates})}</p>
@@ -60,6 +62,7 @@ export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
         </div>
         <p className="hub-mono text-xs break-all">SHA-256 · {manifest.contentSha256}</p>
       </div>}
+      <DatasetExportHistory key={keyId.trim()} keyId={keyId.trim()}/>
     </>}
   </section>;
 }

@@ -1,10 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID,createHash } from 'node:crypto';
 import { Client, Pool } from 'pg';
 import { ensureAttributionContextSchema } from '../../src/db/attributionContextSchema.js';
 import { AttributionContextRepository } from '../../src/db/repositories/AttributionContextRepository.js';
 import { AttributionContextService } from '../../src/services/attributionContextService.js';
 import type { Request, Response } from 'express';
-let mockSummaryDb: { query: (sql: string, parameters?: unknown[]) => Promise<any> };
+let mockSummaryDb: { query: (sql: string, parameters?: unknown[]) => Promise<any>;transaction?:(work:(db:any)=>Promise<any>)=>Promise<any> };
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => mockSummaryDb }));
 import { getAttributionSummary } from '../../src/controllers/attributionController.js';
 import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
@@ -23,6 +23,7 @@ import {reviewExperience,readExperience} from '../../src/controllers/experienceC
 import {getExperienceAdvice} from '../../src/services/experienceAdvice.js';
 import {previewSkillFromExperience} from '../../src/services/skillProposalService.js';
 import {ensureSkillProposalSchema} from '../../src/db/skillProposalSchema.js';
+import {ensureDatasetExportSchema} from '../../src/db/datasetExportSchema.js';
 import {createSkillProposal,reviseSkillProposal,exportSkillProposal,listSkillProposals} from '../../src/services/storedSkillProposals.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
@@ -54,6 +55,12 @@ suite('attribution PostgreSQL isolated schema', () => {
       query: async (sql, parameters) => (await pool.query(sql, parameters)).rows,
     }));
     mockSummaryDb = { query: async (sql, parameters) => (await pool.query(sql, parameters)).rows };
+    mockSummaryDb.transaction=async work=>{
+      const client=await pool.connect();
+      try{await client.query('BEGIN');const value=await work({query:async(sql:string,args:any[]) => (await client.query(sql,args)).rows});
+        await client.query('COMMIT');return value;
+      }catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+    };
   });
   afterAll(async () => {
     if (pool) await pool.end();
@@ -361,6 +368,7 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect((await pool.query('SELECT count(*) FROM tool_result_training_contexts WHERE result_id=$1',[id])).rows[0].count).toBe('0');
   });
   test('dataset preview/export enforces tenant and latest consent without exporting RAW',async()=>{
+    await ensureDatasetExportSchema(pool);await ensureDatasetExportSchema(pool);
     const oldFlag=process.env.MCPHUB_DATASET_BUILDER_ENABLED;process.env.MCPHUB_DATASET_BUILDER_ENABLED='true';
     const context=await service.start('dataset-owner'),id=randomUUID(),digest='d'.repeat(64);
     const tools=[{name:'demo-read',inputSchema:{type:'object'}}];
@@ -372,10 +380,10 @@ suite('attribution PostgreSQL isolated schema', () => {
     await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,1,$2,'correct','approved','reviewer')`,[id,digest]);
     await pool.query(`INSERT INTO tool_result_training_contexts(result_id,revision,discovery_call_id,objective,tool_catalogue,privacy_approved,reviewed_by)
       VALUES($1,1,$2,'read a record',$3,true,'reviewer')`,[id,randomUUID(),JSON.stringify(tools)]);
-    const invoke=async(download:boolean,username='dataset-owner',split='train')=>{
+    const invoke=async(download:boolean,username='dataset-owner',split='train',seed='mcphub-v1')=>{
       let payload:any,body='';
       const res={json:(value:any)=>{payload=value;},setHeader:()=>{},send:(value:string)=>{body=value;},status:()=>{throw new Error('Dataset request failed');}};
-      await (download?exportDataset:previewDataset)({user:{isAdmin:true,username},body:{resultIds:[id],split}} as unknown as Request,res as unknown as Response);
+      await (download?exportDataset:previewDataset)({user:{isAdmin:true,username},body:{resultIds:[id],split,seed}} as unknown as Request,res as unknown as Response);
       return {payload,body};
     };
     try{
@@ -385,6 +393,25 @@ suite('attribution PostgreSQL isolated schema', () => {
       const downloaded=(await invoke(true,'dataset-owner',split)).body;
       expect(JSON.parse(downloaded).metadata).toMatchObject({resultId:id,identityTrust:'trusted',split});
       expect(downloaded).not.toContain('do not export RAW');
+      expect((await invoke(false,'dataset-owner','train','another-seed')).payload.data.splits[split]).toBe(1);
+      const ledger=(await pool.query('SELECT * FROM dataset_exports WHERE username=$1',['dataset-owner'])).rows;
+      expect(ledger).toHaveLength(1);expect(ledger[0].exported_ids).toEqual([id]);
+      expect(ledger[0].byte_length).toBe(Buffer.byteLength(downloaded));
+      expect(ledger[0].file_sha256.trim()).toBe(createHash('sha256').update(downloaded).digest('hex'));
+      expect((await pool.query('SELECT count(*) FROM dataset_split_registry')).rows[0].count).toBe('3');
+      await Promise.all([invoke(true,'dataset-owner',split,'new-seed'),invoke(true,'dataset-owner',split,'other-seed')]);
+      expect((await pool.query('SELECT count(*) FROM dataset_split_registry')).rows[0].count).toBe('3');
+      const traceToken=createHash('sha256').update(`trace:${context.traceId}`).digest('hex');
+      await pool.query('UPDATE dataset_split_registry SET split=$1 WHERE token_hash=$2',[split==='train'?'test':'train',traceToken]);
+      const beforeConflict=(await pool.query('SELECT count(*) FROM dataset_exports')).rows[0].count;
+      for(const handler of [previewDataset,exportDataset]){
+        let status=200,sent=false;
+        await handler({user:{isAdmin:true,username:'dataset-owner'},body:{resultIds:[id],split}} as unknown as Request,
+          {status:(value:number)=>{status=value;return {json:()=>{}};},setHeader:()=>{},json:()=>{},send:()=>{sent=true;}} as unknown as Response);
+        expect(status).toBe(409);expect(sent).toBe(false);
+      }
+      expect((await pool.query('SELECT count(*) FROM dataset_exports')).rows[0].count).toBe(beforeConflict);
+      await pool.query('UPDATE dataset_split_registry SET split=$1 WHERE token_hash=$2',[split,traceToken]);
       expect((await invoke(false,'other-owner')).payload.data.exported).toBe(0);
       await pool.query(`INSERT INTO attribution_task_reviews(task_id,revision,outcome,training_consent,reviewed_by) VALUES($1,2,'success',false,'reviewer')`,[context.taskId]);
       expect((await invoke(false)).payload.data.excluded.training_consent_missing).toBe(1);

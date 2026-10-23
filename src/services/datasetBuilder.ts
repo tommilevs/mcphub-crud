@@ -73,7 +73,18 @@ export function buildDataset(calls:DatasetCall[],options:DatasetOptions){
         rawSha256:call.rawSha256,reviewRevision:call.reviewRevision,contextRevision:call.contextRevision,taskRevision:call.taskRevision,
         split,fingerprint,representation:'derived-direct-tool-selection'}}];
   });
-  return {examples,manifest:{version:1,format:'tool-selection-sft',seed:options.seed??'mcphub-v1',selected:calls.length,
+  const groups=[...groupTokens.keys()].map(group=>{
+    const members=accepted.filter((_,index)=>root(index)===group);
+    const tokens=[...new Set(members.flatMap(({call,fingerprint})=>[`task:${call.taskId}`,`trace:${call.traceId}`,`example:${fingerprint}`]))];
+    return {tokens,fingerprints:[...new Set(members.map(item=>item.fingerprint))],
+      split:examples.find(example=>example.metadata.fingerprint===members[0].fingerprint)!.metadata.split};
+  });
+  return {examples,groups,manifest:{version:1,format:'tool-selection-sft',seed:options.seed??'mcphub-v1',selected:calls.length,
     exported:examples.length,duplicates,excluded,splits:Object.fromEntries(['train','validation','test'].map(split=>[split,examples.filter(row=>row.metadata.split===split).length])),
     contentSha256:hash(canonical(examples))}};
+}
+
+export function refreshDatasetManifest(dataset:ReturnType<typeof buildDataset>):void{
+  dataset.manifest.splits=Object.fromEntries(['train','validation','test'].map(split=>[split,dataset.examples.filter(row=>row.metadata.split===split).length]));
+  dataset.manifest.contentSha256=hash(canonical(dataset.examples));
 }

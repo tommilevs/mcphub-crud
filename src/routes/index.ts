@@ -4,7 +4,7 @@ import { saveTaskReview } from '../controllers/taskReviewController.js';
 import { submitLoopGuardFeedback, getLoopGuardSummary } from '../controllers/loopGuardFeedbackController.js';
 import { saveToolResultReview } from '../controllers/toolResultReviewController.js';
 import { saveTrainingContext, getTrainingContext } from '../controllers/trainingContextController.js';
-import { previewDataset,exportDataset,getDatasetAvailability } from '../controllers/datasetController.js';
+import { previewDataset,exportDataset,getDatasetAvailability,listDatasetExports } from '../controllers/datasetController.js';
 import {saveExperience,findExperiences,reviewExperience,listExperiences,readExperience,getExperienceAvailability} from '../controllers/experienceController.js';
 import {previewSkillProposal,manageSkillProposals} from '../controllers/skillsMinerController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
@@ -442,6 +442,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.get('/tool-results/:id/training-context', getTrainingContext);
   authenticatedRouter.post('/datasets/preview',previewDataset);
   authenticatedRouter.get('/datasets/available',getDatasetAvailability);
+  authenticatedRouter.get('/datasets/exports',listDatasetExports);
   authenticatedRouter.post('/datasets/export',exportDataset);
   authenticatedRouter.post('/experiences',saveExperience);
   authenticatedRouter.get('/experiences',listExperiences);
