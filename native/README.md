@@ -22,23 +22,31 @@ DPAPI round-trip. Test fixtures clean their temporary executable and processes.
 This is not a substitute for installed SCM service, tray, installer and full
 gateway acceptance testing.
 
-Each managed process has a bounded stdio exchange queue and its own I/O worker.
-The Windows pipe handler releases the shared supervisor mutex before waiting, so
-status, stop, restart and watchdog work can continue while another tool is silent.
-The default exchange deadline is 60 seconds, configurable through the existing
-server request/max-total timeout; initialization uses the configured init timeout.
-Deadlines are clamped to 100 ms–1 hour. Expiry poisons that process session and the
-watchdog terminates/restarts it within the existing attempt budget; the timed-out
-request is never replayed. State from an old session cannot mark a replacement
-healthy or unhealthy. A write-only notification/client response does not establish
-protocol readiness; a matching successful JSON-RPC response does.
+Each process has independent stdin/stdout workers, an eight-write queue and a
+256-frame event queue. Overflow fails the session rather than silently dropping
+frames. The Windows control pipe uses overlapped I/O with separate operation
+events, so a pending read cannot block a concurrent stream write. No child I/O
+wait holds the global lifecycle mutex. A write-only notification/client response
+does not establish readiness; a matching successful JSON-RPC response does.
 
 The Node transport consumes pipe data through events and closes a timed-out
 control connection, preventing a delayed reply from satisfying a later request.
-The current batch exchange protocol still buffers server requests/notifications
-until the matching response. Fully interactive server-to-client requests and
-mid-call cancellation therefore require a streaming IPC follow-up before claiming
-general-purpose MCP duplex hosting acceptance.
+New gateway transports request live streaming: stdin writes are acknowledged
+without waiting for a tool response, and stdout frames arrive as independent
+events. Progress, server-initiated requests/replies and cancellation therefore
+flow while an earlier tool call is pending. The SDK owns response/progress
+deadlines; native writes have a separate bounded deadline. Older batch clients
+retain their exchange behavior (60-second default, configurable init/request
+deadlines clamped to 100 ms–1 hour). A new client can negotiate back to an older
+batch service without replaying start or tool calls.
+
+Streaming connections own unique process generations, with the original server
+name retained for display. Closing or losing a pipe stops that connection's
+process tree and forgets its temporary status record. Another connection with the
+same logical name is unaffected. A restarted/exited process closes the old stream;
+the gateway must reconnect and initialize a fresh generation, rather than sending
+requests to an uninitialized replacement. Old-session health cannot affect the
+new generation. No in-flight tool request is replayed automatically.
 
 The Node gateway uses the native service only when
 `MCPHUB_NATIVE_RUNTIME_ENABLED=true` is set on Windows. The default SDK stdio

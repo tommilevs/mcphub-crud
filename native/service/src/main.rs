@@ -8,6 +8,8 @@ mod options;
 #[cfg(windows)]
 mod pipe_access;
 #[cfg(windows)]
+mod pipe_io;
+#[cfg(windows)]
 static OPTIONS: std::sync::OnceLock<options::Options> = std::sync::OnceLock::new();
 #[cfg(windows)]
 fn options() -> &'static options::Options {
@@ -243,75 +245,157 @@ fn handle_request_with_secrets(
 }
 
 #[cfg(windows)]
+struct StreamLease {
+    id: String,
+    session: mcphub_runtime_core::StdioSession,
+    supervisor: Arc<Mutex<RuntimeSupervisor>>,
+}
+#[cfg(windows)]
+impl Drop for StreamLease {
+    fn drop(&mut self) {
+        if let Ok(mut guard) = self.supervisor.lock() {
+            let _ = guard.stop(&self.id);
+            guard.forget_stopped(&self.id);
+        }
+    }
+}
+#[cfg(windows)]
+fn write_control(writer: &Arc<Mutex<pipe_io::Pipe>>, value: &serde_json::Value) -> io::Result<()> {
+    writer
+        .lock()
+        .map_err(|_| io::Error::other("pipe writer unavailable"))?
+        .write_all(format!("{value}\n").as_bytes())
+}
+#[cfg(windows)]
 fn serve_named_pipe_client(
     pipe: usize,
-    supervisor: std::sync::Arc<std::sync::Mutex<RuntimeSupervisor>>,
-    secrets: std::sync::Arc<SecretStore>,
+    supervisor: Arc<Mutex<RuntimeSupervisor>>,
+    secrets: Arc<SecretStore>,
 ) {
-    use std::os::windows::io::FromRawHandle;
-    use windows_sys::Win32::{Foundation::HANDLE, Storage::FileSystem::WriteFile};
-    let raw_handle = pipe as HANDLE;
-    let mut reader =
-        BufReader::new(unsafe { std::fs::File::from_raw_handle(raw_handle as *mut _) });
-    let mut line = String::new();
+    let channel = unsafe { pipe_io::Pipe::from_raw(pipe as *mut _) };
+    let writer = channel.clone();
+    let mut reader = BufReader::new(channel);
+    let writer = Arc::new(Mutex::new(writer));
+    let mut owned: Option<StreamLease> = None;
     loop {
-        let read = match reader.read_line(&mut line) {
-            Ok(read) => read,
-            Err(_) => break,
-        };
-        if read == 0 {
+        let mut line = String::new();
+        if !reader
+            .read_line(&mut line)
+            .ok()
+            .is_some_and(|bytes| bytes > 0)
+        {
             break;
         }
-        // A blocked child must not hold the shared lifecycle/watchdog mutex.
         let request = serde_json::from_str::<serde_json::Value>(line.trim());
-        let stdio = request.as_ref().ok().filter(|value| value["op"] == "stdio");
-        let response = if let Some(request) = stdio {
-            let session = supervisor.lock().ok().and_then(|guard| {
-                guard
-                    .stdio_session(request["id"].as_str().unwrap_or_default())
-                    .ok()
-            });
-            match session
-                .ok_or_else(|| io::Error::other("managed stdio process not found"))
-                .and_then(|session| {
+        let mut events = None;
+        let result = (|| -> Result<serde_json::Value, Box<dyn std::error::Error>> {
+            let request = request?;
+            match request["op"].as_str() {
+                Some("start") if request["stream"] == true => {
+                    if owned.is_some() {
+                        return Err("one stream lease per connection".into());
+                    }
+                    let mut guard = supervisor.lock().map_err(|_| "supervisor unavailable")?;
+                    let response = handle_request_with_secrets(&mut guard, &secrets, line.trim())?;
+                    let id = request["spec"]["id"]
+                        .as_str()
+                        .ok_or("missing process id")?
+                        .to_string();
+                    let session = guard.stdio_session(&id)?;
+                    owned = Some(StreamLease {
+                        id: id.clone(),
+                        session: session.clone(),
+                        supervisor: Arc::clone(&supervisor),
+                    });
+                    events = Some((id, session.take_events()?));
+                    let mut response: serde_json::Value = serde_json::from_str(&response)?;
+                    response["streaming"] = serde_json::json!(true);
+                    Ok(response)
+                }
+                Some("stdio_send") => {
+                    let lease = owned
+                        .as_ref()
+                        .filter(|lease| request["id"] == lease.id)
+                        .ok_or("stdio stream is not owned by this connection")?;
+                    lease.session.send_timeout(
+                        request["message"].as_str().ok_or("missing frame")?,
+                        Duration::from_millis(
+                            request["timeout_ms"]
+                                .as_u64()
+                                .unwrap_or(10_000)
+                                .clamp(100, 3_600_000),
+                        ),
+                    )?;
+                    Ok(serde_json::json!({"ok":true}))
+                }
+                Some("stdio") => {
+                    let session = supervisor
+                        .lock()
+                        .map_err(|_| "supervisor unavailable")?
+                        .stdio_session(request["id"].as_str().unwrap_or_default())?;
                     let message = request["message"].as_str().unwrap_or_default();
-                    match request["timeout_ms"].as_u64() {
+                    let responses = match request["timeout_ms"].as_u64() {
                         Some(ms) => session.exchange_timeout(
                             message,
                             Duration::from_millis(ms.clamp(100, 3_600_000)),
                         ),
                         None => session.exchange(message),
-                    }
-                }) {
-                Ok(responses) => serde_json::json!({"responses":responses}).to_string(),
-                Err(error) => serde_json::json!({"error":error.to_string()}).to_string(),
+                    }?;
+                    Ok(serde_json::json!({"responses":responses}))
+                }
+                _ => {
+                    let mut guard = supervisor.lock().map_err(|_| "supervisor unavailable")?;
+                    Ok(serde_json::from_str(&handle_request_with_secrets(
+                        &mut guard,
+                        &secrets,
+                        line.trim(),
+                    )?)?)
+                }
             }
-        } else {
-            let mut guard = match supervisor.lock() {
-                Ok(guard) => guard,
-                Err(_) => break,
-            };
-            match handle_request_with_secrets(&mut guard, &secrets, line.trim()) {
-                Ok(response) => response,
-                Err(error) => serde_json::json!({ "error": error.to_string() }).to_string(),
-            }
+        })();
+        let response = match result {
+            Ok(value) => value,
+            Err(error) => serde_json::json!({"error":error.to_string()}),
         };
-        let bytes = format!("{response}\n");
-        let mut written = 0;
-        let write_ok = unsafe {
-            WriteFile(
-                raw_handle,
-                bytes.as_ptr() as *const _,
-                bytes.len() as u32,
-                &mut written,
-                std::ptr::null_mut(),
-            )
-        };
-        if write_ok == 0 {
+        if write_control(&writer, &response).is_err() {
             break;
         }
-        line.clear();
+        if let Some((id, events)) = events {
+            let writer = Arc::clone(&writer);
+            if std::thread::Builder::new()
+                .name("mcphub-stdio-forward".into())
+                .spawn(move || {
+                    let mut error = "stdio stream ended".to_string();
+                    while let Ok(frame) = events.recv() {
+                        match frame {
+                            Ok(message) => {
+                                if write_control(
+                                    &writer,
+                                    &serde_json::json!({"event":"stdio","id":id,"message":message}),
+                                )
+                                .is_err()
+                                {
+                                    return;
+                                }
+                            }
+                            Err(source) => {
+                                error = source.to_string();
+                                break;
+                            }
+                        }
+                    }
+                    let _ = write_control(
+                        &writer,
+                        &serde_json::json!({"event":"closed","id":id,"error":error}),
+                    );
+                })
+                .is_err()
+            {
+                break;
+            }
+        }
     }
+    drop(owned);
 }
 
 #[cfg(windows)]
@@ -319,15 +403,15 @@ fn run_named_pipe(
     supervisor: std::sync::Arc<std::sync::Mutex<RuntimeSupervisor>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, GetLastError, ERROR_PIPE_CONNECTED, INVALID_HANDLE_VALUE},
+        Foundation::{CloseHandle, INVALID_HANDLE_VALUE},
         Security::{
             Authorization::ConvertStringSecurityDescriptorToSecurityDescriptorW,
             PSECURITY_DESCRIPTOR, SECURITY_ATTRIBUTES,
         },
-        Storage::FileSystem::PIPE_ACCESS_DUPLEX,
+        Storage::FileSystem::{FILE_FLAG_OVERLAPPED, PIPE_ACCESS_DUPLEX},
         System::Pipes::{
-            ConnectNamedPipe, CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE,
-            PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
+            CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_UNLIMITED_INSTANCES,
+            PIPE_WAIT,
         },
     };
     let name: Vec<u16> = format!("\\\\.\\pipe\\{}", options().pipe_name)
@@ -368,7 +452,7 @@ fn run_named_pipe(
         let pipe = unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
-                PIPE_ACCESS_DUPLEX,
+                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
@@ -380,10 +464,7 @@ fn run_named_pipe(
         if pipe == INVALID_HANDLE_VALUE {
             return Err(Box::new(io::Error::last_os_error()));
         }
-        let connected = unsafe {
-            ConnectNamedPipe(pipe, std::ptr::null_mut()) != 0
-                || GetLastError() == ERROR_PIPE_CONNECTED
-        };
+        let connected = pipe_io::connect(pipe).is_ok();
         if !connected {
             unsafe {
                 CloseHandle(pipe);

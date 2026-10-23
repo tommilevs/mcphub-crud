@@ -54,4 +54,53 @@ suite('isolated installed Windows SCM service',()=>{
     const started=Date.now();expect(await control({op:'status'})).toHaveProperty('processes');expect(Date.now()-started).toBeLessThan(1000);
     expect(await pending).toHaveProperty('error');
   },10000);
+  test('live duplex delivers progress, answers a server request and cancels a pending call without blocking the next call',async()=>{
+    const name=`duplex-${randomUUID()}`;
+    const transport=new NativeRuntimeTransport({id:name,command:process.execPath,args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{},streaming:true},pipe);
+    ids.add(transport.processId);
+    const client=new LegacyMcpClient({name:'duplex-acceptance',version:'1'});
+    let answered=0,progress=0;client.setRequestHandler('ping',async()=>{answered++;return {};});
+    try{
+      await client.connect(transport);await client.listTools();
+      const receive=transport.onmessage;
+      transport.onmessage=message=>{if('method' in message&&message.method==='notifications/progress')progress++;receive?.(message);};
+      expect((await client.callTool({name:'duplex',arguments:{}},{timeout:5000})).content).toEqual([{type:'text',text:'duplex-complete'}]);
+      expect(answered).toBe(1);expect(progress).toBe(1);
+      const abort=new AbortController();
+      const pending=client.callTool({name:'hang',arguments:{}},{signal:abort.signal,timeout:5000}).then(()=>null,error=>error);
+      await new Promise(resolve=>setTimeout(resolve,100));abort.abort();expect(await pending).not.toBeNull();
+      const counts=await client.callTool({name:'counts',arguments:{}},{timeout:5000});
+      expect(counts.content).toEqual([{type:'text',text:'{"cancelled":1}'}]);
+    }finally{await client.close();}
+  },15000);
+  test('two connections with the same logical server name own different process generations',async()=>{
+    const name=`shared-${randomUUID()}`;
+    const spec={id:name,command:process.execPath,args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{},streaming:true};
+    const first=new NativeRuntimeTransport(spec,pipe),second=new NativeRuntimeTransport(spec,pipe);
+    ids.add(first.processId);ids.add(second.processId);expect(first.processId).not.toBe(second.processId);
+    const a=new LegacyMcpClient({name:'a',version:'1'}),b=new LegacyMcpClient({name:'b',version:'1'});
+    try{
+      await a.connect(first);await b.connect(second);await a.close();
+      expect((await b.callTool({name:'counts',arguments:{}},{timeout:5000})).content).toEqual([{type:'text',text:'{"cancelled":0}'}]);
+      expect((await control({op:'status'})).processes.find((row:any)=>row.id===second.processId)).toMatchObject({serverName:name,running:true});
+    }finally{await a.close();await b.close();}
+  },15000);
+  test('abrupt stream disconnect releases its process lease and does not retain an orphan',async()=>{
+    const id=`disconnect-${randomUUID()}`;ids.add(id);
+    const socket=net.createConnection(pipe);socket.on('error',()=>{});
+    const started=await new Promise<any>((resolve,reject)=>{
+      const timer=setTimeout(()=>{socket.destroy();reject(new Error('Lease start timeout'));},5000);let buffer='';
+      socket.once('connect',()=>socket.write(JSON.stringify({op:'start',stream:true,spec:{id,command:process.execPath,args:['-e','setInterval(()=>{},1000)'],env:{}}})+'\n'));
+      socket.on('data',chunk=>{buffer+=chunk.toString();if(buffer.includes('\n')){clearTimeout(timer);resolve(JSON.parse(buffer.split('\n')[0]));}});
+    });
+    expect(started).toMatchObject({id,streaming:true});socket.destroy();
+    let status;
+    for(let attempt=0;attempt<50;attempt++){
+      status=await control({op:'status'});if(!status.processes.some((row:any)=>row.id===id))break;
+      await new Promise(resolve=>setTimeout(resolve,20));
+    }
+    expect(status.processes.some((row:any)=>row.id===id)).toBe(false);
+    let missing=false;try{process.kill(started.pid,0);}catch(error){missing=(error as NodeJS.ErrnoException).code==='ESRCH';}
+    expect(missing).toBe(true);
+  },10000);
 });

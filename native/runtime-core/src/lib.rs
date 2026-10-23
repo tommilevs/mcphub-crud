@@ -22,6 +22,8 @@ pub use stdio::StdioSession;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagedProcessSpec {
+    #[serde(default)]
+    pub server_name: Option<String>,
     pub id: String,
     pub command: String,
     #[serde(default)]
@@ -72,6 +74,8 @@ struct ManagedProcess {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct ProcessStatus {
+    #[serde(rename = "serverName", skip_serializing_if = "Option::is_none")]
+    pub server_name: Option<String>,
     pub id: String,
     /// Lifecycle state exposed to the dashboard. The supervisor only reports
     /// process-level health here; protocol-level checks remain opt-in.
@@ -216,6 +220,7 @@ impl RuntimeSupervisor {
         self.stopped.remove(&id);
         let process = spawn_managed(spec)?;
         let status = ProcessStatus {
+            server_name: process.spec.server_name.clone(),
             id: id.clone(),
             state: "STARTING",
             running: true,
@@ -294,6 +299,7 @@ impl RuntimeSupervisor {
             let (unhealthy, protocol_ready, last_error) = process.io.health();
             let running = process.child.try_wait().ok().flatten().is_none();
             statuses.push(ProcessStatus {
+                server_name: process.spec.server_name.clone(),
                 id: id.clone(),
                 state: if !running {
                     if process.restarts >= process.spec.restart_limit {
@@ -321,6 +327,7 @@ impl RuntimeSupervisor {
                 continue;
             }
             statuses.push(ProcessStatus {
+                server_name: None,
                 id: id.clone(),
                 state: "STOPPED",
                 running: false,
@@ -336,6 +343,9 @@ impl RuntimeSupervisor {
 
     pub fn statuses(&mut self) -> Vec<ProcessStatus> {
         self.poll()
+    }
+    pub fn forget_stopped(&mut self, id: &str) {
+        self.stopped.remove(id);
     }
 
     /// Send one newline-delimited MCP JSON-RPC frame and collect frames until

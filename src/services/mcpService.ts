@@ -1804,6 +1804,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
         command: finalCommand,
         args: resolveCredentialArguments(conf, finalArgs),
         env: nativeEnv,
+        streaming: true,
         request_timeout_ms: Math.trunc(Math.min(3_600_000,Math.max(100,Number(conf.options?.maxTotalTimeout || conf.options?.timeout || process.env.DEFAULT_REQUEST_TIMEOUT) || 60_000))),
         initialize_timeout_ms: Math.trunc(Math.min(3_600_000,Math.max(100,Number(config.initTimeout)||60_000))),
         ...(nativeSecretRefs ? { secret_env: nativeSecretRefs } : {}),

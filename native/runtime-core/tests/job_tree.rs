@@ -36,6 +36,7 @@ fn fixture_with_exit(exit: bool) -> (RuntimeSupervisor, ObservedProcess, Observe
     let mut supervisor = RuntimeSupervisor::new();
     let parent = supervisor
         .start(ManagedProcessSpec {
+            server_name: None,
             id: "tree".into(),
             command: "powershell.exe".into(),
             args: vec![
@@ -111,6 +112,7 @@ fn failed_respawn_attempts_exhaust_the_restart_budget() {
     let mut supervisor = RuntimeSupervisor::new();
     let process = supervisor
         .start(ManagedProcessSpec {
+            server_name: None,
             id: "respawn".into(),
             command: exe.0.to_string_lossy().to_string(),
             args: vec!["/d".into(), "/c".into(), "exit 0".into()],

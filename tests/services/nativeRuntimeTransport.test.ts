@@ -48,4 +48,12 @@ suite('native transport over a real isolated Windows named pipe',()=>{
     expect(requests[0].spec.request_timeout_ms).toBe(200);
     expect(requests.filter(request=>request.op==='stdio').map(request=>request.timeout_ms)).toEqual([1000,200]);
   });
+  test('a streaming-capable client falls back to an older batch service without replaying start',async()=>{
+    handler=(request,socket)=>socket.write(JSON.stringify(request.op==='stdio'?{responses:[JSON.stringify({jsonrpc:'2.0',id:7,result:{}})]}:{ok:true})+'\n');
+    const client=new NativeRuntimeTransport({id:'older-service',command:'unused.exe',args:[],env:{},streaming:true},pipe),received=jest.fn();
+    client.onmessage=received;await client.start();await client.send({jsonrpc:'2.0',id:7,method:'ping'});await client.close();
+    expect(received).toHaveBeenCalledWith({jsonrpc:'2.0',id:7,result:{}});
+    expect(requests.map(request=>request.op)).toEqual(['start','stdio','stop']);
+    expect(requests[0]).toMatchObject({stream:true,spec:{server_name:'older-service',id:client.processId}});
+  });
 });

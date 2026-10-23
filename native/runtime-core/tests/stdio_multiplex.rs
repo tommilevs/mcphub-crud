@@ -9,6 +9,7 @@ fn collects_notifications_and_server_requests_before_matching_response() {
     let mut supervisor = RuntimeSupervisor::new();
     let started = supervisor
         .start(ManagedProcessSpec {
+            server_name: None,
             id: "fixture".into(),
             command: "powershell.exe".into(),
             args: vec![
@@ -50,6 +51,7 @@ fn collects_notifications_and_server_requests_before_matching_response() {
 fn replaces_a_stale_crashed_child_on_new_start() {
     let mut supervisor = RuntimeSupervisor::new();
     let spec = ManagedProcessSpec {
+        server_name: None,
         id: "crashed".into(),
         command: "powershell.exe".into(),
         args: vec![
@@ -77,6 +79,7 @@ fn an_initial_notification_does_not_claim_protocol_readiness() {
     let mut supervisor = RuntimeSupervisor::new();
     supervisor
         .start(ManagedProcessSpec {
+            server_name: None,
             id: "silent".into(),
             command: "powershell.exe".into(),
             args: vec![
@@ -112,6 +115,7 @@ fn a_hung_exchange_does_not_hold_the_lifecycle_lock_and_expires_without_replay()
     let mut supervisor = RuntimeSupervisor::new();
     supervisor
         .start(ManagedProcessSpec {
+            server_name: None,
             id: "hung".into(),
             command: "powershell.exe".into(),
             args: vec![
@@ -148,6 +152,7 @@ fn restart_during_a_pending_exchange_does_not_poison_the_new_process() {
     let mut supervisor = RuntimeSupervisor::new();
     let original = supervisor
         .start(ManagedProcessSpec {
+            server_name: None,
             id: "pending".into(),
             command: "powershell.exe".into(),
             args: vec![
