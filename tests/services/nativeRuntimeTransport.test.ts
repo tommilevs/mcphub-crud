@@ -56,4 +56,16 @@ suite('native transport over a real isolated Windows named pipe',()=>{
     expect(requests.map(request=>request.op)).toEqual(['start','stdio','stop']);
     expect(requests[0]).toMatchObject({stream:true,spec:{server_name:'older-service',id:client.processId}});
   });
+  test('UTF-8 text survives a named-pipe chunk boundary inside a multibyte character',async()=>{
+    const text='Диагностика ✓';
+    handler=(request,socket)=>{
+      if(request.op!=='stdio'){socket.write('{"ok":true}\n');return;}
+      const bytes=Buffer.from(JSON.stringify({responses:[JSON.stringify({jsonrpc:'2.0',id:7,result:{text}})]})+'\n');
+      const split=bytes.indexOf(Buffer.from('Д'))+1;
+      socket.write(bytes.subarray(0,split));setTimeout(()=>socket.write(bytes.subarray(split)),20);
+    };
+    const client=transport(),received=jest.fn();client.onmessage=received;
+    try{await client.start();await client.send({jsonrpc:'2.0',id:7,method:'ping'});expect(received).toHaveBeenCalledWith({jsonrpc:'2.0',id:7,result:{text}});}
+    finally{await client.close();}
+  });
 });

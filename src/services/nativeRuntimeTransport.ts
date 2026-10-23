@@ -1,5 +1,6 @@
 import net from 'node:net';
 import {randomUUID} from 'node:crypto';
+import {StringDecoder} from 'node:string_decoder';
 import type {JSONRPCMessage,Transport} from '@modelcontextprotocol/server';
 type ManagedProcessSpec={id:string;command:string;args:string[];env:Record<string,string>;secret_env?:Record<string,string>;
   restart_limit?:number;restart_delay_ms?:number;request_timeout_ms?:number;initialize_timeout_ms?:number;streaming?:boolean};
@@ -9,6 +10,7 @@ const boundedTimeout=(value:unknown):number=>{const parsed=Number(value);return 
 export class NativeRuntimeTransport implements Transport {
   private socket?:net.Socket;
   private buffer='';
+  private readonly decoder=new StringDecoder('utf8');
   private pending:Promise<unknown>=Promise.resolve();
   private closed=false;
   private closing=false;
@@ -50,7 +52,7 @@ export class NativeRuntimeTransport implements Transport {
     try{await this.control({op:'stop',id:this.processId});}finally{this.disconnect();}
   }
   private onData(chunk:Buffer):void{
-    if(this.closed)return;this.buffer+=chunk.toString('utf8');let newline;
+    if(this.closed)return;this.buffer+=this.decoder.write(chunk);let newline;
     while(!this.closed&&(newline=this.buffer.indexOf('\n'))>=0){
       const line=this.buffer.slice(0,newline);this.buffer=this.buffer.slice(newline+1);
       try{
@@ -65,7 +67,7 @@ export class NativeRuntimeTransport implements Transport {
     }
   }
   private disconnect():void{
-    if(this.closed)return;this.closed=true;this.buffer='';this.socket?.destroy();this.socket=undefined;
+    if(this.closed)return;this.closed=true;this.buffer='';this.decoder.end();this.socket?.destroy();this.socket=undefined;
     this.abort?.(new Error('MCPHub native runtime connection closed'));this.onclose?.();
   }
   private control(request:Record<string,unknown>):Promise<ControlResponse>{
