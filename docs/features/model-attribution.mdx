@@ -5,6 +5,10 @@ description: Optional task correlation and self-reported model identity
 
 Enable the initial compatible implementation with `MCPHUB_ATTRIBUTION_MODE=compatible`.
 The default is off. Existing calls remain valid without `hub_context`.
+Alternatively, enable Model attribution in Smart Routing settings. Context lifetime
+defaults to 168 hours and accepts 1–8760 hours. `MCPHUB_ATTRIBUTION_MODE` and
+`MCPHUB_ATTRIBUTION_TTL_HOURS` override saved settings. Lifetime changes apply
+to newly issued keys; existing keys retain their original expiry.
 
 An authenticated caller can start correlation on any Smart Routing tool:
 

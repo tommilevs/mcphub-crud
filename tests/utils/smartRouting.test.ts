@@ -44,6 +44,14 @@ const SMART_ROUTING_ENV_VARS = [
 ];
 
 describe('smartRouting config resolution', () => {
+  it('resolves attribution defaults, saved values and environment override', async () => {
+    expect((await getSmartRoutingConfig()).attributionMode).toBe('off');
+    mockGet.mockResolvedValue({ smartRouting: { attributionMode: 'compatible', attributionTtlHours: 48 } });
+    expect((await getSmartRoutingConfig()).attributionTtlHours).toBe(48);
+    process.env.MCPHUB_ATTRIBUTION_MODE = 'off';
+    expect((await getSmartRoutingConfig()).attributionMode).toBe('off');
+    delete process.env.MCPHUB_ATTRIBUTION_MODE;
+  });
   const originalEnv = process.env;
 
   beforeEach(() => {
@@ -325,6 +333,8 @@ describe('smartRouting config resolution', () => {
         azureOpenaiEmbeddingModel: '',
         progressiveDisclosure: false,
         mcpZeroEnabled: false,
+        attributionMode: 'off',
+        attributionTtlHours: 168,
         mcpZeroTopServers: 5,
         serverDescriptionMode: 'names',
         embeddingMaxTokens: undefined,

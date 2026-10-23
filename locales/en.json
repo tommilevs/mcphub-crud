@@ -1,5 +1,7 @@
 {
   "attribution": {
+    "settingsHelp": "Optional task correlation. Model claims remain unverified; existing clients keep working.",
+    "ttlHours": "Context lifetime (hours)",
     "title": "Model attribution",
     "unverified": "Unverified",
     "unknown": "Unknown",

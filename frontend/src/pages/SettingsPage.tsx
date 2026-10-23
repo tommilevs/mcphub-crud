@@ -3028,6 +3028,24 @@ const SettingsPage: React.FC = () => {
                     }
                   />
                 </div>
+                <div className="hub-card p-3 space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="text-sm font-medium">{t('attribution.title', 'Model attribution')}</h3>
+                      <p className="text-xs text-[var(--hub-ink-3)]">{t('attribution.settingsHelp', 'Optional task correlation. Model claims remain unverified; existing clients keep working.')}</p>
+                    </div>
+                    <Switch disabled={loading || !smartRoutingConfig.enabled}
+                      checked={smartRoutingConfig.attributionMode === 'compatible'}
+                      onCheckedChange={(checked) => updateSmartRoutingConfig('attributionMode', checked ? 'compatible' : 'off')} />
+                  </div>
+                  <label className="block text-xs text-[var(--hub-ink-3)]">
+                    {t('attribution.ttlHours', 'Context lifetime (hours)')}
+                    <input type="number" min={1} max={8760} className="hub-input mt-1 block w-32"
+                      disabled={loading || smartRoutingConfig.attributionMode !== 'compatible'}
+                      value={smartRoutingConfig.attributionTtlHours ?? 168}
+                      onChange={(event) => updateSmartRoutingConfig('attributionTtlHours', Number(event.target.value))} />
+                  </label>
+                </div>
                 {/* end space-y-3 fields wrapper */}
               </div>
 

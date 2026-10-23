@@ -68,6 +68,8 @@ export interface SmartRoutingConfig {
   mcpZeroEnabled?: boolean;
   /** Number of server candidates considered by MCP-Zero. Default: 5. */
   mcpZeroTopServers?: number;
+  attributionMode?: 'off' | 'compatible';
+  attributionTtlHours?: number;
   /**
    * Controls how available servers are listed in the search_tools meta-tool description.
    * - 'names': only include server names
@@ -367,6 +369,18 @@ export async function getSmartRoutingConfig(): Promise<SmartRoutingConfig> {
       false,
       parseBooleanEnvVar,
     ),
+
+    attributionMode: cfg<'off' | 'compatible'>('attributionMode',
+      { MCPHUB_ATTRIBUTION_MODE: process.env.MCPHUB_ATTRIBUTION_MODE },
+      smartRoutingSettings.attributionMode, 'off',
+      (value: unknown) => value === 'compatible' ? 'compatible' : 'off'),
+    attributionTtlHours: cfg<number>('attributionTtlHours',
+      { MCPHUB_ATTRIBUTION_TTL_HOURS: process.env.MCPHUB_ATTRIBUTION_TTL_HOURS },
+      smartRoutingSettings.attributionTtlHours, 168,
+      (value: unknown) => {
+        const parsed = Number(value);
+        return Number.isSafeInteger(parsed) && parsed >= 1 && parsed <= 8760 ? parsed : 168;
+      }),
 
     mcpZeroTopServers: cfg<number>(
       'mcpZeroTopServers',

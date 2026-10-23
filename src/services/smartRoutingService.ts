@@ -203,6 +203,7 @@ export const buildSmartRoutingMetaTools = (
   serversList: string,
   progressiveDisclosure: boolean,
   fullSchemaTopN?: number,
+  attributionMode: 'off' | 'compatible' = process.env.MCPHUB_ATTRIBUTION_MODE === 'compatible' ? 'compatible' : 'off',
 ): any[] => {
   const tools: any[] = [];
 
@@ -363,7 +364,7 @@ Available servers: ${serversList}`,
     );
   }
 
-  if (process.env.MCPHUB_ATTRIBUTION_MODE === 'compatible') {
+  if (attributionMode === 'compatible') {
     for (const tool of tools) {
       tool.inputSchema = { ...tool.inputSchema, properties: {
         ...tool.inputSchema.properties,
@@ -458,6 +459,7 @@ export const getSmartRoutingMetaToolDefinitions = async (
     serversList,
     progressiveDisclosure,
     smartRoutingConfig.fullSchemaTopN,
+    smartRoutingConfig.attributionMode,
   );
 };
 
@@ -482,6 +484,7 @@ export const getSmartRoutingTools = async (
       serversList,
       progressiveDisclosure,
       smartRoutingConfig.fullSchemaTopN,
+      smartRoutingConfig.attributionMode,
     ),
   };
 };

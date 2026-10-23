@@ -2030,6 +2030,8 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         typeof smartRouting.azureOpenaiEmbeddingDeployment === 'string' ||
         typeof smartRouting.progressiveDisclosure === 'boolean' ||
         typeof smartRouting.mcpZeroEnabled === 'boolean' ||
+        smartRouting.attributionMode !== undefined ||
+        smartRouting.attributionTtlHours !== undefined ||
         typeof smartRouting.mcpZeroTopServers === 'number' ||
         typeof smartRouting.azureOpenaiEmbeddingModel === 'string' ||
         typeof smartRouting.serverDescriptionMode === 'string' ||
@@ -2446,6 +2448,20 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
 
       if (typeof smartRouting.mcpZeroEnabled === 'boolean') {
         systemConfig.smartRouting.mcpZeroEnabled = smartRouting.mcpZeroEnabled;
+      }
+      if (smartRouting.attributionMode !== undefined) {
+        if (!['off', 'compatible'].includes(smartRouting.attributionMode)) {
+          res.status(400).json({ success: false, message: 'Invalid attribution mode' });
+          return;
+        }
+        systemConfig.smartRouting.attributionMode = smartRouting.attributionMode;
+      }
+      if (smartRouting.attributionTtlHours !== undefined) {
+        if (!Number.isSafeInteger(smartRouting.attributionTtlHours) || smartRouting.attributionTtlHours < 1 || smartRouting.attributionTtlHours > 8760) {
+          res.status(400).json({ success: false, message: 'Attribution TTL must be 1–8760 hours' });
+          return;
+        }
+        systemConfig.smartRouting.attributionTtlHours = smartRouting.attributionTtlHours;
       }
       if (typeof smartRouting.mcpZeroTopServers === 'number') {
         systemConfig.smartRouting.mcpZeroTopServers = Math.min(

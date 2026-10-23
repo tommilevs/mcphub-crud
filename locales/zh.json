@@ -1,5 +1,7 @@
 {
   "attribution": {
+    "settingsHelp": "可选任务关联。模型声明仍未经验证，现有客户端继续正常工作。",
+    "ttlHours": "上下文有效期（小时）",
     "title": "模型归属",
     "unverified": "未经验证",
     "unknown": "未知",

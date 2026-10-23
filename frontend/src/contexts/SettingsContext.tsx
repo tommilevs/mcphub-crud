@@ -48,6 +48,8 @@ interface SmartRoutingConfig {
   progressiveDisclosure: boolean;
   mcpZeroEnabled?: boolean;
   mcpZeroTopServers?: number;
+  attributionMode?: 'off' | 'compatible';
+  attributionTtlHours?: number;
   embeddingMaxTokens?: number;
   embeddingQueryPrefix?: string;
   embeddingDocumentPrefix?: string;
