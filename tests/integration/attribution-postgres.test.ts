@@ -22,6 +22,8 @@ import {createExperience,searchExperiences,listExperienceEntries} from '../../sr
 import {reviewExperience,readExperience} from '../../src/controllers/experienceController.js';
 import {getExperienceAdvice} from '../../src/services/experienceAdvice.js';
 import {previewSkillFromExperience} from '../../src/services/skillProposalService.js';
+import {ensureSkillProposalSchema} from '../../src/db/skillProposalSchema.js';
+import {createSkillProposal,reviseSkillProposal,exportSkillProposal,listSkillProposals} from '../../src/services/storedSkillProposals.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
@@ -407,6 +409,19 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect((await previewSkillFromExperience(entry!.experience_id,'experience-owner',null))?.candidate).toMatchObject({
       independentTasks:2,confidence:'proposal',steps:[{server:'demo',tool:'inspect'},{server:'demo',tool:'verify'}]});
     expect(await previewSkillFromExperience(entry!.experience_id,'other-owner',null)).toBeNull();
+    await ensureSkillProposalSchema(pool);await ensureSkillProposalSchema(pool);
+    const skillOwner={username:'experience-owner',keyId:null};
+    const skill=await createSkillProposal(entry!.experience_id,skillOwner);
+    expect(skill).toMatchObject({status:'draft',revision:1,source_revision:1});
+    expect(await exportSkillProposal(skill.proposal_id,skillOwner)).toBeNull();
+    expect(await listSkillProposals({username:'other-owner',keyId:null})).toHaveLength(0);
+    const approve=()=>reviseSkillProposal(skill.proposal_id,skillOwner,{revision:1,status:'approved'});
+    expect((await Promise.all([approve(),approve()])).filter(Boolean)).toHaveLength(1);
+    expect((await exportSkillProposal(skill.proposal_id,skillOwner))?.markdown).toContain('## Evidence');
+    expect(await reviseSkillProposal(skill.proposal_id,skillOwner,{revision:2,status:'draft',markdown:'Edited draft'})).toMatchObject({status:'draft',revision:3});
+    expect(await exportSkillProposal(skill.proposal_id,skillOwner)).toBeNull();
+    expect(await reviseSkillProposal(skill.proposal_id,skillOwner,{revision:3,status:'approved'})).toMatchObject({status:'approved',revision:4});
+    expect((await pool.query('SELECT count(*) FROM skill_proposal_versions WHERE proposal_id=$1',[skill.proposal_id])).rows[0].count).toBe('4');
     const search=(username='experience-owner')=>searchExperiences({username,keyId:null,query:'diagnostic',limit:10});
     expect(await search()).toHaveLength(1);expect(await search('other-owner')).toHaveLength(0);
     const readCurrent=async(username='experience-owner')=>{
@@ -431,6 +446,7 @@ suite('attribution PostgreSQL isolated schema', () => {
     await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,2,$2,'correct','rejected','reviewer')`,[ids[0],digest]);
     expect(await search()).toHaveLength(0);
     expect(await previewSkillFromExperience(entry!.experience_id,'experience-owner',null)).toBeNull();
+    expect(await exportSkillProposal(skill.proposal_id,skillOwner)).toBeNull();
     expect(await readCurrent()).toBe(404);
     expect((await listExperienceEntries({username:'experience-owner',keyId:null,limit:20}))[0].assessment.usable).toBe(false);
     const old=process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED;process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED='true';

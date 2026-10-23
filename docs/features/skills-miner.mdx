@@ -31,7 +31,19 @@ observed steps, safety, result references, reported/unknown versions and explici
 limitations. It embeds neither RAW nor arguments and does not claim causal or
 model-quality proof. Names/descriptions cannot inject frontmatter fields or HTML.
 
-This slice implements preview and draft rendering only. Versioned proposal storage,
-prerequisites/safety authoring, user review/approval, SKILL.md export and the
-dashboard remain subsequent stages. No skill file is written, installed or
-executed by the preview endpoint; no tool permissions are changed.
+`POST /api/skills` saves a generated draft from `experienceId` and optional `keyId`.
+`GET /api/skills?keyId=...` lists up to 50 proposals in that exact owner/key scope.
+`PATCH /api/skills/:id` accepts `revision`, `status` and optional `markdown` (64 KiB
+maximum). Every edit resets status to draft; approval is a separate request against
+the exact revision. Concurrent changes have one winner and return 409 otherwise.
+Each change atomically appends a version snapshot, preserving previous content.
+
+`POST /api/skills/:id/export` downloads the reviewed Markdown as `SKILL.md` only
+when the proposal is approved and its source experience revision and reviewed
+workflow remain current. Privacy revocation, missing evidence, retirement or changed
+source revision block export. Listing stale proposals remains available for governance.
+Approval does not make edited text trustworthy automatically: the reviewer must
+inspect prerequisites, safety, privacy and applicability before approving.
+
+The dashboard editor remains a subsequent stage. No skill is installed or executed
+by these endpoints; no tool permissions are changed.
