@@ -1,5 +1,6 @@
 {
   "attribution": {
+    "loadMore": "Load more events",
     "events": "Identity timeline",
     "noEvents": "No identity events",
     "truncated": "Showing the first 100 events",

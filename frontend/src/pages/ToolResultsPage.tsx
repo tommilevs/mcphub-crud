@@ -34,21 +34,21 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const [identityEvents, setIdentityEvents] = useState<AttributionEvent[] | null>(null);
   const [identityEventError, setIdentityEventError] = useState('');
   const [identityEventsLoading, setIdentityEventsLoading] = useState(false);
-  const [identityEventsTruncated, setIdentityEventsTruncated] = useState(false);
+  const [identityEventsCursor, setIdentityEventsCursor] = useState<string>();
   const currentResultRef = useRef(resultId);
   currentResultRef.current = resultId;
-  useEffect(() => { setIdentityEvents(null); setIdentityEventError(''); }, [resultId]);
-  const loadIdentityEvents = async () => {
+  useEffect(() => { setIdentityEvents(null); setIdentityEventError(''); setIdentityEventsCursor(undefined); setIdentityEventsLoading(false); }, [resultId]);
+  const loadIdentityEvents = async (append = false) => {
     if (!detail?.attribution?.traceId) return;
     const currentResult = detail.resultId;
     setIdentityEventsLoading(true);
     setIdentityEventError('');
     try {
-      const response = await getAttributionEvents(detail.attribution.traceId);
+      const response = await getAttributionEvents(detail.attribution.traceId, append ? identityEventsCursor : undefined);
       if (!response.success) throw new Error(response.message || 'Failed to load identity events');
       if (currentResult === currentResultRef.current) {
-        setIdentityEvents(response.data ?? []);
-        setIdentityEventsTruncated(response.meta?.hasMore ?? false);
+        setIdentityEvents((previous) => append ? [...(previous ?? []), ...(response.data ?? [])] : response.data ?? []);
+        setIdentityEventsCursor(response.meta?.nextCursor);
       }
     } catch (error) {
       if (currentResult === currentResultRef.current) setIdentityEventError(error instanceof Error ? error.message : String(error));
@@ -188,7 +188,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
             <span className="hub-mono break-all">{event.claimed_model_id || t('attribution.unknown', 'Unknown')} · {t('attribution.unverified', 'Unverified')}</span>
           </li>)}
           {identityEvents.length === 0 && <li className="text-xs text-[var(--hub-ink-3)]">{t('attribution.noEvents', 'No identity events')}</li>}
-          {identityEventsTruncated && <li className="text-xs text-[var(--hub-ink-3)]">{t('attribution.truncated', 'Showing the first 100 events')}</li>}
+          {identityEventsCursor && <li><button type="button" className="hub-btn text-xs" disabled={identityEventsLoading} onClick={() => void loadIdentityEvents(true)}>{t('attribution.loadMore', 'Load more events')}</button></li>}
         </ol>}
       </section>}
       {detail.objective && <div className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.objective')}</div><div className="mt-1 text-sm">{detail.objective}</div></div>}

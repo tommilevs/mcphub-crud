@@ -32,8 +32,8 @@ export interface AttributionEvent {
   claimed_model_id: string | null;
   identity_source: 'unknown' | 'self_reported';
 }
-export const getAttributionEvents = (traceId: string) =>
-  apiGet<ApiResponse<AttributionEvent[]> & { meta?: { hasMore: boolean } }>(`/attribution/traces/${encodeURIComponent(traceId)}/events?limit=100`);
+export const getAttributionEvents = (traceId: string, cursor?: string) =>
+  apiGet<ApiResponse<AttributionEvent[]> & { meta?: { hasMore: boolean; nextCursor?: string } }>(`/attribution/traces/${encodeURIComponent(traceId)}/events?${query({ limit: 100, cursor })}`);
 
 export const checkToolResultHistoryAvailable = async (): Promise<boolean> => {
   const response = await apiGet<ApiResponse<{ available: boolean }>>('/tool-results/available');

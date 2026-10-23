@@ -1,5 +1,6 @@
 {
   "attribution": {
+    "loadMore": "加载更多事件",
     "events": "身份时间线",
     "noEvents": "没有身份事件",
     "truncated": "显示前 100 个事件",
