@@ -10,6 +10,8 @@ const createRepository = (): jest.Mocked<ToolResultRepository> => ({
   enforceRetention: jest.fn(),
   findById: jest.fn(),
   findPaginated: jest.fn(),
+  findForReindex: jest.fn(),
+  countForReindex: jest.fn(),
   search: jest.fn(),
   setPinned: jest.fn(),
   incrementUseCount: jest.fn(),

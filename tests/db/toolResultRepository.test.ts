@@ -134,4 +134,15 @@ describe('ToolResultRepositoryDb', () => {
     expect(sql).toContain('tool_result_chunks');
     expect(params).toEqual([25, true]);
   });
+
+  it('counts remaining payload-bearing results without touching RAW', async () => {
+    const query = jest.fn().mockResolvedValue([{ count: '7' }]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+
+    await expect(repository.countForReindex(true)).resolves.toBe(7);
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain('COUNT(*)');
+    expect(sql).toContain('tool_result_chunks');
+    expect(params).toEqual([true]);
+  });
 });

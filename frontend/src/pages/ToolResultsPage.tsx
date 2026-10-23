@@ -232,7 +232,7 @@ const ToolResultsPage: React.FC = () => {
     try {
       const response = await reindexToolResults(25, true);
       if (response.success && response.data) {
-        setReindexMessage(`${response.data.indexed} indexed · ${response.data.skipped} skipped · ${response.data.embeddingFailures} embedding failures`);
+        setReindexMessage(`${response.data.indexed} indexed · ${response.data.remaining} remaining · ${response.data.skipped} skipped · ${response.data.embeddingFailures} embedding failures`);
       } else {
         setReindexMessage(response.message || t('toolResults.reindexError'));
       }

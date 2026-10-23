@@ -67,7 +67,7 @@ export const getToolResultChunks = (resultId: string): Promise<ApiResponse<ToolR
 export const reindexToolResults = (
   limit = 25,
   onlyMissing = true,
-): Promise<ApiResponse<{ requested: number; selected: number; indexed: number; skipped: number; embeddingFailures: number }>> =>
+): Promise<ApiResponse<{ requested: number; selected: number; indexed: number; skipped: number; embeddingFailures: number; remaining: number }>> =>
   apiPost('/tool-results/reindex', { limit, onlyMissing });
 
 export const getToolResult = (resultId: string): Promise<ApiResponse<ToolResultDetail>> =>

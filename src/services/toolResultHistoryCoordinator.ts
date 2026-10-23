@@ -31,6 +31,7 @@ export interface ToolResultReindexSummary {
   indexed: number;
   skipped: number;
   embeddingFailures: number;
+  remaining: number;
 }
 
 let reindexInFlight = false;
@@ -81,6 +82,7 @@ export const reindexToolResultHistory = async (
     indexed: 0,
     skipped: 0,
     embeddingFailures: 0,
+    remaining: 0,
   };
   try {
     const records = await repository.findForReindex(limit, onlyMissing);
@@ -128,6 +130,7 @@ export const reindexToolResultHistory = async (
       }
       summary.indexed += 1;
     }
+    summary.remaining = await repository.countForReindex(onlyMissing);
     return summary;
   } finally {
     reindexInFlight = false;

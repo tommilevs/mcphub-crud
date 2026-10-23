@@ -162,6 +162,20 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     return rows.map(mapRow);
   }
 
+  async countForReindex(onlyMissing: boolean): Promise<number> {
+    const rows = await this.dataSource.query<Array<{ count: string }>>(
+      `SELECT COUNT(*)::text AS count
+       FROM tool_results result
+       WHERE result.payload_available = TRUE
+         AND result.raw_text IS NOT NULL
+         AND ($1::boolean = FALSE OR NOT EXISTS (
+           SELECT 1 FROM tool_result_chunks chunks WHERE chunks.result_id = result.result_id
+         ))`,
+      [onlyMissing],
+    );
+    return Number(rows[0]?.count ?? 0);
+  }
+
   async search(
     query: string,
     limit: number,
