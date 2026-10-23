@@ -3,7 +3,7 @@ import { getAttributionEvents, getAttributionSummary } from '../controllers/attr
 import { saveTaskReview } from '../controllers/taskReviewController.js';
 import { submitLoopGuardFeedback, getLoopGuardSummary } from '../controllers/loopGuardFeedbackController.js';
 import { saveToolResultReview } from '../controllers/toolResultReviewController.js';
-import { saveTrainingContext } from '../controllers/trainingContextController.js';
+import { saveTrainingContext, getTrainingContext } from '../controllers/trainingContextController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
 import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
 import express from 'express';
@@ -436,6 +436,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.post('/tool-results/:id/loopguard-feedback', submitLoopGuardFeedback);
   authenticatedRouter.put('/tool-results/:id/review', saveToolResultReview);
   authenticatedRouter.put('/tool-results/:id/training-context', saveTrainingContext);
+  authenticatedRouter.get('/tool-results/:id/training-context', getTrainingContext);
 
   // Configuration template routes
   authenticatedRouter.post('/templates/export', templateRateLimiter, auth, exportConfigTemplate);

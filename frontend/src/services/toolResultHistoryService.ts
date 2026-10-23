@@ -52,6 +52,14 @@ export const saveTaskReview = (taskId: string, review: { outcome: string; traini
   apiPut<ApiResponse<unknown>>(`/attribution/tasks/${encodeURIComponent(taskId)}/review`, review);
 export const saveToolResultReview = (id: string, review: { quality: string; privacy: string; revision: number; rawSha256: string }) =>
   apiPut<ApiResponse<unknown>>(`/tool-results/${encodeURIComponent(id)}/review`, review);
+export interface TrainingContextData {
+  objective: string | null; invokedToolName: string | null;
+  current: { revision: number; discoveryCallId: string; tools: unknown[]; privacyApproved: boolean; reviewedBy: string; reviewedAt: string } | null;
+  sources: Array<{ callId: string; occurredAt: string; evidence: { candidates: Array<{ name: string; schemaSha256: string | null; descriptionSha256?: string }> } }>;
+}
+export const getTrainingContext = (id: string) => apiGet<ApiResponse<TrainingContextData>>(`/tool-results/${encodeURIComponent(id)}/training-context`);
+export const saveTrainingContext = (id: string, value: { revision: number; discoveryCallId?: string; tools?: unknown[]; privacyApproved: boolean }) =>
+  apiPut<ApiResponse<unknown>>(`/tool-results/${encodeURIComponent(id)}/training-context`, value);
 export const submitLoopGuardFeedback = (resultId: string, verdict: 'helpful' | 'false_positive' | 'ignored') =>
   apiPost<ApiResponse<unknown>>(`/tool-results/${encodeURIComponent(resultId)}/loopguard-feedback`, { verdict });
 export const getAttributionSummary = (days = 30) =>

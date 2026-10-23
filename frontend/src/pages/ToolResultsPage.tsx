@@ -7,6 +7,7 @@ import AttributionSummaryPanel from '@/components/AttributionSummaryPanel';
 import LoopGuardSummaryPanel from '@/components/LoopGuardSummaryPanel';
 import TaskReviewForm from '@/components/TaskReviewForm';
 import ToolResultReviewForm from '@/components/ToolResultReviewForm';
+import TrainingContextEditor from '@/components/TrainingContextEditor';
 import LoopGuardFeedbackButtons from '@/components/LoopGuardFeedbackButtons';
 import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
@@ -214,6 +215,11 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           if (response.success && response.data) setDetail(response.data);
           else throw new Error(response.message || t('toolResults.fetchError'));
         }} />}
+      <TrainingContextEditor key={`${detail.resultId}:context`} resultId={detail.resultId} onSaved={async()=>{
+        const response=await getToolResult(resultId);
+        if(response.success&&response.data)setDetail(response.data);
+        else throw new Error(response.message||t('toolResults.fetchError'));
+      }}/>
       {detail.loopGuardAdvice && <section className="hub-card p-3 space-y-2">
         <h2 className="text-sm font-medium">LoopGuard</h2>
         <p className="text-xs">{detail.loopGuardAdvice.trigger === 'alternating_failure_cycle'

@@ -14,7 +14,7 @@ import { createGatewayProof } from '../../src/services/gatewayProvenance.js';
 import { runWithAttribution } from '../../src/services/attributionRuntime.js';
 import { getCallAttribution } from '../../src/services/callAttribution.js';
 import { RequestContextService } from '../../src/services/requestContextService.js';
-import { saveTrainingContext } from '../../src/controllers/trainingContextController.js';
+import { saveTrainingContext, getTrainingContext } from '../../src/controllers/trainingContextController.js';
 import { extractDiscoveryEvidence } from '../../src/services/discoveryEvidence.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
@@ -334,9 +334,18 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect((await Promise.all([save(0),save(0)])).sort()).toEqual([200,409]);
     const repo=new ToolResultRepositoryDb(mockSummaryDb as never);
     expect((await repo.findById(id))?.trainingContext).toMatchObject({revision:1,privacyApproved:true});
+    let editor: any;
+    const loadEditor=()=>getTrainingContext({user:{isAdmin:true},params:{id}} as unknown as Request,
+      {json:(value:any)=>{editor=value.data;},status:()=>{throw new Error('Context load failed');}} as unknown as Response);
+    await loadEditor();
+    expect(editor).toMatchObject({objective:'actual objective',invokedToolName:'demo-read',current:{revision:1,tools,privacyApproved:true}});
+    expect(editor.sources.map((source:any)=>source.callId)).toEqual([callId]);
     await pool.query('DELETE FROM attribution_discovery_events WHERE call_id=$1',[callId]);
     expect(await save(1,[],false)).toBe(200);
     expect((await repo.findById(id))?.trainingContext).toMatchObject({revision:2,privacyApproved:false});
+    await loadEditor();
+    expect(editor.current).toMatchObject({revision:2,tools,privacyApproved:false});
+    expect(editor.sources).toEqual([]);
     expect((await pool.query('SELECT count(*) FROM tool_result_training_contexts WHERE result_id=$1',[id])).rows[0].count).toBe('2');
     await pool.query('DELETE FROM tool_results WHERE result_id=$1',[id]);
     expect((await pool.query('SELECT count(*) FROM tool_result_training_contexts WHERE result_id=$1',[id])).rows[0].count).toBe('0');

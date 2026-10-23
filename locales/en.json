@@ -1,5 +1,13 @@
 {
   "attribution": {
+    "contextTitle": "Training task and discovery context",
+    "contextHelp": "Paste the exact original discovery catalogue. Schema and description fingerprints are checked against the selected source. Approval covers this context only; task consent and call privacy review remain separate.",
+    "contextMissingObjective": "No original objective is saved; this result cannot be approved.",
+    "contextSource": "Original discovery",
+    "contextUnavailable": "Source unavailable",
+    "contextCatalogue": "Original tool catalogue (JSON array)",
+    "contextApprove": "I reviewed this objective and catalogue and approve this context for training.",
+    "contextRevoke": "Revoke context approval",
     "verifiedCorrelation": "Verified adapter correlation",
     "gatewayAdapter": "Gateway adapter",
     "providerResponse": "Provider response",

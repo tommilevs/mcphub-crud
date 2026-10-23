@@ -1,5 +1,13 @@
 {
   "attribution": {
+    "contextTitle": "训练任务与发现上下文",
+    "contextHelp": "粘贴原始发现目录。系统将对照所选来源检查模式及描述指纹。批准仅适用于该上下文；任务同意和调用隐私审核仍是独立要求。",
+    "contextMissingObjective": "未保存原始任务目标，无法批准该结果。",
+    "contextSource": "原始发现",
+    "contextUnavailable": "来源不可用",
+    "contextCatalogue": "原始工具目录（JSON数组）",
+    "contextApprove": "我已审核该目标和目录，并批准将此上下文用于训练。",
+    "contextRevoke": "撤销上下文批准",
     "verifiedCorrelation": "已验证的适配器关联",
     "gatewayAdapter": "网关适配器",
     "providerResponse": "提供商响应",

@@ -190,6 +190,14 @@ Revisions are append-only through the admin API with optimistic concurrency;
 stale or unmatched context returns 409. Revoke with `{ "revision": N,
 "privacyApproved": false }`, even after source discovery retention. The latest
 revision controls readiness and result retention deletes its context revisions.
+`GET /api/tool-results/:id/training-context` returns the current snapshot and up
+to 50 recent eligible source manifests from this result's branch and time range.
+Result details offer a lazy-loaded editor with source selection, catalogue JSON,
+an explicit approval checkbox and revocation. Editing the catalogue or source
+clears the checkbox. Approval is disabled when the objective, invoked name or
+source is unavailable; withdrawal remains available for an approved archived
+snapshot. A changed revision requires reloading before saving.
+
 This API stores an explicitly submitted reviewed snapshot; automatic full-schema
-capture, a dedicated context editor and Dataset Builder export are not yet
-implemented by this slice. It does not reconstruct unknown historical context.
+capture and Dataset Builder export are not yet implemented by this slice. It
+does not reconstruct unknown historical context.
