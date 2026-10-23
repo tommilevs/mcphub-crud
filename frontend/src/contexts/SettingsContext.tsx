@@ -50,6 +50,8 @@ interface SmartRoutingConfig {
   mcpZeroTopServers?: number;
   attributionMode?: 'off' | 'compatible';
   attributionTtlHours?: number;
+  loopGuardEnabled?: boolean;
+  loopGuardIgnoredTools?: string[];
   embeddingMaxTokens?: number;
   embeddingQueryPrefix?: string;
   embeddingDocumentPrefix?: string;

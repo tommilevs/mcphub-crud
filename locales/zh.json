@@ -1,5 +1,7 @@
 {
   "attribution": {
+    "loopSettingsHelp": "针对任务分支中重复失败的建议。需要启用归属功能；绝不会阻止工具。",
+    "loopIgnoredTools": "LoopGuard 排除的工具，每行一个 server/tool",
     "loopCycleAdvice": "两步失败循环已重复三次。请检查两个错误并考虑改变诊断策略。仍允许有意重试。",
     "loopAdvice": "观察到三次快速且相同的失败。重试前请检查已保存的错误和工具模式。仍允许有意重试。",
     "taskReview": "任务审核",

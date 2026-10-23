@@ -1,12 +1,15 @@
 import type { ToolResultRecord } from '../types/toolResult.js';
 import { getAppDataSource } from '../db/connection.js';
 import { detectRepeatedFailure, type LoopGuardAdvice } from './loopGuard.js';
+import { getSmartRoutingConfig } from '../utils/smartRouting.js';
 
 export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGuardAdvice | null> {
   const context = record.attribution;
-  if (process.env.MCPHUB_LOOP_GUARD_ENABLED !== 'true' || record.status !== 'error' ||
+  if (record.status !== 'error' ||
     !context?.traceId || !context.branchId) return null;
   try {
+    const config = await getSmartRoutingConfig();
+    if (!config.loopGuardEnabled || config.loopGuardIgnoredTools?.includes(`${record.server}/${record.tool}`)) return null;
     const db = getAppDataSource();
     const rows = await db.query(`SELECT result_id, timestamp, server, tool, status, arguments, raw_sha256
       FROM tool_results WHERE username IS NOT DISTINCT FROM $1 AND key_id IS NOT DISTINCT FROM $2
@@ -18,6 +21,8 @@ export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGu
       resultDigest: record.rawSha256 }, ...rows.map((row: any) => ({ resultId: row.result_id,
       timestamp: new Date(row.timestamp), server: row.server, tool: row.tool,
       status: row.status, arguments: row.arguments, resultDigest: row.raw_sha256 }))]);
+    if (advice && rows.some((row: any) => advice.resultIds.includes(row.result_id) &&
+      config.loopGuardIgnoredTools?.includes(`${row.server}/${row.tool}`))) return null;
     if (advice) await db.query('UPDATE tool_result_state SET loop_guard_advice=$2::jsonb WHERE result_id=$1', [record.resultId, JSON.stringify(advice)]);
     return advice;
   } catch { return null; }

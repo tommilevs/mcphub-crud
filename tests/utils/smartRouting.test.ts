@@ -44,6 +44,12 @@ const SMART_ROUTING_ENV_VARS = [
 ];
 
 describe('smartRouting config resolution', () => {
+  it('resolves the saved LoopGuard switch and exact ignored-tool list', async () => {
+    mockGet.mockResolvedValue({ smartRouting: { loopGuardEnabled: true, loopGuardIgnoredTools: ['demo/inspect'] } });
+    const config = await getSmartRoutingConfig();
+    expect(config.loopGuardEnabled).toBe(true);
+    expect(config.loopGuardIgnoredTools).toEqual(['demo/inspect']);
+  });
   it('resolves attribution defaults, saved values and environment override', async () => {
     expect((await getSmartRoutingConfig()).attributionMode).toBe('off');
     mockGet.mockResolvedValue({ smartRouting: { attributionMode: 'compatible', attributionTtlHours: 48 } });
@@ -335,6 +341,8 @@ describe('smartRouting config resolution', () => {
         mcpZeroEnabled: false,
         attributionMode: 'off',
         attributionTtlHours: 168,
+        loopGuardEnabled: false,
+        loopGuardIgnoredTools: [],
         mcpZeroTopServers: 5,
         serverDescriptionMode: 'names',
         embeddingMaxTokens: undefined,

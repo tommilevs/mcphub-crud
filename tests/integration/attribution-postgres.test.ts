@@ -145,6 +145,7 @@ suite('attribution PostgreSQL isolated schema', () => {
   });
   test('LoopGuard isolates trace branches and persists advice outside RAW', async () => {
     const oldFlag = process.env.MCPHUB_LOOP_GUARD_ENABLED;
+    const oldIgnored = process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS;
     process.env.MCPHUB_LOOP_GUARD_ENABLED = 'true';
     try {
       await pool.query(`ALTER TABLE tool_results ADD COLUMN username text;
@@ -180,9 +181,13 @@ suite('attribution PostgreSQL isolated schema', () => {
       }
       expect((await observeLoopGuard(record))?.trigger).toBe('alternating_failure_cycle');
       expect(await observeLoopGuard({ ...record, rawSha256: 'new-progress' })).toBeNull();
+      process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS = 'demo/diagnose-a';
+      expect(await observeLoopGuard(record)).toBeNull();
     } finally {
       if (oldFlag === undefined) delete process.env.MCPHUB_LOOP_GUARD_ENABLED;
       else process.env.MCPHUB_LOOP_GUARD_ENABLED = oldFlag;
+      if (oldIgnored === undefined) delete process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS;
+      else process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS = oldIgnored;
     }
   });
 });

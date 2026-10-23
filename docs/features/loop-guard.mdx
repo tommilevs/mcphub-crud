@@ -7,6 +7,11 @@ The initial deterministic LoopGuard is opt-in with
 `MCPHUB_LOOP_GUARD_ENABLED=true`. It requires enabled attribution, a known trace
 and branch, and saved Tool Result History. It never blocks, replays or executes
 tools. There is no internal LLM call in this first implementation.
+You can also enable it in Smart Routing settings and exclude exact tools using
+one `server/tool` per line (up to 100 entries). An excluded tool suppresses
+both a direct repeat warning and a cycle containing that tool. Environment
+variables override saved settings; `MCPHUB_LOOP_GUARD_IGNORED_TOOLS` accepts a
+comma-separated exclusion list. Exclusions affect advice only, not execution.
 
 After a failed execution, the hub compares the current result with up to five preceding
 results in the same authenticated username/key, trace and branch. Advice is

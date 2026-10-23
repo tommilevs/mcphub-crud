@@ -2031,6 +2031,8 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         typeof smartRouting.progressiveDisclosure === 'boolean' ||
         typeof smartRouting.mcpZeroEnabled === 'boolean' ||
         smartRouting.attributionMode !== undefined ||
+        smartRouting.loopGuardEnabled !== undefined ||
+        smartRouting.loopGuardIgnoredTools !== undefined ||
         smartRouting.attributionTtlHours !== undefined ||
         typeof smartRouting.mcpZeroTopServers === 'number' ||
         typeof smartRouting.azureOpenaiEmbeddingModel === 'string' ||
@@ -2455,6 +2457,20 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
           return;
         }
         systemConfig.smartRouting.attributionMode = smartRouting.attributionMode;
+      }
+      if (smartRouting.loopGuardEnabled !== undefined) {
+        if (typeof smartRouting.loopGuardEnabled !== 'boolean') {
+          res.status(400).json({ success: false, message: 'Invalid LoopGuard switch' }); return;
+        }
+        systemConfig.smartRouting.loopGuardEnabled = smartRouting.loopGuardEnabled;
+      }
+      if (smartRouting.loopGuardIgnoredTools !== undefined) {
+        const entries = smartRouting.loopGuardIgnoredTools;
+        if (!Array.isArray(entries) || entries.length > 100 || entries.some((entry: unknown) =>
+          typeof entry !== 'string' || !entry.trim() || entry.length > 1024 || /[\u0000-\u001f]/.test(entry))) {
+          res.status(400).json({ success: false, message: 'Invalid LoopGuard ignored tools' }); return;
+        }
+        systemConfig.smartRouting.loopGuardIgnoredTools = [...new Set(entries.map((entry: string) => entry.trim()))];
       }
       if (smartRouting.attributionTtlHours !== undefined) {
         if (!Number.isSafeInteger(smartRouting.attributionTtlHours) || smartRouting.attributionTtlHours < 1 || smartRouting.attributionTtlHours > 8760) {

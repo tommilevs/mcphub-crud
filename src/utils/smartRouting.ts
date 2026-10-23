@@ -70,6 +70,8 @@ export interface SmartRoutingConfig {
   mcpZeroTopServers?: number;
   attributionMode?: 'off' | 'compatible';
   attributionTtlHours?: number;
+  loopGuardEnabled?: boolean;
+  loopGuardIgnoredTools?: string[];
   /**
    * Controls how available servers are listed in the search_tools meta-tool description.
    * - 'names': only include server names
@@ -374,6 +376,16 @@ export async function getSmartRoutingConfig(): Promise<SmartRoutingConfig> {
       { MCPHUB_ATTRIBUTION_MODE: process.env.MCPHUB_ATTRIBUTION_MODE },
       smartRoutingSettings.attributionMode, 'off',
       (value: unknown) => value === 'compatible' ? 'compatible' : 'off'),
+    loopGuardEnabled: cfg('loopGuardEnabled',
+      { MCPHUB_LOOP_GUARD_ENABLED: process.env.MCPHUB_LOOP_GUARD_ENABLED },
+      smartRoutingSettings.loopGuardEnabled, false, parseBooleanEnvVar),
+    loopGuardIgnoredTools: cfg<string[]>('loopGuardIgnoredTools',
+      { MCPHUB_LOOP_GUARD_IGNORED_TOOLS: process.env.MCPHUB_LOOP_GUARD_IGNORED_TOOLS },
+      smartRoutingSettings.loopGuardIgnoredTools, [], (value: unknown) => {
+        const entries = Array.isArray(value) ? value : typeof value === 'string' ? value.split(',') : [];
+        return [...new Set(entries.filter((entry): entry is string => typeof entry === 'string')
+          .map((entry) => entry.trim()).filter((entry) => entry.length > 0 && entry.length <= 1024))].slice(0, 100);
+      }),
     attributionTtlHours: cfg<number>('attributionTtlHours',
       { MCPHUB_ATTRIBUTION_TTL_HOURS: process.env.MCPHUB_ATTRIBUTION_TTL_HOURS },
       smartRoutingSettings.attributionTtlHours, 168,

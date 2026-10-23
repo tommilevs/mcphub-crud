@@ -3045,6 +3045,19 @@ const SettingsPage: React.FC = () => {
                       value={smartRoutingConfig.attributionTtlHours ?? 168}
                       onChange={(event) => updateSmartRoutingConfig('attributionTtlHours', Number(event.target.value))} />
                   </label>
+                  <div className="flex items-center justify-between gap-3 border-t border-[var(--hub-line)] pt-3">
+                    <div><h3 className="text-sm font-medium">LoopGuard</h3>
+                      <p className="text-xs text-[var(--hub-ink-3)]">{t('attribution.loopSettingsHelp', 'Advice for repeated failures within a task branch. Requires attribution; never blocks tools.')}</p></div>
+                    <Switch disabled={loading || smartRoutingConfig.attributionMode !== 'compatible'}
+                      checked={smartRoutingConfig.loopGuardEnabled ?? false}
+                      onCheckedChange={(checked) => updateSmartRoutingConfig('loopGuardEnabled', checked)} />
+                  </div>
+                  <label className="block text-xs">{t('attribution.loopIgnoredTools', 'Tools excluded from LoopGuard, one server/tool per line')}
+                    <textarea className="hub-input mt-1 block w-full" rows={3} disabled={loading}
+                      value={(smartRoutingConfig.loopGuardIgnoredTools ?? []).join('\n')}
+                      onChange={(event) => updateSmartRoutingConfig('loopGuardIgnoredTools', event.target.value.split('\n'))}
+                      onBlur={(event) => updateSmartRoutingConfig('loopGuardIgnoredTools', event.target.value.split('\n').map((value) => value.trim()).filter(Boolean))} />
+                  </label>
                 </div>
                 {/* end space-y-3 fields wrapper */}
               </div>
