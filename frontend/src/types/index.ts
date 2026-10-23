@@ -946,7 +946,9 @@ export interface ToolResultSummary {
     traceId: string | null;
     modelSegmentId: string | null;
     branchId?: string | null;
-    identity: { modelId: string | null; source: 'unknown' | 'self_reported'; verified: false };
+    identity: { modelId: string | null; source: 'unknown' | 'self_reported' | 'gateway_observed'; verified: boolean };
+    provenance?: { adapterId: string; modelId: string; responseId: string; toolCallId: string;
+      invocationSha256: string; claimedModelId?: string | null; causalCorrelationVerified: true };
     clientClaims?: { clientNameClaim?: string; clientInstanceHint?: string; agentRunHint?: string; taskHint?: string };
     conflictReason?: string;
   };

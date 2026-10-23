@@ -35,6 +35,13 @@ export const ensureAttributionContextSchema = async (db: {
     );
     CREATE INDEX IF NOT EXISTS attribution_identity_events_trace_idx
       ON attribution_identity_events (trace_id, occurred_at, event_id);
+    CREATE TABLE IF NOT EXISTS attribution_gateway_nonces (
+      adapter_id varchar(255) NOT NULL,
+      nonce uuid NOT NULL,
+      expires_at timestamptz NOT NULL,
+      PRIMARY KEY (adapter_id,nonce)
+    );
+    CREATE INDEX IF NOT EXISTS attribution_gateway_nonces_expiry_idx ON attribution_gateway_nonces(expires_at);
     CREATE TABLE IF NOT EXISTS attribution_task_reviews (
       task_id uuid NOT NULL,
       revision integer NOT NULL CHECK (revision > 0),

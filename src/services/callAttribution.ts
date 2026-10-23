@@ -8,7 +8,9 @@ export interface CallAttribution {
   taskId: string | null;
   traceId: string | null;
   modelSegmentId: string | null;
-  identity: AttributionIdentity;
+  identity: AttributionIdentity | { modelId: string; source: 'gateway_observed'; verified: true };
+  provenance?: { adapterId: string; modelId: string; responseId: string; toolCallId: string;
+    invocationSha256: string; claimedModelId?: string | null; causalCorrelationVerified: true };
   branchId?: string | null;
   clientClaims?: AttributionClientClaims;
   conflictReason?: string;
@@ -16,6 +18,10 @@ export interface CallAttribution {
 }
 
 const storage = new AsyncLocalStorage<CallAttribution>();
+export const withCallAttributionOverride = <T>(patch: Partial<CallAttribution>, callback: () => T): T => {
+  const current = storage.getStore();
+  return current ? storage.run({ ...current, ...patch }, callback) : callback();
+};
 export const getCallAttribution = (): CallAttribution | undefined => storage.getStore();
 export const runWithCallAttribution = <T>(
   context: Omit<CallAttribution, 'callId'> | null,

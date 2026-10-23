@@ -22,7 +22,7 @@ export async function getAttributionSummary(req: Request, res: Response): Promis
     ) SELECT json_build_object(
       'total', COUNT(*),
       'known', COUNT(*) FILTER (WHERE NULLIF(attribution->'identity'->>'modelId', '') IS NOT NULL AND attribution->>'conflictReason' IS NULL),
-      'verified', COUNT(*) FILTER (WHERE attribution->'identity'->>'verified' = 'true' AND attribution->'identity'->>'source' IN ('gateway_observed', 'host_reported') AND attribution->>'conflictReason' IS NULL),
+      'verified', COUNT(*) FILTER (WHERE attribution->'identity'->>'verified' = 'true' AND attribution->'identity'->>'source' IN ('gateway_observed', 'host_reported') AND attribution->'provenance'->>'causalCorrelationVerified' = 'true' AND attribution->>'conflictReason' IS NULL),
       'conflicted', COUNT(*) FILTER (WHERE attribution->>'conflictReason' IS NOT NULL),
       'executionErrors', COUNT(*) FILTER (WHERE status = 'error'),
       'models', COALESCE((SELECT json_agg(models) FROM models), '[]'::json)

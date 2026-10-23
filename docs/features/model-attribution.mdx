@@ -123,7 +123,7 @@ explicit call assessment, not inferred from execution status or task success.
 An incorrect call must not be used as a positive SFT demonstration merely because
 its review is complete; dataset-specific selection still applies.
 
-## Gateway proof reference (not yet a runtime adapter)
+## Optional instrumented gateway adapter
 
 `src/services/gatewayProvenance.ts` provides an instrumented OpenAI-compatible
 gateway reference. `createGatewayProof` accepts the concrete provider response,
@@ -139,9 +139,25 @@ at most five seconds of clock skew, and reject changed invocations, owners,
 signatures, unknown adapters and replay. Keys must contain at least 32 characters
 and must never be supplied by the model or stored in project files.
 
-This is an adapter foundation, **not an enabled verified-identity path**. Runtime
-wiring, durable replay storage and a reviewed deployment of the instrumented
-gateway are still required. An HMAC proves that a trusted adapter signed the
+In compatible mode, attach the proof as MCP request `_meta["dev.mcphub/provenance"]`.
+Register operator-trusted adapter IDs and secrets in `MCPHUB_GATEWAY_ADAPTER_KEYS`
+(a JSON object mapping adapter IDs to secrets in the runtime environment). No
+adapters are trusted by default. The owner used by the signer must match the
+hub's authenticated principal, serialized as `[username-or-null,key-id-or-null]`.
+Anonymous calls cannot establish verified provenance.
+
+Runtime validates the original invocation before stripping hub metadata upstream.
+PostgreSQL consumes each adapter/nonce pair once atomically across workers;
+expired nonce cleanup is bounded. Valid evidence upgrades only the current call's
+snapshot to `gateway_observed`; it does not upgrade stored correlation contexts
+or later unsigned calls. Call ID remains unchanged. Conflicting claimed and
+observed model IDs are both retained with an explicit conflict and excluded from
+trusted training eligibility. Result details show adapter, response and tool-call
+identifiers. The verified-coverage summary also requires causal evidence.
+
+A reviewed deployment of the instrumented gateway is still required; no real
+external gateway deployment has been verified by these implementation tests.
+An HMAC proves that a trusted adapter signed the
 correlation; it cannot independently prove the provider or a compromised adapter
 truthful. Merely passing a configured model or attaching unsigned client metadata
-must never upgrade attribution. Existing calls remain self-reported/unknown.
+must never upgrade attribution. Unsigned calls remain self-reported/unknown.

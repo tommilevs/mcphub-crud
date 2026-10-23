@@ -4,6 +4,7 @@ import { RequestContextService } from './requestContextService.js';
 import { runWithCallAttribution } from './callAttribution.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
 import { maintainAttributionRetention } from './attributionRetention.js';
+import { withGatewayAttribution } from './gatewayAttribution.js';
 
 export async function runWithAttribution(request: any, handler: (request: any) => Promise<any>) {
   let config;
@@ -13,11 +14,12 @@ export async function runWithAttribution(request: any, handler: (request: any) =
     return runWithCallAttribution(null, () => handler(stripAttributionInput(request)));
   }
   if (config.attributionMode !== 'compatible') {
-    return handler(request);
+    const { 'dev.mcphub/provenance': _proof, ...meta } = request.params?._meta ?? {};
+    return handler({ ...request, params: { ...request.params, ...(request.params?._meta ? { _meta: meta } : {}) } });
   }
   const current = RequestContextService.getInstance().getRequestContext();
   // Anonymous requests lack a stable authenticated owner for correlation keys.
-  if ((!request.params?.arguments?.hub_context && !request.params?._meta?.['dev.mcphub/attribution']) || (!current?.username && !current?.keyId)) {
+  if ((!request.params?.arguments?.hub_context && !request.params?._meta?.['dev.mcphub/attribution'] && !request.params?._meta?.['dev.mcphub/provenance']) || (!current?.username && !current?.keyId)) {
     return runWithCallAttribution(null, () => handler(stripAttributionInput(request)));
   }
   const principal = JSON.stringify([current.username ?? null, current.keyId ?? null]);
@@ -29,7 +31,8 @@ export async function runWithAttribution(request: any, handler: (request: any) =
     maintainAttributionRetention(repository);
     const service = new AttributionContextService(repository,
       undefined, (config.attributionTtlHours ?? 168) * 60 * 60 * 1000);
-    return withAttributionHandshake(request, principal, service, handler);
+    return runWithCallAttribution(null, () => withAttributionHandshake(request, principal, service,
+      cleaned => withGatewayAttribution(request, stripAttributionInput(cleaned), principal, repository, handler)));
   } catch {
     return runWithCallAttribution(null, () => handler(stripAttributionInput(request)));
   }

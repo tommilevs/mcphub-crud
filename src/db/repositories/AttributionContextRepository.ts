@@ -5,6 +5,16 @@ import type { DiscoveryEvidence } from '../../services/discoveryEvidence.js';
 export class AttributionContextRepository implements AttributionContextStore {
   constructor(private readonly db: { query(sql: string, parameters?: unknown[]): Promise<any> }) {}
 
+  async consumeGatewayNonce(adapter: string, nonce: string, expires: Date): Promise<boolean> {
+    const rows = await this.db.query(`WITH expired AS (
+      DELETE FROM attribution_gateway_nonces WHERE (adapter_id,nonce) IN (
+        SELECT adapter_id,nonce FROM attribution_gateway_nonces WHERE expires_at < NOW()
+        LIMIT 500 FOR UPDATE SKIP LOCKED)
+    ) INSERT INTO attribution_gateway_nonces(adapter_id,nonce,expires_at) VALUES ($1,$2,$3)
+      ON CONFLICT (adapter_id,nonce) DO NOTHING RETURNING nonce`,[adapter,nonce,expires]);
+    return rows.length === 1;
+  }
+
   async recordLoopGuardReaction(context: AttributionContextReference, callId: string, reaction: LoopGuardReaction): Promise<void> {
     await this.db.query(`INSERT INTO tool_result_loop_reactions
       (call_id,result_id,context_id,trace_id,branch_id,model_segment_id,action)

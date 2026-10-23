@@ -6,7 +6,7 @@ export function stripAttributionInput(request: any) {
   const params = request.params ?? {};
   const smart = ['search_tools', 'describe_tool', 'call_tool'].includes(params.name);
   const { hub_context: _context, ...args } = params.arguments ?? {};
-  const { 'dev.mcphub/attribution': _attribution, ...remainingMeta } = params._meta ?? {};
+  const { 'dev.mcphub/attribution': _attribution, 'dev.mcphub/provenance': _proof, ...remainingMeta } = params._meta ?? {};
   return { ...request, params: { ...params,
     ...(smart && params.arguments ? { arguments: args } : {}),
     ...(params._meta ? { _meta: remainingMeta } : {}),

@@ -1,5 +1,10 @@
 {
   "attribution": {
+    "verifiedCorrelation": "Verified adapter correlation",
+    "gatewayAdapter": "Gateway adapter",
+    "providerResponse": "Provider response",
+    "providerToolCall": "Provider tool call",
+    "modelClaim": "Model claim",
     "resultReview": "Call quality and privacy review",
     "resultReviewHelp": "Review this call’s tool choice, arguments, metadata and original RAW. Privacy approval asserts that this material is suitable for training; it does not redact RAW, grant task consent, verify model identity or approve other calls.",
     "callQuality": "Tool choice and argument quality",

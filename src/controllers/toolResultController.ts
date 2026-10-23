@@ -18,6 +18,7 @@ const publicRecord = (record: ToolResultRecord): Omit<ToolResultRecord, 'raw' | 
     outcomeReviewed: Boolean(record.taskReview?.reviewedBy && record.taskReview.outcome !== 'unknown'),
     redactionReviewed: Boolean(record.resultReview?.reviewedBy && record.resultReview.rawSha256 === record.rawSha256 && record.resultReview.privacy === 'approved'),
     callQualityReviewed: Boolean(record.resultReview?.reviewedBy && record.resultReview.rawSha256 === record.rawSha256 && ['correct','incorrect'].includes(record.resultReview.quality)),
+    causalCorrelationVerified: record.attribution?.provenance?.causalCorrelationVerified === true,
   }) };
 };
 

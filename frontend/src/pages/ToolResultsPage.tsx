@@ -157,12 +157,17 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
       {detail.attribution && <section className="hub-card p-3 space-y-3" aria-label={t('attribution.title', 'Model attribution')}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <h2 className="text-sm font-medium">{t('attribution.title', 'Model attribution')}</h2>
-          <span className="text-xs text-[var(--hub-ink-3)]">{t('attribution.unverified', 'Unverified')}</span>
+          <span className="text-xs text-[var(--hub-ink-3)]">{detail.attribution.identity.verified && detail.attribution.provenance?.causalCorrelationVerified
+            ? t('attribution.verifiedCorrelation', 'Verified adapter correlation') : t('attribution.unverified', 'Unverified')}</span>
         </div>
         <dl className="grid gap-3 text-xs sm:grid-cols-2 lg:grid-cols-3">
           {[
             [t('attribution.model', 'Model'), detail.attribution.identity.modelId || t('attribution.unknown', 'Unknown')],
-            [t('attribution.source', 'Source'), detail.attribution.identity.source === 'self_reported' ? t('attribution.selfReported', 'Self-reported') : t('attribution.unknown', 'Unknown')],
+            [t('attribution.source', 'Source'), detail.attribution.identity.source === 'gateway_observed' ? 'gateway_observed' : detail.attribution.identity.source === 'self_reported' ? t('attribution.selfReported', 'Self-reported') : t('attribution.unknown', 'Unknown')],
+            [t('attribution.gatewayAdapter', 'Gateway adapter'), detail.attribution.provenance?.adapterId],
+            [t('attribution.providerResponse', 'Provider response'), detail.attribution.provenance?.responseId],
+            [t('attribution.providerToolCall', 'Provider tool call'), detail.attribution.provenance?.toolCallId],
+            [t('attribution.modelClaim', 'Model claim'), detail.attribution.provenance?.claimedModelId],
             [t('attribution.client', 'Client claim'), detail.attribution.clientClaims?.clientNameClaim],
             [t('attribution.instance', 'Client instance claim'), detail.attribution.clientClaims?.clientInstanceHint],
             [t('attribution.run', 'Agent run claim'), detail.attribution.clientClaims?.agentRunHint],

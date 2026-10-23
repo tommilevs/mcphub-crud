@@ -1,5 +1,10 @@
 {
   "attribution": {
+    "verifiedCorrelation": "已验证的适配器关联",
+    "gatewayAdapter": "网关适配器",
+    "providerResponse": "提供商响应",
+    "providerToolCall": "提供商工具调用",
+    "modelClaim": "模型声明",
     "resultReview": "调用质量与隐私审核",
     "resultReviewHelp": "请审核该调用的工具选择、参数、元数据和原始RAW。隐私批准表示这些材料适合训练；它不会修改RAW、授予任务同意、验证模型身份或批准其他调用。",
     "callQuality": "工具选择与参数质量",

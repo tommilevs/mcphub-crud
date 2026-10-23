@@ -10,6 +10,10 @@ import { getAttributionSummary } from '../../src/controllers/attributionControll
 import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
 import { saveToolResultReview } from '../../src/controllers/toolResultReviewController.js';
 import { ensureToolResultReviewSchema } from '../../src/db/toolResultReviewSchema.js';
+import { createGatewayProof } from '../../src/services/gatewayProvenance.js';
+import { runWithAttribution } from '../../src/services/attributionRuntime.js';
+import { getCallAttribution } from '../../src/services/callAttribution.js';
+import { RequestContextService } from '../../src/services/requestContextService.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
@@ -62,6 +66,45 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect(await service.resolve('alice', first.traceKey)).toBeNull();
     const events = (await pool.query('SELECT event_type FROM attribution_identity_events ORDER BY event_type')).rows;
     expect(events.map((row) => row.event_type)).toEqual(['branch_forked', 'context_started', 'model_rotated']);
+  });
+  test('durable gateway nonce has exactly one winner across concurrent requests', async () => {
+    const repo = new AttributionContextRepository(mockSummaryDb);
+    const nonce = randomUUID();
+    expect((await Promise.all([repo.consumeGatewayNonce('gateway',nonce,new Date(Date.now()+60000)),
+      repo.consumeGatewayNonce('gateway',nonce,new Date(Date.now()+60000))])).sort()).toEqual([false,true]);
+  });
+  test('runtime verifies gateway proof per call without upgrading unsigned continuation', async () => {
+    const oldMode=process.env.MCPHUB_ATTRIBUTION_MODE, oldKeys=process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;
+    const secret='integration-only-gateway-key-32-characters';
+    process.env.MCPHUB_ATTRIBUTION_MODE='compatible';
+    process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=JSON.stringify({integration:secret});
+    const request={id:19,params:{name:'call_tool',arguments:{toolName:'demo',hub_context:{action:'start',model_claim:'observed'}},_meta:{} as any}};
+    const provider={id:'response-integration',model:'observed',choices:[{message:{tool_calls:[{id:'tool-call-integration',type:'function',
+      function:{name:'call_tool',arguments:JSON.stringify(request.params.arguments)}}]}}]};
+    request.params._meta['dev.mcphub/provenance']=createGatewayProof(provider,'tool-call-integration',request,
+      {adapterId:'integration',principal:JSON.stringify(['gateway-user',null]),secret});
+    try {
+      await RequestContextService.getInstance().runWithCustomRequestContext({headers:{},username:'gateway-user'},async()=>{
+        let verifiedCallId: string | undefined;
+        const result=await runWithAttribution(request,async(cleaned)=>{
+          expect(cleaned.params._meta['dev.mcphub/provenance']).toBeUndefined();
+          expect(getCallAttribution()?.identity).toMatchObject({source:'gateway_observed',verified:true,modelId:'observed'});
+          verifiedCallId=getCallAttribution()?.callId; return {content:[]};
+        });
+        expect(result._meta['dev.mcphub/provenance'].causalCorrelationVerified).toBe(true);
+        const key=result._meta['dev.mcphub/context'].trace_key;
+        await runWithAttribution({params:{name:'call_tool',arguments:{toolName:'demo',hub_context:{trace_key:key}}}},async()=>{
+          expect(getCallAttribution()?.identity).toMatchObject({source:'self_reported',verified:false});
+          expect(getCallAttribution()?.callId).not.toBe(verifiedCallId); return {};
+        });
+        await runWithAttribution(request,async()=>{
+          expect(getCallAttribution()?.identity.verified).toBe(false); return {};
+        });
+      });
+    } finally {
+      if(oldMode===undefined)delete process.env.MCPHUB_ATTRIBUTION_MODE;else process.env.MCPHUB_ATTRIBUTION_MODE=oldMode;
+      if(oldKeys===undefined)delete process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;else process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=oldKeys;
+    }
   });
   test('rolls back context issuance when its identity event cannot be saved', async () => {
     const before = (await pool.query('SELECT count(*) FROM attribution_contexts')).rows[0].count;
