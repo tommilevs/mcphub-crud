@@ -322,8 +322,9 @@ suite('attribution PostgreSQL isolated schema', () => {
     await pool.query('ALTER TABLE tool_results ADD COLUMN objective text');
     const context=await service.start('training-context-user'), id=randomUUID(), callId=randomUUID();
     const tools=[{name:'demo-read',description:'Read a record',inputSchema:{type:'object',properties:{}}}];
-    const evidence=extractDiscoveryEvidence('search_tools',{content:[{type:'text',text:JSON.stringify({tools})}]})!;
+    const evidence=extractDiscoveryEvidence('search_tools',{content:[{type:'text',text:JSON.stringify({tools})}]},true)!;
     await service.recordDiscovery(context,callId,evidence);
+    expect((await pool.query('SELECT evidence FROM attribution_discovery_events WHERE call_id=$1',[callId])).rows[0].evidence.toolCatalogue).toEqual(tools);
     await pool.query(`INSERT INTO tool_results(result_id,timestamp,objective,attribution) VALUES($1,NOW()+INTERVAL '1 second','actual objective',$2)`,
       [id,JSON.stringify({traceId:context.traceId,branchId:context.branchId,invokedToolName:'demo-read'})]);
     await pool.query('INSERT INTO tool_result_state(result_id) VALUES($1)',[id]);
@@ -348,6 +349,7 @@ suite('attribution PostgreSQL isolated schema', () => {
     await loadEditor();
     expect(editor).toMatchObject({objective:'actual objective',invokedToolName:'demo-read',current:{revision:1,tools,privacyApproved:true}});
     expect(editor.sources.map((source:any)=>source.callId)).toEqual([callId]);
+    expect(editor.sources[0].evidence.toolCatalogue).toEqual(tools);
     await pool.query('DELETE FROM attribution_discovery_events WHERE call_id=$1',[callId]);
     expect(await save(1,[],false)).toBe(200);
     expect((await repo.findById(id))?.trainingContext).toMatchObject({revision:2,privacyApproved:false});

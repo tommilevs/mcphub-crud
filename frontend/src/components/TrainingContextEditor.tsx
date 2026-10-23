@@ -17,7 +17,7 @@ function ContextForm({resultId,onSaved}:{resultId:string;onSaved:()=>Promise<voi
   };
   const apply=(next:TrainingContextData)=>{
     setData(next);setSource(next.current?.discoveryCallId??next.sources[0]?.callId??'');
-    setText(JSON.stringify(next.current?.tools??[],null,2));setApproved(false);
+    setText(JSON.stringify(next.current?.tools??next.sources[0]?.evidence.toolCatalogue??[],null,2));setApproved(false);
   };
   useEffect(()=>{
     let active=true;
@@ -39,10 +39,13 @@ function ContextForm({resultId,onSaved}:{resultId:string;onSaved:()=>Promise<voi
   if(!data)return <p role={error?'alert':undefined} className="text-xs">{error||t('app.loading')}</p>;
   const sourceAvailable=data.sources.some(item=>item.callId===source);
   return <div className="space-y-3">
-    <p className="text-xs text-[var(--hub-ink-3)]">{t('attribution.contextHelp','Paste the exact original discovery catalogue. Schema and description fingerprints are checked against the selected source. Approval covers this context only; task consent and call privacy review remain separate.')}</p>
+    <p className="text-xs text-[var(--hub-ink-3)]">{t('attribution.contextCaptureHelp','Review the captured catalogue, or paste the exact original catalogue if it was not retained. Schema and description fingerprints are checked against the selected source. Capture never grants approval; task consent and call privacy review remain separate.')}</p>
     <p className="text-xs break-words">{data.objective||t('attribution.contextMissingObjective','No original objective is saved; this result cannot be approved.')}</p>
     <label className="block text-xs">{t('attribution.contextSource','Original discovery')}
-      <select className="hub-input mt-1 block w-full" disabled={saving} value={source} onChange={event=>{setSource(event.target.value);setApproved(false);}}>
+      <select className="hub-input mt-1 block w-full" disabled={saving} value={source} onChange={event=>{
+        const id=event.target.value;setSource(id);setApproved(false);
+        setText(JSON.stringify(data.sources.find(item=>item.callId===id)?.evidence.toolCatalogue??[],null,2));
+      }}>
         {!sourceAvailable&&<option value={source}>{t('attribution.contextUnavailable','Source unavailable')}</option>}
         {data.sources.map(item=><option key={item.callId} value={item.callId}>{new Date(item.occurredAt).toLocaleString()} · {item.evidence.candidates.length} tools · {item.callId}</option>)}
       </select>

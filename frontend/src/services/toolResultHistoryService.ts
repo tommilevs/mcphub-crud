@@ -55,7 +55,7 @@ export const saveToolResultReview = (id: string, review: { quality: string; priv
 export interface TrainingContextData {
   objective: string | null; invokedToolName: string | null;
   current: { revision: number; discoveryCallId: string; tools: unknown[]; privacyApproved: boolean; reviewedBy: string; reviewedAt: string } | null;
-  sources: Array<{ callId: string; occurredAt: string; evidence: { candidates: Array<{ name: string; schemaSha256: string | null; descriptionSha256?: string }> } }>;
+  sources: Array<{ callId: string; occurredAt: string; evidence: { candidates: Array<{ name: string; schemaSha256: string | null; descriptionSha256?: string }>; toolCatalogue?: Array<{name:string;inputSchema:object;description?:string}> } }>;
 }
 export const getTrainingContext = (id: string) => apiGet<ApiResponse<TrainingContextData>>(`/tool-results/${encodeURIComponent(id)}/training-context`);
 export const saveTrainingContext = (id: string, value: { revision: number; discoveryCallId?: string; tools?: unknown[]; privacyApproved: boolean }) =>

@@ -16,3 +16,14 @@ test('ignores execution responses and unsuccessful discovery', () => {
   expect(extractDiscoveryEvidence('call_tool', { content: [] })).toBeNull();
   expect(extractDiscoveryEvidence('describe_tool', { isError: true })).toBeNull();
 });
+
+test('opt-in capture retains only a complete bounded catalogue and never grants privacy approval',()=>{
+  const tools=[{name:'demo-read',description:'review me',inputSchema:{type:'object',properties:{}}}];
+  const result=(value:unknown)=>({content:[{type:'text',text:JSON.stringify({tools:value})}]});
+  expect(extractDiscoveryEvidence('search_tools',result(tools),true)?.toolCatalogue).toEqual(tools);
+  expect(extractDiscoveryEvidence('search_tools',result(tools),false)?.toolCatalogue).toBeUndefined();
+  expect(extractDiscoveryEvidence('search_tools',result([...tools,{name:'missing-schema'}]),true)?.toolCatalogue).toBeUndefined();
+  expect(extractDiscoveryEvidence('search_tools',result([...tools,tools[0]]),true)?.toolCatalogue).toBeUndefined();
+  expect(extractDiscoveryEvidence('search_tools',result([{...tools[0],description:'x'.repeat(524288)}]),true)?.toolCatalogue).toBeUndefined();
+  expect(extractDiscoveryEvidence('search_tools',result(tools),true)).not.toHaveProperty('privacyApproved');
+});

@@ -3,6 +3,15 @@ title: Dataset Builder
 description: Reviewed, tenant-scoped tool-selection SFT export
 ---
 
+Operators may opt into `MCPHUB_CAPTURE_DISCOVERY_CATALOGUE=true` to retain complete
+original `search_tools` catalogues alongside discovery fingerprints. Default off:
+schemas and descriptions can contain private defaults or service details. Capture
+is limited to 100 unique tools and 512 KiB and follows discovery-event retention.
+Incomplete/progressive catalogues without all schemas are never filled in from
+later state. The training-context editor prefills retained catalogues but leaves
+approval unchecked. The existing fingerprint, branch, timestamp, objective,
+per-call review and task-consent gates still apply before dataset export.
+
 Enable `MCPHUB_DATASET_BUILDER_ENABLED=true` explicitly. The default is disabled.
 Admin `POST /api/datasets/preview` and `/api/datasets/export` accept:
 
