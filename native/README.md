@@ -73,6 +73,14 @@ broker. Credential-templated and personal-auth stdio configurations remain on
 the existing Node-owned transport until those identity-specific flows can be
 represented safely by the service.
 
+The private named pipe accepts SYSTEM and elevated local Administrators only.
+Interactive membership alone grants no access to process execution or secret
+enrollment. The installed gateway runs under the service account and can access
+the pipe; ordinary dashboard users go through the authenticated HTTP admin API.
+For a separately launched development gateway with native mode enabled, run that
+gateway elevated. The default Node-owned stdio transport requires no elevation.
+The tray opens the HTTP dashboard and does not need direct pipe access.
+
 The Windows Tauri installer can include a self-contained gateway runtime. Run
 `native/package-windows.ps1` before `cargo tauri build` to stage portable
 `node.exe`, the compiled backend `dist`, frontend `frontend/dist`, and production `node_modules`. The installed

@@ -3,6 +3,8 @@
 
 #[cfg(windows)]
 use mcphub_runtime_core::secret_store::SecretStore;
+#[cfg(windows)]
+mod pipe_access;
 use mcphub_runtime_core::{ManagedProcessSpec, RuntimeSupervisor};
 use std::io::{self, BufRead, BufReader};
 #[cfg(not(windows))]
@@ -322,12 +324,11 @@ fn run_named_pipe(
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
-    // The service runs as LocalSystem, while the Node gateway/tray normally
-    // runs in the signed-in user's session. Keep the pipe local and grant
-    // access only to SYSTEM, local Administrators, and the interactive user
-    // token. Secret values are still accepted only through the authenticated
-    // admin HTTP endpoints; the pipe never exposes secret_get.
-    let sddl: Vec<u16> = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;IU)"
+    // This private endpoint can spawn SYSTEM processes and resolve credentials.
+    // The installed gateway is service-hosted (SYSTEM); elevated administrators
+    // may also operate it. An interactive logon alone is not authorization.
+    // Ordinary dashboard clients use the gateway's authenticated HTTP API.
+    let sddl: Vec<u16> = pipe_access::CONTROL_PIPE_SDDL
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
