@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -6,6 +6,8 @@ import Pagination from '@/components/ui/Pagination';
 import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
   getToolResult,
+  getAttributionEvents,
+  type AttributionEvent,
   getToolResultRaw,
   getToolResultRawRange,
   getToolResults,
@@ -29,6 +31,29 @@ const bytes = (value: number) => {
 const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const { t } = useTranslation();
   const [detail, setDetail] = useState<ToolResultDetail | null>(null);
+  const [identityEvents, setIdentityEvents] = useState<AttributionEvent[] | null>(null);
+  const [identityEventError, setIdentityEventError] = useState('');
+  const [identityEventsLoading, setIdentityEventsLoading] = useState(false);
+  const [identityEventsTruncated, setIdentityEventsTruncated] = useState(false);
+  const currentResultRef = useRef(resultId);
+  currentResultRef.current = resultId;
+  useEffect(() => { setIdentityEvents(null); setIdentityEventError(''); }, [resultId]);
+  const loadIdentityEvents = async () => {
+    if (!detail?.attribution?.traceId) return;
+    const currentResult = detail.resultId;
+    setIdentityEventsLoading(true);
+    setIdentityEventError('');
+    try {
+      const response = await getAttributionEvents(detail.attribution.traceId);
+      if (!response.success) throw new Error(response.message || 'Failed to load identity events');
+      if (currentResult === currentResultRef.current) {
+        setIdentityEvents(response.data ?? []);
+        setIdentityEventsTruncated(response.meta?.hasMore ?? false);
+      }
+    } catch (error) {
+      if (currentResult === currentResultRef.current) setIdentityEventError(error instanceof Error ? error.message : String(error));
+    } finally { if (currentResult === currentResultRef.current) setIdentityEventsLoading(false); }
+  };
   const [raw, setRaw] = useState('');
   const [error, setError] = useState('');
   const [rangeStart, setRangeStart] = useState('0');
@@ -150,10 +175,21 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           {t('attribution.conflict', 'Conflicting identity data')}: {detail.attribution.conflictReason}
         </p>}
         <div className="flex flex-wrap gap-2">
+          {detail.attribution.traceId && <button type="button" className="hub-btn text-xs" disabled={identityEventsLoading} onClick={() => void loadIdentityEvents()}>{identityEventsLoading ? t('app.loading') : t('attribution.events', 'Identity timeline')}</button>}
           {detail.attribution.traceId && <Link className="hub-btn text-xs" to={`/tool-results?traceId=${encodeURIComponent(detail.attribution.traceId)}`}>{t('attribution.trace', 'Trace')}</Link>}
           {detail.attribution.taskId && <Link className="hub-btn text-xs" to={`/tool-results?taskId=${encodeURIComponent(detail.attribution.taskId)}`}>{t('attribution.task', 'Task')}</Link>}
           {detail.attribution.branchId && <Link className="hub-btn text-xs" to={`/tool-results?branchId=${encodeURIComponent(detail.attribution.branchId)}`}>{t('attribution.branch', 'Branch')}</Link>}
         </div>
+        {identityEventError && <p role="alert" className="text-xs text-red-500">{identityEventError}</p>}
+        {identityEvents && <ol className="space-y-2 border-t border-[var(--hub-line)] pt-3">
+          {identityEvents.map((event) => <li key={event.event_id} className="grid gap-1 text-xs sm:grid-cols-3">
+            <time dateTime={event.occurred_at} className="text-[var(--hub-ink-3)]">{new Date(event.occurred_at).toLocaleString()}</time>
+            <span>{t(`attribution.eventNames.${event.event_type}`, event.event_type)}</span>
+            <span className="hub-mono break-all">{event.claimed_model_id || t('attribution.unknown', 'Unknown')} · {t('attribution.unverified', 'Unverified')}</span>
+          </li>)}
+          {identityEvents.length === 0 && <li className="text-xs text-[var(--hub-ink-3)]">{t('attribution.noEvents', 'No identity events')}</li>}
+          {identityEventsTruncated && <li className="text-xs text-[var(--hub-ink-3)]">{t('attribution.truncated', 'Showing the first 100 events')}</li>}
+        </ol>}
       </section>}
       {detail.objective && <div className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.objective')}</div><div className="mt-1 text-sm">{detail.objective}</div></div>}
       {lineage && (lineage.ancestors.length > 0 || lineage.children.length > 0) && <div className="hub-card p-3 space-y-3">

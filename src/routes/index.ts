@@ -1,4 +1,5 @@
 import { metrics } from '../controllers/metricsController.js';
+import { getAttributionEvents } from '../controllers/attributionController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
 import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
 import express from 'express';
@@ -409,6 +410,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.delete('/activities/cleanup', deleteOldActivities);
 
   // Immutable tool execution result history (database mode, admin-only handlers)
+  authenticatedRouter.get('/attribution/traces/:traceId/events', getAttributionEvents);
   authenticatedRouter.get('/tool-results/available', checkToolResultHistoryAvailable);
   authenticatedRouter.get('/tool-results', getToolResults);
   authenticatedRouter.get('/tool-results/search', searchToolResults);

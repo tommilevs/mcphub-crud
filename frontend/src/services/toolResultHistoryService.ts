@@ -22,6 +22,19 @@ const query = (values: object): string => {
   return params.toString();
 };
 
+export interface AttributionEvent {
+  event_id: string;
+  context_id: string;
+  branch_id: string | null;
+  model_segment_id: string;
+  event_type: 'context_started' | 'branch_forked' | 'model_rotated';
+  occurred_at: string;
+  claimed_model_id: string | null;
+  identity_source: 'unknown' | 'self_reported';
+}
+export const getAttributionEvents = (traceId: string) =>
+  apiGet<ApiResponse<AttributionEvent[]> & { meta?: { hasMore: boolean } }>(`/attribution/traces/${encodeURIComponent(traceId)}/events?limit=100`);
+
 export const checkToolResultHistoryAvailable = async (): Promise<boolean> => {
   const response = await apiGet<ApiResponse<{ available: boolean }>>('/tool-results/available');
   return Boolean(response.success && response.data?.available);

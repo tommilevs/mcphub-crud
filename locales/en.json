@@ -1,5 +1,9 @@
 {
   "attribution": {
+    "events": "Identity timeline",
+    "noEvents": "No identity events",
+    "truncated": "Showing the first 100 events",
+    "eventNames": { "context_started": "Context started", "branch_forked": "Branch created", "model_rotated": "Model segment changed" },
     "settingsHelp": "Optional task correlation. Model claims remain unverified; existing clients keep working.",
     "ttlHours": "Context lifetime (hours)",
     "title": "Model attribution",

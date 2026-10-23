@@ -1,5 +1,9 @@
 {
   "attribution": {
+    "events": "身份时间线",
+    "noEvents": "没有身份事件",
+    "truncated": "显示前 100 个事件",
+    "eventNames": { "context_started": "上下文已创建", "branch_forked": "分支已创建", "model_rotated": "模型片段已更改" },
     "settingsHelp": "可选任务关联。模型声明仍未经验证，现有客户端继续正常工作。",
     "ttlHours": "上下文有效期（小时）",
     "title": "模型归属",
