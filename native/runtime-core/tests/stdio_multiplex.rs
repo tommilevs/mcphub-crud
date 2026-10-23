@@ -7,7 +7,7 @@ use std::collections::HashMap;
 fn collects_notifications_before_matching_response() {
     let script = r#"$m=ConvertFrom-Json ([Console]::In.ReadLine()); Write-Output '{"jsonrpc":"2.0","method":"notifications/progress","params":{}}'; Write-Output ('{"jsonrpc":"2.0","id":' + $m.id + ',"result":{}}')"#;
     let mut supervisor = RuntimeSupervisor::new();
-    supervisor
+    let started = supervisor
         .start(ManagedProcessSpec {
             id: "fixture".into(),
             command: "powershell.exe".into(),
@@ -22,6 +22,7 @@ fn collects_notifications_before_matching_response() {
             restart_delay_ms: 0,
         })
         .expect("fixture process starts");
+    assert_eq!(started.state, "STARTING");
 
     let frames = supervisor
         .send_stdio("fixture", r#"{"jsonrpc":"2.0","id":7,"method":"ping"}"#)

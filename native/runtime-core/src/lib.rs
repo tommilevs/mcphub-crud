@@ -65,6 +65,9 @@ struct ManagedProcess {
 #[derive(Debug, Clone, Serialize)]
 pub struct ProcessStatus {
     pub id: String,
+    /// Lifecycle state exposed to the dashboard. The supervisor only reports
+    /// process-level health here; protocol-level checks remain opt-in.
+    pub state: &'static str,
     pub running: bool,
     pub pid: Option<u32>,
     pub restarts: u32,
@@ -123,6 +126,7 @@ impl RuntimeSupervisor {
         let job = windows::assign_to_job(child.id())?;
         let status = ProcessStatus {
             id: id.clone(),
+            state: "STARTING",
             running: true,
             pid: Some(child.id()),
             restarts: 0,
@@ -193,9 +197,17 @@ impl RuntimeSupervisor {
                     process.last_start = Instant::now();
                 }
             }
+            let running = process.child.try_wait().ok().flatten().is_none();
             statuses.push(ProcessStatus {
                 id: id.clone(),
-                running: process.child.try_wait().ok().flatten().is_none(),
+                state: if running {
+                    "RUNNING"
+                } else if process.restarts >= process.spec.restart_limit {
+                    "CRASH_LOOP"
+                } else {
+                    "RESTARTING"
+                },
+                running,
                 pid: Some(process.child.id()),
                 restarts: process.restarts,
                 restart_limit: process.spec.restart_limit,

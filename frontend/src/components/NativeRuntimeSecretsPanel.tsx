@@ -3,7 +3,7 @@ import { apiDelete, apiGet, apiPut } from '@/utils/fetchInterceptor';
 import { useToast } from '@/contexts/ToastContext';
 
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
-type NativeProcessStatus = { id: string; running: boolean; pid?: number; restarts: number };
+type NativeProcessStatus = { id: string; state?: string; running: boolean; pid?: number; restarts: number; restart_limit?: number };
 type NativeRuntimeStatusResponse = NativeProcessStatus[];
 
 /** Admin-only enrollment UI. The value is sent once and never rendered back. */
@@ -86,6 +86,18 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
           Refresh status
         </button>
       </div>
+      {runtimeStatus && runtimeStatus.length > 0 && (
+        <div className="mt-3 space-y-2">
+          {runtimeStatus.map((process) => (
+            <div key={process.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--hub-line)] px-3 py-2 text-sm">
+              <span className="font-medium">{process.id}</span>
+              <span className={process.running ? 'text-green-600' : 'text-amber-600'}>
+                {process.state || (process.running ? 'RUNNING' : 'STOPPED')} · {process.restarts}/{process.restart_limit ?? '—'} restarts
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
       <form onSubmit={enroll} className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_auto_auto]">
         <input value={id} onChange={(event) => setId(event.target.value)} className="form-input px-3 py-2" placeholder="github-token" maxLength={128} aria-label="Secret ID" />
         <input type="password" value={value} onChange={(event) => setValue(event.target.value)} className="form-input px-3 py-2" placeholder="Secret value (never shown again)" maxLength={65536} autoComplete="new-password" aria-label="Secret value" />
