@@ -41,6 +41,12 @@ export const getToolResultTimeline = (
 ): Promise<ApiResponse<ToolResultSummary[]>> =>
   apiGet(`/tool-results/timeline/${encodeURIComponent(sessionId)}?limit=${limit}`);
 
+export const getToolResultConversationTimeline = (
+  conversationId: string,
+  limit = 100,
+): Promise<ApiResponse<ToolResultSummary[]>> =>
+  apiGet(`/tool-results/conversation-timeline/${encodeURIComponent(conversationId)}?limit=${limit}`);
+
 export const getToolResult = (resultId: string): Promise<ApiResponse<ToolResultDetail>> =>
   apiGet(`/tool-results/${encodeURIComponent(resultId)}`);
 

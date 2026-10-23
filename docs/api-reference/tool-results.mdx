@@ -33,6 +33,7 @@ RAW is never returned by list, search, or metadata endpoints. Metadata-only reco
 
 ```http
 GET /api/tool-results/timeline/:sessionId?limit=100
+GET /api/tool-results/conversation-timeline/:conversationId?limit=100
 POST /api/tool-results/compare
 PATCH /api/tool-results/:resultId/pin
 ```

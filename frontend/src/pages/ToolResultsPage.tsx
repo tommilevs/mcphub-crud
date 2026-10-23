@@ -12,6 +12,7 @@ import {
   getToolResultStats,
   compareToolResults,
   getToolResultTimeline,
+  getToolResultConversationTimeline,
   setToolResultPinned,
 } from '@/services/toolResultHistoryService';
 
@@ -140,6 +141,7 @@ const ToolResultsPage: React.FC = () => {
   const [timeline, setTimeline] = useState<ToolResultSummary[] | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState('');
+  const [timelineContext, setTimelineContext] = useState<{ kind: 'session' | 'conversation'; id: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -175,13 +177,22 @@ const ToolResultsPage: React.FC = () => {
 
   const runTimeline = async () => {
     const sessionId = filter.sessionId?.trim();
-    if (!sessionId) return;
+    const conversationId = filter.conversationId?.trim();
+    const context = sessionId
+      ? { kind: 'session' as const, id: sessionId }
+      : conversationId
+        ? { kind: 'conversation' as const, id: conversationId }
+        : null;
+    if (!context) return;
     setTimelineLoading(true);
     setTimelineError('');
     try {
-      const response = await getToolResultTimeline(sessionId);
+      const response = context.kind === 'session'
+        ? await getToolResultTimeline(context.id)
+        : await getToolResultConversationTimeline(context.id);
       if (response.success && response.data) setTimeline(response.data);
       else setTimelineError(response.message || t('toolResults.fetchError'));
+      setTimelineContext(context);
     } catch (cause) {
       setTimelineError(cause instanceof Error ? cause.message : t('toolResults.fetchError'));
     } finally {
@@ -209,12 +220,12 @@ const ToolResultsPage: React.FC = () => {
       <select className="hub-input" value={draft.status || ''} onChange={(e) => setDraft({ ...draft, status: (e.target.value || undefined) as ToolResultFilter['status'] })}><option value="">{t('toolResults.allStatuses')}</option><option value="success">success</option><option value="error">error</option></select>
       <label className="flex items-center gap-2 px-2 text-sm"><input type="checkbox" checked={draft.pinned === true} onChange={(e) => setDraft({ ...draft, pinned: e.target.checked ? true : undefined })} />{t('toolResults.pinnedOnly')}</label>
       <button className="hub-btn hub-btn-primary active:scale-[0.98]" type="submit"><Search size={15} /> {t('common.search')}</button>
-      {filter.sessionId && <button className="hub-btn active:scale-[0.98]" type="button" onClick={() => void runTimeline()}><Clock3 size={15} /> {t('toolResults.timeline')}</button>}
+      {(filter.sessionId || filter.conversationId) && <button className="hub-btn active:scale-[0.98]" type="button" onClick={() => void runTimeline()}><Clock3 size={15} /> {t('toolResults.timeline')}</button>}
     </form>
     {error && <div className="hub-card p-4 text-sm text-red-500">{error}</div>}
     {timelineError && !timeline && <div className="hub-card p-4 text-sm text-red-500">{timelineError}</div>}
     {timeline && <div className="hub-card p-3">
-      <div className="flex items-center justify-between gap-2"><div><div className="text-sm font-medium">{t('toolResults.timeline')}</div><div className="hub-mono text-xs text-[var(--hub-ink-3)] truncate">{filter.sessionId}</div></div><button className="hub-btn" onClick={() => setTimeline(null)}>{t('common.close')}</button></div>
+      <div className="flex items-center justify-between gap-2"><div><div className="text-sm font-medium">{t('toolResults.timeline')}</div><div className="hub-mono text-xs text-[var(--hub-ink-3)] truncate">{timelineContext?.id}</div></div><button className="hub-btn" onClick={() => { setTimeline(null); setTimelineContext(null); }}>{t('common.close')}</button></div>
       {timelineError && <div className="mt-2 text-sm text-red-500">{timelineError}</div>}
       {!timelineLoading && timeline.length === 0 && <div className="mt-3 text-sm text-[var(--hub-ink-3)]">{t('toolResults.timelineEmpty')}</div>}
       <div className="mt-3 space-y-2">{timeline.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 hover:bg-[var(--hub-surface-hover)]"><div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{item.server} / {item.tool}</span><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span></div><div className="mt-1 text-xs text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()} · {item.durationMs} ms · {bytes(item.rawBytes)}</div></Link>)}</div>

@@ -25,6 +25,7 @@ import {
   searchToolResults,
   compareToolResults,
   getToolResultTimeline,
+  getToolResultConversationTimeline,
 } from '../../src/controllers/toolResultController.js';
 
 const makeReq = (overrides: Record<string, unknown> = {}) =>
@@ -153,6 +154,13 @@ describe('toolResultController', () => {
     const res = makeRes();
     await getToolResultTimeline(makeReq({ params: { sessionId: 's-1' }, query: { limit: '50' } }), res);
     expect(repository.findPaginated).toHaveBeenCalledWith(1, 50, { sessionId: 's-1' });
+  });
+
+  it('returns a bounded timeline for a conversation', async () => {
+    repository.findPaginated.mockResolvedValue({ data: [], total: 0, page: 1, limit: 40, totalPages: 0 });
+    const res = makeRes();
+    await getToolResultConversationTimeline(makeReq({ params: { conversationId: 'c-1' }, query: { limit: '40' } }), res);
+    expect(repository.findPaginated).toHaveBeenCalledWith(1, 40, { conversationId: 'c-1' });
   });
 
   it('compares exactly two result records without exposing RAW', async () => {

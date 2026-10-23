@@ -88,6 +88,20 @@ export const getToolResultTimeline = async (req: Request, res: Response): Promis
   res.json({ success: true, data: result.data.map(publicRecord), pagination: { ...result, totalPages: 1 } });
 };
 
+export const getToolResultConversationTimeline = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
+  const repository = requireRepository(res);
+  if (!repository) return;
+  const conversationId = String(req.params.conversationId || '').trim();
+  const limit = Number.parseInt(String(req.query.limit ?? '100'), 10);
+  if (!conversationId || !Number.isInteger(limit) || limit < 1 || limit > 500) {
+    res.status(400).json({ success: false, message: 'Invalid conversation timeline request' });
+    return;
+  }
+  const result = await repository.findPaginated(1, limit, { conversationId });
+  res.json({ success: true, data: result.data.map(publicRecord), pagination: { ...result, totalPages: 1 } });
+};
+
 export const getToolResultById = async (req: Request, res: Response): Promise<void> => {
   if (!(await requireAdmin(req, res))) return;
   const repository = requireRepository(res);
