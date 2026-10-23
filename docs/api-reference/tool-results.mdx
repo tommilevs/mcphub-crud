@@ -23,6 +23,7 @@ GET /api/tool-results/search?q=failed+deployment&limit=20
 GET /api/tool-results/:resultId
 GET /api/tool-results/:resultId/raw
 GET /api/tool-results/:resultId/range?start=0&end=4096
+GET /api/tool-results/:resultId/chunks
 GET /api/tool-results/:resultId/search?q=Xid+79&limit=10
 ```
 
@@ -30,6 +31,7 @@ Search uses hybrid vector plus PostgreSQL full-text retrieval when the vector pa
 
 RAW is never returned by list, search, or metadata endpoints. Metadata-only records return `409` from RAW endpoints with the configured omission reason.
 The result-scoped search endpoint searches indexed original chunks and returns retrieval scores without rewriting or exposing the full RAW payload.
+The chunks endpoint returns the exact indexed chunk text with chunk version, byte size, and embedding availability/dimensions. It does not mutate or rewrite immutable RAW.
 
 ## Sessions, lineage, pinning, and comparison
 

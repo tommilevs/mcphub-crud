@@ -90,3 +90,13 @@ export interface ToolResultChunkHit {
   lexicalRank?: number;
   vectorRank?: number;
 }
+
+export interface ToolResultChunk {
+  resultId: string;
+  chunkIndex: number;
+  chunkVersion: number;
+  content: string;
+  contentBytes: number;
+  hasEmbedding: boolean;
+  embeddingDimensions?: number;
+}

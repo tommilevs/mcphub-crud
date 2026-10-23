@@ -4,6 +4,7 @@ import type {
   ToolResultStats,
   ToolResultSearchHit,
   ToolResultChunkHit,
+  ToolResultChunk,
 } from '../../types/toolResult.js';
 import type {
   ToolResultPage,
@@ -240,6 +241,28 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
       retrievalScore: Number(row.retrieval_score ?? 0),
       lexicalRank: row.lexical_rank == null ? undefined : Number(row.lexical_rank),
       vectorRank: row.vector_rank == null ? undefined : Number(row.vector_rank),
+    }));
+  }
+
+  async listChunks(resultId: string): Promise<ToolResultChunk[]> {
+    const rows = await this.dataSource.query<ToolResultRow[]>(
+      `SELECT result_id, chunk_index, chunk_version, content,
+         octet_length(content)::integer AS content_bytes,
+         embedding IS NOT NULL AS has_embedding,
+         CASE WHEN embedding IS NULL THEN NULL ELSE vector_dims(embedding) END AS embedding_dimensions
+       FROM tool_result_chunks
+       WHERE result_id = $1
+       ORDER BY chunk_index ASC, chunk_version ASC`,
+      [resultId],
+    );
+    return rows.map((row) => ({
+      resultId: String(row.result_id),
+      chunkIndex: Number(row.chunk_index),
+      chunkVersion: Number(row.chunk_version),
+      content: String(row.content),
+      contentBytes: Number(row.content_bytes ?? 0),
+      hasEmbedding: row.has_embedding === true || row.has_embedding === 't',
+      embeddingDimensions: row.embedding_dimensions == null ? undefined : Number(row.embedding_dimensions),
     }));
   }
 

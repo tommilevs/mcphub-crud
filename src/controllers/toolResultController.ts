@@ -248,6 +248,29 @@ export const searchToolResultChunks = async (req: Request, res: Response): Promi
   res.json({ success: true, data, meta: searchDiagnostics(data, mode) });
 };
 
+export const getToolResultChunks = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
+  const repository = requireRepository(res);
+  if (!repository) return;
+  if (!repository.listChunks) {
+    res.status(503).json({ success: false, message: 'Tool result chunks are unavailable' });
+    return;
+  }
+  const resultId = String(req.params.id || '').trim();
+  if (!resultId) {
+    res.status(400).json({ success: false, message: 'Invalid result id' });
+    return;
+  }
+  const record = await repository.findById(resultId);
+  if (!record) {
+    res.status(404).json({ success: false, message: 'Tool result not found' });
+    return;
+  }
+  const data = await repository.listChunks(resultId);
+  await repository.incrementUseCount(resultId);
+  res.json({ success: true, data });
+};
+
 export const searchToolResults = async (req: Request, res: Response): Promise<void> => {
   if (!(await requireAdmin(req, res))) return;
   const repository = requireRepository(res);

@@ -8,6 +8,7 @@ import type {
   ToolResultCompare,
   ToolResultLineage,
   ToolResultChunkHit,
+  ToolResultChunk,
   ToolResultSearchDiagnostics,
 } from '@/types';
 import { apiGet, apiPatch, apiPost, fetchWithInterceptors } from '@/utils/fetchInterceptor';
@@ -59,6 +60,9 @@ export const searchToolResultChunks = (
   limit = 10,
 ): Promise<ApiResponse<ToolResultChunkHit[]>> =>
   apiGet(`/tool-results/${encodeURIComponent(resultId)}/search?${query({ q: searchQuery, limit })}`);
+
+export const getToolResultChunks = (resultId: string): Promise<ApiResponse<ToolResultChunk[]>> =>
+  apiGet(`/tool-results/${encodeURIComponent(resultId)}/chunks`);
 
 export const getToolResult = (resultId: string): Promise<ApiResponse<ToolResultDetail>> =>
   apiGet(`/tool-results/${encodeURIComponent(resultId)}`);

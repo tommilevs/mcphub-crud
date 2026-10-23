@@ -6,6 +6,7 @@ import type {
   ToolResultStats,
   ToolResultSearchHit,
   ToolResultChunkHit,
+  ToolResultChunk,
 } from '../types/toolResult.js';
 
 export interface ToolResultPage {
@@ -33,6 +34,7 @@ export interface ToolResultRepository {
     embedding: number[] | null,
     limit: number,
   ): Promise<ToolResultChunkHit[]>;
+  listChunks?(resultId: string): Promise<ToolResultChunk[]>;
   hybridSearch?(query: string, embedding: number[] | null, limit: number, filter?: ToolResultFilter): Promise<ToolResultSearchHit[]>;
   setPinned(resultId: string, pinned: boolean): Promise<ToolResultRecord | null>;
   incrementUseCount(resultId: string): Promise<void>;

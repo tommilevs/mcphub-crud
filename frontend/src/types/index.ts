@@ -997,6 +997,16 @@ export interface ToolResultChunkHit {
   vectorRank?: number;
 }
 
+export interface ToolResultChunk {
+  resultId: string;
+  chunkIndex: number;
+  chunkVersion: number;
+  content: string;
+  contentBytes: number;
+  hasEmbedding: boolean;
+  embeddingDimensions?: number;
+}
+
 export interface ToolResultSearchDiagnostics {
   mode: 'hybrid' | 'lexical';
   resultCount: number;

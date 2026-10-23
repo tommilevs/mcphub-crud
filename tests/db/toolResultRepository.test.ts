@@ -107,4 +107,18 @@ describe('ToolResultRepositoryDb', () => {
     expect(sql).toContain('retrieval_score');
     expect(params).toEqual(['result-1', 'Xid 79', '[0.1,0.2]', 5]);
   });
+
+  it('lists exact indexed chunks with embedding metadata', async () => {
+    const query = jest.fn().mockResolvedValue([
+      { result_id: 'result-1', chunk_index: '0', chunk_version: '1', content: 'first', content_bytes: 5, has_embedding: false, embedding_dimensions: null },
+      { result_id: 'result-1', chunk_index: '1', chunk_version: '1', content: 'second', content_bytes: 6, has_embedding: true, embedding_dimensions: 2 },
+    ]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+
+    await expect(repository.listChunks('result-1')).resolves.toEqual([
+      { resultId: 'result-1', chunkIndex: 0, chunkVersion: 1, content: 'first', contentBytes: 5, hasEmbedding: false, embeddingDimensions: undefined },
+      { resultId: 'result-1', chunkIndex: 1, chunkVersion: 1, content: 'second', contentBytes: 6, hasEmbedding: true, embeddingDimensions: 2 },
+    ]);
+    expect(query.mock.calls[0][1]).toEqual(['result-1']);
+  });
 });

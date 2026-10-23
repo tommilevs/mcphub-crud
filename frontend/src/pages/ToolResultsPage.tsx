@@ -3,7 +3,7 @@ import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-r
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
-import type { PaginationInfo, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
+import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
   getToolResult,
   getToolResultRaw,
@@ -15,6 +15,7 @@ import {
   getToolResultConversationTimeline,
   getToolResultLineage,
   searchToolResultChunks,
+  getToolResultChunks,
   setToolResultPinned,
 } from '@/services/toolResultHistoryService';
 
@@ -38,9 +39,11 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const [chunkHits, setChunkHits] = useState<ToolResultChunkHit[]>([]);
   const [chunkLoading, setChunkLoading] = useState(false);
   const [chunkError, setChunkError] = useState('');
+  const [chunks, setChunks] = useState<ToolResultChunk[]>([]);
+  const [chunksError, setChunksError] = useState('');
 
   useEffect(() => {
-    Promise.allSettled([getToolResult(resultId), getToolResultRaw(resultId), getToolResultLineage(resultId)]).then(([metadata, payload, related]) => {
+    Promise.allSettled([getToolResult(resultId), getToolResultRaw(resultId), getToolResultLineage(resultId), getToolResultChunks(resultId)]).then(([metadata, payload, related, indexed]) => {
       if (metadata.status === 'fulfilled' && metadata.value.success && metadata.value.data) {
         setDetail(metadata.value.data);
       } else {
@@ -49,6 +52,9 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
       if (payload.status === 'fulfilled') setRaw(payload.value);
       else setError(payload.reason instanceof Error ? payload.reason.message : t('toolResults.noPayload'));
       if (related.status === 'fulfilled' && related.value.success && related.value.data) setLineage(related.value.data);
+      if (indexed.status === 'fulfilled' && indexed.value.success && indexed.value.data) setChunks(indexed.value.data);
+      else if (indexed.status === 'rejected') setChunksError(indexed.reason instanceof Error ? indexed.reason.message : t('toolResults.fetchError'));
+      else if (indexed.status === 'fulfilled' && !indexed.value.success) setChunksError(indexed.value.message || t('toolResults.fetchError'));
     });
   }, [resultId, t]);
 
@@ -123,6 +129,15 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
         {lineage.ancestors.length > 0 && <div><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.ancestors')}</div><div className="mt-1 space-y-1">{lineage.ancestors.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 text-xs hover:bg-[var(--hub-surface-hover)]"><span className="font-medium">{item.server} / {item.tool}</span><span className="ml-2 text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()}</span></Link>)}</div></div>}
         {lineage.children.length > 0 && <div><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.children')}</div><div className="mt-1 space-y-1">{lineage.children.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 text-xs hover:bg-[var(--hub-surface-hover)]"><span className="font-medium">{item.server} / {item.tool}</span><span className="ml-2 text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()}</span></Link>)}</div></div>}
       </div>}
+      <div className="hub-card p-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-sm font-medium">{t('toolResults.chunks')}</span>
+          <span className="text-xs text-[var(--hub-ink-3)]">{chunks.length} · {chunks.filter((chunk) => chunk.hasEmbedding).length} {t('toolResults.embedded')}</span>
+        </div>
+        {chunksError && <div className="mt-2 text-sm text-red-500">{chunksError}</div>}
+        {!chunksError && chunks.length === 0 && <div className="mt-2 text-sm text-[var(--hub-ink-3)]">{t('toolResults.noChunks')}</div>}
+        {chunks.length > 0 && <div className="mt-3 space-y-2">{chunks.map((chunk) => <div key={`${chunk.chunkIndex}-${chunk.chunkVersion}`} className="rounded border border-[var(--hub-line)] p-2"><div className="flex items-center justify-between gap-2 text-xs text-[var(--hub-ink-3)]"><span>{t('toolResults.chunk')} #{chunk.chunkIndex} · v{chunk.chunkVersion} · {bytes(chunk.contentBytes)}</span><span>{chunk.hasEmbedding ? `${t('toolResults.embedded')} ${chunk.embeddingDimensions || ''}` : t('toolResults.noEmbedding')}</span></div><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs hub-mono">{chunk.content}</pre></div>)}</div>}
+      </div>
       <div className="hub-card p-3">
         <div className="text-sm font-medium">{t('toolResults.searchInside')}</div>
         <form className="mt-2 flex flex-wrap gap-2" onSubmit={(event) => { event.preventDefault(); void searchChunks(); }}>
