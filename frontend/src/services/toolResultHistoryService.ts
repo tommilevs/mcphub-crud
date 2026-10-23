@@ -8,6 +8,7 @@ import type {
   ToolResultCompare,
   ToolResultLineage,
   ToolResultChunkHit,
+  ToolResultSearchDiagnostics,
 } from '@/types';
 import { apiGet, apiPatch, apiPost, fetchWithInterceptors } from '@/utils/fetchInterceptor';
 import { getApiUrl } from '@/utils/runtime';
@@ -29,7 +30,7 @@ export const getToolResults = (
   page: number,
   limit: number,
   filter: ToolResultFilter,
-): Promise<ApiResponse<ToolResultSummary[]> & { pagination?: PaginationInfo }> =>
+): Promise<ApiResponse<ToolResultSummary[]> & { pagination?: PaginationInfo; meta?: ToolResultSearchDiagnostics }> =>
   filter.query
     ? apiGet(`/tool-results/search?${query({ q: filter.query, limit, ...filter, query: undefined })}`)
     : apiGet(`/tool-results?${query({ page, limit, ...filter })}`);

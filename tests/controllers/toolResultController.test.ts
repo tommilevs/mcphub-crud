@@ -141,6 +141,13 @@ describe('toolResultController', () => {
     await searchToolResults(makeReq({ query: { q: 'Xid 79', limit: '10' } }), res);
 
     expect(repository.search).toHaveBeenCalledWith('Xid 79', 10, {});
+    expect((res.json as jest.Mock).mock.calls[0][0].meta).toEqual(expect.objectContaining({
+      mode: 'lexical',
+      resultCount: 0,
+      lexicalMatches: 0,
+      vectorMatches: 0,
+      fusedMatches: 0,
+    }));
   });
 
   it('pins mutable state without updating RAW', async () => {

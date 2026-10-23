@@ -501,6 +501,7 @@ export interface ApiResponse<T = any> {
   success: boolean;
   message?: string;
   data?: T;
+  meta?: Record<string, unknown>;
   errors?: string[];
 }
 
@@ -994,6 +995,14 @@ export interface ToolResultChunkHit {
   retrievalScore: number;
   lexicalRank?: number;
   vectorRank?: number;
+}
+
+export interface ToolResultSearchDiagnostics {
+  mode: 'hybrid' | 'lexical';
+  resultCount: number;
+  lexicalMatches: number;
+  vectorMatches: number;
+  fusedMatches: number;
 }
 
 export interface ToolResultLineage {

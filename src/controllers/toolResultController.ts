@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import type { ToolResultFilter, ToolResultRecord } from '../types/toolResult.js';
+import type { ToolResultFilter, ToolResultRecord, ToolResultSearchDiagnostics } from '../types/toolResult.js';
 import {
   getToolResultRepository,
   isToolResultHistoryAvailable,
@@ -35,6 +35,22 @@ const parseFilter = (req: Request): ToolResultFilter => {
   if (typeof req.query.startDate === 'string') filter.startDate = new Date(req.query.startDate);
   if (typeof req.query.endDate === 'string') filter.endDate = new Date(req.query.endDate);
   return filter;
+};
+
+const searchDiagnostics = (
+  data: unknown[],
+  mode: 'hybrid' | 'lexical',
+): ToolResultSearchDiagnostics => {
+  const hits = data as Array<{ lexicalRank?: number; vectorRank?: number }>;
+  const lexicalMatches = hits.filter((hit) => hit.lexicalRank != null).length;
+  const vectorMatches = hits.filter((hit) => hit.vectorRank != null).length;
+  return {
+    mode,
+    resultCount: data.length,
+    lexicalMatches,
+    vectorMatches,
+    fusedMatches: hits.filter((hit) => hit.lexicalRank != null && hit.vectorRank != null).length,
+  };
 };
 
 export const checkToolResultHistoryAvailable = async (
@@ -229,7 +245,7 @@ export const searchToolResultChunks = async (req: Request, res: Response): Promi
   const data = await repository.searchChunks(resultId, query, embedding, limit);
   await repository.incrementUseCount(resultId);
   recordToolResultSearch(mode);
-  res.json({ success: true, data, meta: { mode } });
+  res.json({ success: true, data, meta: searchDiagnostics(data, mode) });
 };
 
 export const searchToolResults = async (req: Request, res: Response): Promise<void> => {
@@ -257,7 +273,7 @@ export const searchToolResults = async (req: Request, res: Response): Promise<vo
     data = await repository.search(query, limit, parseFilter(req));
   }
   recordToolResultSearch(mode);
-  res.json({ success: true, data: data.map(publicRecord), meta: { mode } });
+  res.json({ success: true, data: data.map(publicRecord), meta: searchDiagnostics(data, mode) });
 };
 
 export const pinToolResult = async (req: Request, res: Response): Promise<void> => {

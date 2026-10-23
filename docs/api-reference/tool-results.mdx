@@ -26,7 +26,7 @@ GET /api/tool-results/:resultId/range?start=0&end=4096
 GET /api/tool-results/:resultId/search?q=Xid+79&limit=10
 ```
 
-Search uses hybrid vector plus PostgreSQL full-text retrieval when the vector path is available and falls back to lexical search when it is not. The response exposes `meta.mode`. The range endpoint returns UTF-8 bytes with `206 Partial Content`, `Accept-Ranges`, and `Content-Range` headers.
+Search uses hybrid vector plus PostgreSQL full-text retrieval when the vector path is available and falls back to lexical search when it is not. The response exposes `meta.mode`, `resultCount`, and how many returned hits have lexical, vector, or fused ranks. The range endpoint returns UTF-8 bytes with `206 Partial Content`, `Accept-Ranges`, and `Content-Range` headers.
 
 RAW is never returned by list, search, or metadata endpoints. Metadata-only records return `409` from RAW endpoints with the configured omission reason.
 The result-scoped search endpoint searches indexed original chunks and returns retrieval scores without rewriting or exposing the full RAW payload.

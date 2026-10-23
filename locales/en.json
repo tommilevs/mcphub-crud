@@ -1500,6 +1500,11 @@
     "searchInside": "Search inside RAW",
     "searchInsidePlaceholder": "Find evidence in this saved result",
     "noChunkMatches": "No matching chunks",
-    "chunk": "Chunk"
+    "chunk": "Chunk",
+    "searchDiagnostics": "Search diagnostics",
+    "hits": "hits",
+    "lexical": "lexical",
+    "vector": "vector",
+    "fused": "fused"
   }
 }

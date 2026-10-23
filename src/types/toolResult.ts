@@ -73,6 +73,14 @@ export interface ToolResultSearchHit extends ToolResultRecord {
   vectorRank?: number;
 }
 
+export interface ToolResultSearchDiagnostics {
+  mode: 'hybrid' | 'lexical';
+  resultCount: number;
+  lexicalMatches: number;
+  vectorMatches: number;
+  fusedMatches: number;
+}
+
 export interface ToolResultChunkHit {
   resultId: string;
   chunkIndex: number;

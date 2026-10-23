@@ -3,7 +3,7 @@ import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-r
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
-import type { PaginationInfo, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultStats, ToolResultSummary } from '@/types';
+import type { PaginationInfo, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
   getToolResult,
   getToolResultRaw,
@@ -184,11 +184,16 @@ const ToolResultsPage: React.FC = () => {
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState('');
   const [timelineContext, setTimelineContext] = useState<{ kind: 'session' | 'conversation'; id: string } | null>(null);
+  const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<ToolResultSearchDiagnostics | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
     const [list, totals] = await Promise.all([getToolResults(page, 20, filter), getToolResultStats(filter)]);
-    if (list.success && list.data) { setItems(list.data); setPagination(list.pagination || (filter.query ? { page: 1, limit: 20, total: list.data.length, totalPages: 1, hasNextPage: false, hasPrevPage: false } : null)); }
+    if (list.success && list.data) {
+      setItems(list.data);
+      setRetrievalDiagnostics(filter.query && list.meta ? list.meta : null);
+      setPagination(list.pagination || (filter.query ? { page: 1, limit: 20, total: list.data.length, totalPages: 1, hasNextPage: false, hasPrevPage: false } : null));
+    }
     else setError(list.message || t('toolResults.fetchError'));
     if (totals.success && totals.data) setStats(totals.data);
     setLoading(false);
@@ -251,6 +256,7 @@ const ToolResultsPage: React.FC = () => {
       {[[t('toolResults.total'), stats.total], [t('toolResults.pinned'), stats.pinned], [t('toolResults.payloads'), stats.payloadAvailable], [t('toolResults.storage'), bytes(stats.totalRawBytes)]].map(([label, value]) => <div key={label} className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{label}</div><div className="hub-num mt-1 text-xl">{value}</div></div>)}
     </div>}
     {stats?.retrieval && <div className="hub-card px-3 py-2 text-xs text-[var(--hub-ink-3)]">{t('toolResults.retrievalMetrics')}: {stats.retrieval.searches} {t('toolResults.searches')} · {stats.retrieval.hybridSearches} {t('toolResults.hybrid')} · {stats.retrieval.indexFailures} {t('toolResults.indexFailures')}</div>}
+    {retrievalDiagnostics && <div className="hub-card px-3 py-2 text-xs text-[var(--hub-ink-3)]">{t('toolResults.searchDiagnostics')}: {retrievalDiagnostics.mode} · {retrievalDiagnostics.resultCount} {t('toolResults.hits')} · {retrievalDiagnostics.lexicalMatches} {t('toolResults.lexical')} · {retrievalDiagnostics.vectorMatches} {t('toolResults.vector')} · {retrievalDiagnostics.fusedMatches} {t('toolResults.fused')}</div>}
     <form className="hub-card p-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setPage(1); setFilter({ ...draft, startDate: draft.startDate ? new Date(draft.startDate).toISOString() : undefined, endDate: draft.endDate ? new Date(draft.endDate).toISOString() : undefined }); }}>
       <input className="hub-input min-w-56 flex-1" placeholder={t('toolResults.query')} value={draft.query || ''} onChange={(e) => setDraft({ ...draft, query: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.server')} value={draft.server || ''} onChange={(e) => setDraft({ ...draft, server: e.target.value })} />
