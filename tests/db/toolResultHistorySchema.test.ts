@@ -16,5 +16,7 @@ describe('ensureToolResultHistorySchema', () => {
     expect(sql).toContain('tool_results_search_idx');
     expect(sql).toContain('tool_results_session_idx');
     expect(sql).toContain('tool_results_conversation_idx');
+    expect(sql).toContain('ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS raw_text');
+    expect(sql).toContain('ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS payload_available');
   });
 });

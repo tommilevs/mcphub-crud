@@ -50,6 +50,26 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
       ON tool_result_chunks USING gin (to_tsvector('simple', content));
   `);
 
+  // The history tables are created outside TypeORM migrations so the feature
+  // can be enabled on an existing MCPHub database. Keep upgrades additive:
+  // CREATE TABLE IF NOT EXISTS does not add columns to an older installation.
+  await dataSource.query(`
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS group_name varchar(255);
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS username varchar(255);
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS key_id varchar(255);
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS session_id varchar(255);
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS conversation_id varchar(255);
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS parent_result_id uuid;
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS objective text;
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS arguments text;
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS raw text;
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS raw_text text;
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS raw_bytes bigint NOT NULL DEFAULT 0;
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS raw_sha256 char(64);
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS payload_available boolean NOT NULL DEFAULT TRUE;
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS payload_omission_reason text;
+  `);
+
   await dataSource.query(`
     CREATE INDEX IF NOT EXISTS tool_results_timestamp_idx
       ON tool_results (timestamp DESC, result_id DESC);
