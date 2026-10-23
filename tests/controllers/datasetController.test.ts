@@ -27,7 +27,7 @@ test.each([{resultIds:[]},{resultIds:['bad']},{resultIds:[id],allowSelfReported:
 test('scope is authenticated owner and explicit key, missing IDs are not existence leaks',async()=>{
   query.mockResolvedValue([]);const res=response();
   await previewDataset({user:{isAdmin:true,username:'owner'},body:{resultIds:[id],keyId:'own-key'}} as Request,res as unknown as Response);
-  expect(query.mock.calls[0][1]).toEqual([[id],'owner','own-key']);
+  expect(query.mock.calls[0][1]).toEqual([[id],'owner','own-key',false]);
   expect(res.json.mock.calls[0][0].data.excluded).toEqual({unavailable_or_out_of_scope:1});
 });
 

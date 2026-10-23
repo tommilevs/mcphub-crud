@@ -372,18 +372,18 @@ suite('attribution PostgreSQL isolated schema', () => {
     const oldFlag=process.env.MCPHUB_DATASET_BUILDER_ENABLED;process.env.MCPHUB_DATASET_BUILDER_ENABLED='true';
     const context=await service.start('dataset-owner'),id=randomUUID(),digest='d'.repeat(64);
     const tools=[{name:'demo-read',inputSchema:{type:'object'}}];
-    await pool.query(`INSERT INTO tool_results(result_id,username,key_id,raw,raw_sha256,objective,arguments,attribution)
-      VALUES($1,'dataset-owner',NULL,'do not export RAW',$2,'read a record','{}',$3)`,[id,digest,JSON.stringify({
+    await pool.query(`INSERT INTO tool_results(result_id,username,key_id,status,raw,raw_sha256,objective,arguments,attribution)
+      VALUES($1,'dataset-owner',NULL,'success','do not export RAW',$2,'read a record','{}',$3)`,[id,digest,JSON.stringify({
       taskId:context.taskId,traceId:context.traceId,branchId:context.branchId,modelSegmentId:context.modelSegmentId,
       invokedToolName:'demo-read',identity:{modelId:'observed',source:'gateway_observed',verified:true},provenance:{causalCorrelationVerified:true}})]);
     await pool.query(`INSERT INTO attribution_task_reviews(task_id,revision,outcome,training_consent,reviewed_by) VALUES($1,1,'success',true,'reviewer')`,[context.taskId]);
     await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,1,$2,'correct','approved','reviewer')`,[id,digest]);
     await pool.query(`INSERT INTO tool_result_training_contexts(result_id,revision,discovery_call_id,objective,tool_catalogue,privacy_approved,reviewed_by)
       VALUES($1,1,$2,'read a record',$3,true,'reviewer')`,[id,randomUUID(),JSON.stringify(tools)]);
-    const invoke=async(download:boolean,username='dataset-owner',split='train',seed='mcphub-v1')=>{
+    const invoke=async(download:boolean,username='dataset-owner',split='train',seed='mcphub-v1',format='tool-selection-sft',selection=[id])=>{
       let payload:any,body='';
       const res={json:(value:any)=>{payload=value;},setHeader:()=>{},send:(value:string)=>{body=value;},status:()=>{throw new Error('Dataset request failed');}};
-      await (download?exportDataset:previewDataset)({user:{isAdmin:true,username},body:{resultIds:[id],split,seed}} as unknown as Request,res as unknown as Response);
+      await (download?exportDataset:previewDataset)({user:{isAdmin:true,username},body:{resultIds:selection,split,seed,format}} as unknown as Request,res as unknown as Response);
       return {payload,body};
     };
     try{
@@ -412,6 +412,19 @@ suite('attribution PostgreSQL isolated schema', () => {
       }
       expect((await pool.query('SELECT count(*) FROM dataset_exports')).rows[0].count).toBe(beforeConflict);
       await pool.query('UPDATE dataset_split_registry SET split=$1 WHERE token_hash=$2',[split,traceToken]);
+      const second=randomUUID();
+      await pool.query(`INSERT INTO tool_results(result_id,username,key_id,status,raw,raw_sha256,objective,arguments,attribution,timestamp)
+        SELECT $2,username,key_id,'error',raw,raw_sha256,objective,'{"attempt":2}',attribution,timestamp+INTERVAL '1 second' FROM tool_results WHERE result_id=$1`,[id,second]);
+      await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,1,$2,'incorrect','approved','reviewer')`,[second,digest]);
+      await pool.query(`INSERT INTO tool_result_training_contexts(result_id,revision,discovery_call_id,objective,tool_catalogue,privacy_approved,reviewed_by)
+        VALUES($1,1,$2,'read a record',$3,true,'reviewer')`,[second,randomUUID(),JSON.stringify(tools)]);
+      const incomplete=(await invoke(false,'dataset-owner',split,'seed','recorded-tool-trajectory')).payload.data;
+      expect(incomplete.exported).toBe(0);expect(incomplete.excluded.trajectory_segment_incomplete).toBe(1);
+      const trajectory=JSON.parse((await invoke(true,'dataset-owner',split,'seed','recorded-tool-trajectory',[id,second])).body);
+      expect(trajectory.events.map((event:any)=>event.resultId)).toEqual([id,second]);
+      expect(trajectory.events[1]).toMatchObject({executionStatus:'error',quality:'incorrect'});
+      expect(trajectory.metadata).toMatchObject({split,originalConversationComplete:false,representation:'recorded-tool-trajectory'});
+      expect(trajectory).not.toHaveProperty('messages');expect(JSON.stringify(trajectory)).not.toContain('do not export RAW');
       expect((await invoke(false,'other-owner')).payload.data.exported).toBe(0);
       await pool.query(`INSERT INTO attribution_task_reviews(task_id,revision,outcome,training_consent,reviewed_by) VALUES($1,2,'success',false,'reviewer')`,[context.taskId]);
       expect((await invoke(false)).payload.data.excluded.training_consent_missing).toBe(1);

@@ -1,7 +1,7 @@
 import type {ApiResponse} from '@/types';
 import {apiGet,apiPost,fetchWithInterceptors} from '@/utils/fetchInterceptor';
 import {getApiUrl} from '@/utils/runtime';
-export interface DatasetSelection {resultIds:string[];keyId:string|null;allowSelfReported:boolean;seed:string}
+export interface DatasetSelection {resultIds:string[];keyId:string|null;allowSelfReported:boolean;seed:string;format?:string}
 export interface DatasetManifest {version:number;format:string;seed:string;selected:number;exported:number;duplicates:number;
   excluded:Record<string,number>;splits:Record<string,number>;contentSha256:string}
 export const getDatasetAvailability=()=>apiGet<ApiResponse<{enabled:boolean}>>('/datasets/available');

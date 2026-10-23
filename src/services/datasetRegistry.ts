@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {buildDataset,refreshDatasetManifest} from './datasetBuilder.js';
+import {refreshDatasetManifest,type DatasetArtifact} from './datasetBuilder.js';
 type Group={tokens:string[];fingerprints:string[];split:string};
 type Db={query(sql:string,parameters?:any[]):Promise<any[]>};
 export class DatasetSplitConflict extends Error{}
@@ -12,7 +12,7 @@ export function resolveDatasetGroups(groups:Group[],known:Map<string,string>):Gr
     return {...group,split:[...assigned][0]??group.split};
   });
 }
-export async function applyDatasetRegistry(db:Db,dataset:ReturnType<typeof buildDataset>,username:string,keyId:string|null){
+export async function applyDatasetRegistry(db:Db,dataset:DatasetArtifact,username:string,keyId:string|null){
   const scope=datasetOwnerScope(username,keyId);
   const tokens=[...new Set(dataset.groups.flatMap(group=>group.tokens))];
   const rows=tokens.length?await db.query(`SELECT token_hash,split FROM dataset_split_registry WHERE owner_scope=$1 AND token_hash=ANY($2::text[])`,[scope,tokens.map(digest)]):[];
@@ -23,7 +23,7 @@ export async function applyDatasetRegistry(db:Db,dataset:ReturnType<typeof build
   dataset.groups=groups;refreshDatasetManifest(dataset);
 }
 /** Caller holds the per-owner transaction lock; ledger commits before any bytes are returned. */
-export async function recordDatasetExport(db:Db,dataset:ReturnType<typeof buildDataset>,value:{username:string;keyId:string|null;split:string;ids:string[];content:string}){
+export async function recordDatasetExport(db:Db,dataset:DatasetArtifact,value:{username:string;keyId:string|null;split:string;ids:string[];content:string}){
   const scope=datasetOwnerScope(value.username,value.keyId),id=randomUUID();
   const groups=dataset.groups.filter(group=>group.split===value.split);
   const tokens=[...new Set(groups.flatMap(group=>group.tokens))].map(digest);
@@ -32,6 +32,6 @@ export async function recordDatasetExport(db:Db,dataset:ReturnType<typeof buildD
   const fileSha256=digest(value.content),byteLength=Buffer.byteLength(value.content,'utf8');
   await db.query(`INSERT INTO dataset_exports(export_id,username,key_id,split,selected_ids,exported_ids,manifest,file_sha256,byte_length)
     VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`,[id,value.username,value.keyId,value.split,value.ids,
-    dataset.examples.filter(row=>row.metadata.split===value.split).map(row=>row.metadata.resultId),JSON.stringify(dataset.manifest),fileSha256,byteLength]);
+    dataset.examples.filter(row=>row.metadata.split===value.split).flatMap(row=>row.metadata.resultIds??(row.metadata.resultId?[row.metadata.resultId]:[])),JSON.stringify(dataset.manifest),fileSha256,byteLength]);
   return {id,fileSha256,byteLength};
 }

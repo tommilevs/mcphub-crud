@@ -10,10 +10,11 @@ export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
   const [allowSelfReported,setAllowSelfReported]=useState(false);
   const [seed,setSeed]=useState('mcphub-v1');
   const [split,setSplit]=useState('train');
+  const [format,setFormat]=useState('tool-selection-sft');
   const [preview,setPreview]=useState<{key:string;data:DatasetManifest}>();
   const [busy,setBusy]=useState(false);
   const [error,setError]=useState('');
-  const selection={resultIds:[...resultIds].sort(),keyId:keyId.trim()||null,allowSelfReported,seed};
+  const selection={resultIds:[...resultIds].sort(),keyId:keyId.trim()||null,allowSelfReported,seed,format};
   const selectionKey=JSON.stringify(selection);
   const manifest=preview?.key===selectionKey?preview.data:undefined;
   useEffect(()=>{
@@ -29,7 +30,7 @@ export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
         const blob=await downloadDataset(selection,split);
         if(!blob.size){setPreview(undefined);throw new Error(t('datasets.empty','No eligible examples remain. Refresh the preview.'));}
         const url=URL.createObjectURL(blob),link=document.createElement('a');
-        link.href=url;link.download=`mcphub-sft-${split}.jsonl`;document.body.appendChild(link);link.click();link.remove();
+        link.href=url;link.download=`mcphub-${format==='recorded-tool-trajectory'?'trajectory':'sft'}-${split}.jsonl`;document.body.appendChild(link);link.click();link.remove();
         setTimeout(()=>URL.revokeObjectURL(url),1000);
       }else{
         const response=await previewDataset(selection);
@@ -49,6 +50,11 @@ export default function DatasetBuilderPanel({resultIds}:{resultIds:string[]}){
         <label className="text-xs">{t('datasets.seed','Split seed')}<input className="hub-input mt-1 w-full" value={seed} maxLength={128} disabled={busy} onChange={event=>setSeed(event.target.value)}/></label>
       </div>
       <label className="flex items-start gap-2 text-xs"><input type="checkbox" checked={allowSelfReported} disabled={busy} onChange={event=>setAllowSelfReported(event.target.checked)}/>{t('datasets.allowSelf','Include self-reported models explicitly; these examples remain unverified.')}</label>
+      <label className="block text-xs">{t('datasets.format','Export format')}<select className="hub-input mt-1 block" value={format} disabled={busy} onChange={event=>setFormat(event.target.value)}>
+        <option value="tool-selection-sft">{t('datasets.sftFormat','Positive tool-selection SFT')}</option>
+        <option value="recorded-tool-trajectory">{t('datasets.trajectoryFormat','Recorded tool trajectories by model segment')}</option>
+      </select></label>
+      {format==='recorded-tool-trajectory'&&<p className="text-xs text-[var(--hub-ink-3)]">{t('datasets.trajectoryHelp','Select every retained call in each model segment. Reviewed errors stay labeled as errors. Results are references; hidden client conversation and final answers are not reconstructed.')}</p>}
       <p className="text-xs text-[var(--hub-ink-3)]">{t('datasets.registryHelp','Earlier exports keep related tasks, traces and duplicate examples in the same split, even if the seed changes. Conflicting past assignments block export. Previews are provisional until download.')}</p>
       <button type="button" className="hub-btn" disabled={busy||resultIds.length>100||!seed} onClick={()=>run(false)}>{t('datasets.preview','Preview eligibility')}</button>
       {manifest&&<div className="space-y-3">

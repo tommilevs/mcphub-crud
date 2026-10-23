@@ -30,7 +30,7 @@ registry without reserving assignments; concurrent exports may change a preview.
 The registry stores hashed linkage tokens and outlives result retention to avoid
 reintroducing leakage. It covers exports recorded after this feature was enabled;
 older external files cannot be retroactively inferred or audited. Export receipts
-are synchronous; background jobs and complete original trajectories remain pending.
+are synchronous; background jobs and complete original client conversations remain pending.
 Admin `POST /api/datasets/preview` and `/api/datasets/export` accept:
 
 ```json
@@ -59,8 +59,7 @@ split sizes, seed and content digest. Export requires one split (`train`,
 `validation`, `test`) and downloads JSONL, capped at 10 MiB. Responses are no-store.
 Connected components of shared task IDs, trace IDs and duplicate input examples
 are assigned together before the 80/10/10 split. Exact semantic input duplicates
-are emitted once. Keep the same frozen selection/seed when comparing splits;
-there is not yet a persistent cross-export leakage registry.
+are emitted once. Recorded prior assignments take precedence over a new seed.
 
 Version 1 is explicitly **derived direct tool-selection SFT**: objective and
 discovered catalogue are the prompt, reviewed backend tool/arguments are the
@@ -69,7 +68,26 @@ it does not claim to reconstruct the original client's entire conversation.
 Metadata preserves per-call model/segment, review revisions, task outcome and RAW
 digest/result ID. RAW contents, trace keys, fictional final answers and automatic
 training are excluded. DPO and full trajectories are not implemented by this
-format; execution success/failure alone never creates preference labels.
+SFT format; execution success/failure alone never creates preference labels.
+
+The separate `format: "recorded-tool-trajectory"` exports recorded tool events by
+task/trace/branch/model segment. Select **every currently retained call** in each
+segment; omitted, unreviewed, privacy-revoked or identity-conflicted calls exclude
+the whole segment rather than silently creating a partial success story. Each
+segment must have one known model. Trusted attribution remains the default and
+explicit self-report opt-in remains labeled unverified. Reviewed task outcomes
+may include failure; reviewed incorrect calls retain their quality and technical
+execution labels. This is observational trajectory data, not positive-only SFT.
+
+Events preserve objectives, available catalogues, actions, timestamps, review
+revisions, per-call identity provenance and result ID/digest references. No RAW
+contents, hidden client messages or final answers are reconstructed. Equal
+timestamps do not prove causal order. Coverage explicitly means all **currently
+retained** segment calls: old pruned events and original conversation completeness
+remain unknown. Separate segments are exported separately and share task/trace
+split constraints, including the same persistent registry used for SFT. The
+dashboard format selector invalidates an old preview when changed. DPO still
+requires separate reliable comparative labels and is not inferred from these traces.
 
 Select results with the history table checkboxes to open the Dataset Builder
 panel. It checks feature availability, offers the key scope and separate
