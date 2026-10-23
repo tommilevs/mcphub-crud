@@ -20,5 +20,20 @@ export const ensureAttributionContextSchema = async (db: {
     CREATE INDEX IF NOT EXISTS attribution_contexts_expiry_idx ON attribution_contexts (expires_at);
     CREATE INDEX IF NOT EXISTS attribution_contexts_principal_trace_idx
       ON attribution_contexts (principal, trace_id);
+    CREATE TABLE IF NOT EXISTS attribution_identity_events (
+      event_id uuid PRIMARY KEY,
+      context_id uuid NOT NULL REFERENCES attribution_contexts(context_id) ON DELETE CASCADE,
+      parent_context_id uuid,
+      task_id uuid NOT NULL,
+      trace_id uuid NOT NULL,
+      branch_id uuid,
+      model_segment_id uuid NOT NULL,
+      event_type varchar(32) NOT NULL CHECK (event_type IN ('context_started', 'branch_forked', 'model_rotated')),
+      occurred_at timestamptz NOT NULL,
+      claimed_model_id varchar(255),
+      identity_source varchar(32) NOT NULL CHECK (identity_source IN ('unknown', 'self_reported'))
+    );
+    CREATE INDEX IF NOT EXISTS attribution_identity_events_trace_idx
+      ON attribution_identity_events (trace_id, occurred_at, event_id);
   `);
 };

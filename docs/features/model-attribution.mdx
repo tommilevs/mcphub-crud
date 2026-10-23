@@ -30,6 +30,9 @@ and the new `model_claim` (or omit it for an unknown model). Rotation preserves
 task and trace, creates a fresh context/segment and key, and revokes the old key
 in one PostgreSQL statement. Concurrent rotation allows only one successor.
 Calls already running retain their original per-call snapshot.
+Context creation, branch creation and model rotation also append a PostgreSQL
+identity event in the same statement as the context mutation. Events contain
+server identifiers, time and unverified model claims, with no raw correlation key.
 
 Use `action: "fork"` with a current key to create a parallel branch of the same
 task/trace. The parent key remains valid. The child receives its own branch,

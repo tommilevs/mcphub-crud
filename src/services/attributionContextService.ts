@@ -29,7 +29,7 @@ export interface AttributionContextRecord {
 }
 
 export interface AttributionContextStore {
-  insert(record: AttributionContextRecord): Promise<void>;
+  insert(record: AttributionContextRecord, event?: 'context_started' | 'branch_forked', parentContextId?: string): Promise<void>;
   findByDigest(digest: string): Promise<AttributionContextRecord | null>;
   rotate?(oldDigest: string, next: AttributionContextRecord): Promise<boolean>;
 }
@@ -90,7 +90,7 @@ export class AttributionContextService {
       expiresAt: new Date(createdAt.getTime() + this.ttlMs), revokedAt: undefined,
       identity: { modelId, source: modelId ? 'self_reported' : 'unknown', verified: false },
     };
-    await this.store.insert(next);
+    await this.store.insert(next, 'branch_forked', previous.contextId);
     const { keyDigest: _digest, principal: _principal, ...context } = next;
     return { ...context, traceKey: nextKey };
   }
