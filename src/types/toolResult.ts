@@ -1,6 +1,8 @@
+import type { CallAttribution } from '../services/callAttribution.js';
 export type ToolResultStatus = 'success' | 'error';
 
 export interface ToolResultRecord {
+  attribution?: CallAttribution;
   resultId: string;
   timestamp: Date;
   server: string;

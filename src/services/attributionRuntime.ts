@@ -1,14 +1,17 @@
 import { AttributionContextService } from './attributionContextService.js';
 import { withAttributionHandshake } from './attributionHandshake.js';
 import { RequestContextService } from './requestContextService.js';
+import { runWithCallAttribution } from './callAttribution.js';
 
 export async function runWithAttribution(request: any, handler: (request: any) => Promise<any>) {
-  if (process.env.MCPHUB_ATTRIBUTION_MODE !== 'compatible' || !request.params?.arguments?.hub_context) {
+  if (process.env.MCPHUB_ATTRIBUTION_MODE !== 'compatible') {
     return handler(request);
   }
   const current = RequestContextService.getInstance().getRequestContext();
   // Anonymous requests lack a stable authenticated owner for correlation keys.
-  if (!current?.username && !current?.keyId) return handler(request);
+  if (!request.params?.arguments?.hub_context || (!current?.username && !current?.keyId)) {
+    return runWithCallAttribution(null, () => handler(request));
+  }
   const principal = JSON.stringify([current.username ?? null, current.keyId ?? null]);
   try {
     const [{ getAppDataSource }, { AttributionContextRepository }] = await Promise.all([
@@ -17,6 +20,6 @@ export async function runWithAttribution(request: any, handler: (request: any) =
     const service = new AttributionContextService(new AttributionContextRepository(getAppDataSource()));
     return withAttributionHandshake(request, principal, service, handler);
   } catch {
-    return handler(request);
+    return runWithCallAttribution(null, () => handler(request));
   }
 }

@@ -1,4 +1,5 @@
 import type { AttributionContextService } from './attributionContextService.js';
+import { runWithCallAttribution } from './callAttribution.js';
 
 /** The context belongs to the hub and must never become an upstream tool argument. */
 export async function withAttributionHandshake(
@@ -29,7 +30,7 @@ export async function withAttributionHandshake(
   } catch {
     // Attribution persistence must not prevent ordinary execution in compatible mode.
   }
-  const result = await handler(cleaned);
+  const result = await runWithCallAttribution(context ?? null, () => handler(cleaned));
   if (!context || !result || typeof result !== 'object') return result;
   return { ...result, _meta: { ...result._meta, 'dev.mcphub/context': {
     context_id: context.contextId, task_id: context.taskId, trace_id: context.traceId,

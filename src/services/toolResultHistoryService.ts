@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { getCallAttribution } from './callAttribution.js';
 import type {
   ToolResultCaptureInput,
   ToolResultFilter,
@@ -62,6 +63,7 @@ export class ToolResultHistoryService {
     const raw = capturePayload ? JSON.stringify(input.result ?? null) : null;
     const args = capturePayload ? JSON.stringify(input.arguments ?? {}) : null;
     const record: ToolResultRecord = {
+      attribution: getCallAttribution(),
       resultId: randomUUID(),
       timestamp: new Date(),
       server: input.server,

@@ -53,6 +53,7 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
   // CREATE TABLE IF NOT EXISTS does not add columns to an older installation.
   await dataSource.query(`
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS group_name varchar(255);
+    ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS attribution jsonb;
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS username varchar(255);
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS key_id varchar(255);
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS session_id varchar(255);

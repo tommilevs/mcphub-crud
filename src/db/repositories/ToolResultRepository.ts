@@ -18,6 +18,7 @@ type Queryable = {
 type ToolResultRow = Record<string, unknown>;
 
 const mapRow = (row: ToolResultRow): ToolResultRecord => ({
+  attribution: row.attribution as ToolResultRecord['attribution'] ?? undefined,
   resultId: String(row.result_id),
   timestamp: new Date(String(row.timestamp)),
   server: String(row.server),
@@ -62,10 +63,10 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
           INSERT INTO tool_results (
           result_id, timestamp, server, tool, duration_ms, status, group_name, username,
           key_id, session_id, conversation_id, parent_result_id, objective, arguments,
-          raw, raw_text, raw_bytes, raw_sha256, payload_available, payload_omission_reason
+          raw, raw_text, raw_bytes, raw_sha256, payload_available, payload_omission_reason, attribution
         ) VALUES (
           $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-          $15, $16, $17, $18, $19, $20
+          $15, $16, $17, $18, $19, $20, $21
           )
           RETURNING result_id
         )
@@ -92,6 +93,7 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
           record.rawSha256,
           record.payloadAvailable,
           record.payloadOmissionReason ?? null,
+          record.attribution ? JSON.stringify(record.attribution) : null,
         ],
     );
     return record;
