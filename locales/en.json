@@ -1479,6 +1479,8 @@
     "retrievalMetrics": "Retrieval metrics",
     "searches": "searches",
     "hybrid": "hybrid",
-    "indexFailures": "index failures"
+    "indexFailures": "index failures",
+    "timeline": "Session timeline",
+    "timelineEmpty": "No results found for this session"
   }
 }

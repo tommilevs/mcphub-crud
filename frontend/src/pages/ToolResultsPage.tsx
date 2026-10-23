@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Copy, Download, Pin, PinOff, Search } from 'lucide-react';
+import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
@@ -10,6 +10,7 @@ import {
   getToolResults,
   getToolResultStats,
   compareToolResults,
+  getToolResultTimeline,
   setToolResultPinned,
 } from '@/services/toolResultHistoryService';
 
@@ -96,6 +97,9 @@ const ToolResultsPage: React.FC = () => {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [comparison, setComparison] = useState<{ sameRaw: boolean; results: ToolResultSummary[] } | null>(null);
+  const [timeline, setTimeline] = useState<ToolResultSummary[] | null>(null);
+  const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelineError, setTimelineError] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -109,6 +113,22 @@ const ToolResultsPage: React.FC = () => {
   const runCompare = async () => {
     const response = await compareToolResults(selected);
     if (response.success && response.data) setComparison(response.data);
+  };
+
+  const runTimeline = async () => {
+    const sessionId = filter.sessionId?.trim();
+    if (!sessionId) return;
+    setTimelineLoading(true);
+    setTimelineError('');
+    try {
+      const response = await getToolResultTimeline(sessionId);
+      if (response.success && response.data) setTimeline(response.data);
+      else setTimelineError(response.message || t('toolResults.fetchError'));
+    } catch (cause) {
+      setTimelineError(cause instanceof Error ? cause.message : t('toolResults.fetchError'));
+    } finally {
+      setTimelineLoading(false);
+    }
   };
 
   useEffect(() => { if (!resultId) void load(); }, [load, resultId]);
@@ -128,8 +148,15 @@ const ToolResultsPage: React.FC = () => {
       <select className="hub-input" value={draft.status || ''} onChange={(e) => setDraft({ ...draft, status: (e.target.value || undefined) as ToolResultFilter['status'] })}><option value="">{t('toolResults.allStatuses')}</option><option value="success">success</option><option value="error">error</option></select>
       <label className="flex items-center gap-2 px-2 text-sm"><input type="checkbox" checked={draft.pinned === true} onChange={(e) => setDraft({ ...draft, pinned: e.target.checked ? true : undefined })} />{t('toolResults.pinnedOnly')}</label>
       <button className="hub-btn hub-btn-primary active:scale-[0.98]" type="submit"><Search size={15} /> {t('common.search')}</button>
+      {filter.sessionId && <button className="hub-btn active:scale-[0.98]" type="button" onClick={() => void runTimeline()}><Clock3 size={15} /> {t('toolResults.timeline')}</button>}
     </form>
     {error && <div className="hub-card p-4 text-sm text-red-500">{error}</div>}
+    {timeline && <div className="hub-card p-3">
+      <div className="flex items-center justify-between gap-2"><div><div className="text-sm font-medium">{t('toolResults.timeline')}</div><div className="hub-mono text-xs text-[var(--hub-ink-3)] truncate">{filter.sessionId}</div></div><button className="hub-btn" onClick={() => setTimeline(null)}>{t('common.close')}</button></div>
+      {timelineError && <div className="mt-2 text-sm text-red-500">{timelineError}</div>}
+      {!timelineLoading && timeline.length === 0 && <div className="mt-3 text-sm text-[var(--hub-ink-3)]">{t('toolResults.timelineEmpty')}</div>}
+      <div className="mt-3 space-y-2">{timeline.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 hover:bg-[var(--hub-surface-hover)]"><div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{item.server} / {item.tool}</span><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span></div><div className="mt-1 text-xs text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()} · {item.durationMs} ms · {bytes(item.rawBytes)}</div></Link>)}</div>
+    </div>}
     {selected.length >= 2 && <button className="hub-btn hub-btn-primary" onClick={() => void runCompare()}>{t('toolResults.compare')} ({selected.length})</button>}
     {comparison && <div className="hub-card p-3"><div className="flex items-center justify-between"><span className="text-sm font-medium">{t('toolResults.compare')}</span><button className="hub-btn" onClick={() => setComparison(null)}>{t('common.close')}</button></div><div className="mt-2 grid gap-2 md:grid-cols-2">{comparison.results.map((item) => <div key={item.resultId} className="rounded border border-[var(--hub-line)] p-2 text-xs"><div className="font-medium">{item.server} / {item.tool}</div><div className="hub-mono text-[var(--hub-ink-3)]">{item.resultId}</div><div>{new Date(item.timestamp).toLocaleString()} · {bytes(item.rawBytes)}</div></div>)}</div><div className="mt-2 text-xs text-[var(--hub-ink-3)]">{comparison.sameRaw ? t('toolResults.sameRaw') : t('toolResults.differentRaw')}</div></div>}
     <div className="hub-card overflow-x-auto">

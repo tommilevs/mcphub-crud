@@ -35,6 +35,12 @@ export const getToolResults = (
 export const getToolResultStats = (filter: ToolResultFilter): Promise<ApiResponse<ToolResultStats>> =>
   apiGet(`/tool-results/stats?${query(filter)}`);
 
+export const getToolResultTimeline = (
+  sessionId: string,
+  limit = 100,
+): Promise<ApiResponse<ToolResultSummary[]>> =>
+  apiGet(`/tool-results/timeline/${encodeURIComponent(sessionId)}?limit=${limit}`);
+
 export const getToolResult = (resultId: string): Promise<ApiResponse<ToolResultDetail>> =>
   apiGet(`/tool-results/${encodeURIComponent(resultId)}`);
 
