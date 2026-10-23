@@ -192,6 +192,11 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           {identityEventsCursor && <li><button type="button" className="hub-btn text-xs" disabled={identityEventsLoading} onClick={() => void loadIdentityEvents(true)}>{t('attribution.loadMore', 'Load more events')}</button></li>}
         </ol>}
       </section>}
+      {detail.trainingReadiness && <section className="hub-card p-3 space-y-2">
+        <h2 className="text-sm font-medium">{t('attribution.trainingReadiness', 'Training readiness')}</h2>
+        <p className="text-xs text-[var(--hub-ink-3)]">{t(`attribution.readiness.${detail.trainingReadiness.tier}`, detail.trainingReadiness.tier)}</p>
+        <ul className="list-disc pl-4 text-xs space-y-1">{detail.trainingReadiness.reasons.map((reason) => <li key={reason}>{t(`attribution.trainingReasons.${reason}`, reason)}</li>)}</ul>
+      </section>}
       {detail.objective && <div className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.objective')}</div><div className="mt-1 text-sm">{detail.objective}</div></div>}
       {lineage && (lineage.ancestors.length > 0 || lineage.children.length > 0) && <div className="hub-card p-3 space-y-3">
         <div className="text-sm font-medium">{t('toolResults.lineage')}</div>

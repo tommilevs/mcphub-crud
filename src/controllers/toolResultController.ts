@@ -5,14 +5,15 @@ import {
   isToolResultHistoryAvailable,
 } from '../services/toolResultHistoryRegistry.js';
 import { requireAdmin } from '../utils/requireAdmin.js';
+import { assessTrainingReadiness } from '../services/trainingReadiness.js';
 import { logger } from '../utils/logger.js';
 import { generateEmbedding } from '../services/vectorSearchService.js';
 import { getToolResultRetrievalMetrics, recordToolResultSearch } from '../services/toolResultMetricsService.js';
 import { reindexToolResultHistory } from '../services/toolResultHistoryCoordinator.js';
 
-const publicRecord = (record: ToolResultRecord): Omit<ToolResultRecord, 'raw' | 'rawText'> => {
+const publicRecord = (record: ToolResultRecord): Omit<ToolResultRecord, 'raw' | 'rawText'> & { trainingReadiness: ReturnType<typeof assessTrainingReadiness> } => {
   const { raw: _raw, rawText: _rawText, ...metadata } = record;
-  return metadata;
+  return { ...metadata, trainingReadiness: assessTrainingReadiness(record) };
 };
 
 const requireRepository = (res: Response) => {

@@ -1,5 +1,16 @@
 {
   "attribution": {
+    "trainingReadiness": "Training readiness",
+    "readiness": { "trusted": "Trusted attribution", "unverified": "Unverified attribution", "unknown": "Unknown attribution", "conflicted": "Conflicting attribution", "excluded": "Excluded" },
+    "trainingReasons": {
+      "payload_unavailable": "Original payload is unavailable.",
+      "attribution_conflicted": "Identity sources conflict.",
+      "untrusted_model_attribution": "The model is not verified for this call.",
+      "training_consent_missing": "Permission to use this data for training has not been recorded.",
+      "reviewed_outcome_missing": "The task outcome has not been reviewed.",
+      "discovery_context_missing": "Tool discovery context is incomplete.",
+      "redaction_review_missing": "Sensitive-data review is incomplete."
+    },
     "summaryHelp": "Retained calls from the last 30 days. Execution errors do not establish tool-selection errors or task outcomes.",
     "totalCalls": "Retained calls",
     "knownCoverage": "Known model coverage",

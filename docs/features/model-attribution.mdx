@@ -74,3 +74,13 @@ model/source observation groups with sample counts and execution-error counts.
 Legacy results without attribution count as unknown. The admin endpoint
 `GET /api/attribution/summary?days=30` accepts 1–3650 days. These observations
 do not establish task success, tool-selection quality or a ranking of models.
+
+Result metadata also includes a conservative `trainingReadiness` assessment,
+shown in result details. It distinguishes trusted, unverified, unknown,
+conflicted and excluded attribution, and lists missing consent, reviewed
+outcome, discovery context, redaction review or available payload.
+Verified host/gateway claims additionally require server-verified causal
+correlation. Request metadata cannot supply these review gates. Until persisted
+reviews and trusted adapters are implemented, records remain ineligible for
+model-specific training. This assessment does not export data or create SFT/DPO
+examples, and successful tool execution never substitutes for an assessed outcome.

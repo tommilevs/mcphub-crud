@@ -1,5 +1,16 @@
 {
   "attribution": {
+    "trainingReadiness": "训练就绪状态",
+    "readiness": { "trusted": "可信归属", "unverified": "未经验证的归属", "unknown": "未知归属", "conflicted": "归属冲突", "excluded": "已排除" },
+    "trainingReasons": {
+      "payload_unavailable": "原始内容不可用。",
+      "attribution_conflicted": "身份来源冲突。",
+      "untrusted_model_attribution": "此调用的模型尚未验证。",
+      "training_consent_missing": "尚未记录使用这些数据进行训练的许可。",
+      "reviewed_outcome_missing": "任务结果尚未审核。",
+      "discovery_context_missing": "工具发现上下文不完整。",
+      "redaction_review_missing": "敏感数据审核尚未完成。"
+    },
     "summaryHelp": "最近 30 天保留的调用。执行错误不代表工具选择错误或任务结果。",
     "totalCalls": "保留的调用",
     "knownCoverage": "已知模型覆盖率",

@@ -928,6 +928,11 @@ export interface OpenApiToolStats {
 export type ToolResultStatus = 'success' | 'error';
 
 export interface ToolResultSummary {
+  trainingReadiness?: {
+    tier: 'trusted' | 'unverified' | 'unknown' | 'conflicted' | 'excluded';
+    eligible: boolean;
+    reasons: string[];
+  };
   attribution?: {
     callId: string;
     contextId: string | null;
