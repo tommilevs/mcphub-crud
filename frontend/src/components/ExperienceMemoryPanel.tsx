@@ -2,6 +2,7 @@ import {useEffect,useState} from 'react';
 import {useTranslation} from 'react-i18next';
 import {Link} from 'react-router-dom';
 import {getExperienceAvailability,listExperiences,saveExperience,reviewExperience,type ExperienceEntry} from '@/services/experienceService';
+import SkillProposalPanel from './SkillProposalPanel';
 
 function ExperienceManager({resultIds}:{resultIds:string[]}){
   const {t}=useTranslation();
@@ -75,6 +76,7 @@ function ExperienceManager({resultIds}:{resultIds:string[]}){
       {!entry.assessment.usable&&<p className="text-xs text-red-500">{t('experiences.stale','Evidence is unavailable or its approval changed. This entry is excluded from advice.')}</p>}
       <div className="flex flex-wrap gap-2">{entry.evidence_ids.map(id=><Link key={id} className="hub-mono text-xs break-all text-[var(--hub-accent)]" to={`/tool-results/${encodeURIComponent(id)}`}>{id}</Link>)}</div>
       <div className="flex gap-2">{['draft','approved','retired'].filter(status=>status!==entry.status).map(status=><button type="button" className="hub-btn" key={status} disabled={busy||(status==='approved'&&!entry.assessment.usable)} onClick={()=>perform(()=>changeStatus(entry,status))}>{t(`experiences.actions.${status}`,status)}</button>)}</div>
+      <SkillProposalPanel key={`${scopeKey}:${entry.experience_id}`} experienceId={entry.experience_id} keyId={scopeKey}/>
     </article>)}
   </div>;
 }
