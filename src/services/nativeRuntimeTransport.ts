@@ -46,7 +46,10 @@ export class NativeRuntimeTransport implements Transport {
         socket.off('error', onError);
         socket.on('data', (chunk) => this.onData(chunk));
         socket.on('error', (error) => this.onerror?.(error));
-        socket.on('close', () => this.onclose?.());
+        socket.on('close', () => {
+          this.closed = true;
+          this.onclose?.();
+        });
         resolve(socket);
       });
     });
@@ -96,8 +99,24 @@ export class NativeRuntimeTransport implements Transport {
             reject(new Error('MCPHub native runtime is not connected'));
             return;
           }
-          const timer = setTimeout(() => reject(new Error('MCPHub runtime request timed out')), 30_000);
+          let settled = false;
+          let timer: NodeJS.Timeout;
+          const finish = (callback: () => void) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            callback();
+          };
+          timer = setTimeout(
+            () => finish(() => reject(new Error('MCPHub runtime request timed out'))),
+            30_000,
+          );
           const poll = () => {
+            if (settled) return;
+            if (this.closed) {
+              finish(() => reject(new Error('MCPHub native runtime connection closed')));
+              return;
+            }
             const newline = this.buffer.indexOf('\n');
             if (newline < 0) {
               setImmediate(poll);
@@ -105,19 +124,17 @@ export class NativeRuntimeTransport implements Transport {
             }
             const line = this.buffer.slice(0, newline).trim();
             this.buffer = this.buffer.slice(newline + 1);
-            clearTimeout(timer);
             try {
               const parsed = JSON.parse(line) as ControlResponse;
-              if (parsed.error) reject(new Error(parsed.error));
-              else resolve(parsed);
+              if (parsed.error) finish(() => reject(new Error(parsed.error)));
+              else finish(() => resolve(parsed));
             } catch (error) {
-              reject(error);
+              finish(() => reject(error));
             }
           };
           this.socket.write(`${JSON.stringify(request)}\n`, (error) => {
             if (error) {
-              clearTimeout(timer);
-              reject(error);
+              finish(() => reject(error));
               return;
             }
             poll();
