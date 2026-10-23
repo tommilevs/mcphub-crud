@@ -145,7 +145,7 @@ describe('handleCallToolRequest null / primitive tool result payloads (issue #92
     options: {},
   });
 
-  const callWithPayload = async (text: string) => {
+  const callWithPayload = async (text: string, headers?: Record<string, string>) => {
     const callTool = jest.fn().mockResolvedValue({
       content: [{ type: 'text', text }],
       isError: false,
@@ -166,6 +166,7 @@ describe('handleCallToolRequest null / primitive tool result payloads (issue #92
       {
         sessionId: 'session-1',
         server: 'null-server',
+        headers,
       },
     );
 
@@ -209,6 +210,22 @@ describe('handleCallToolRequest null / primitive tool result payloads (issue #92
       }),
     );
     expect(result._meta).toEqual({ 'mcphub/result_id': 'result-1' });
+  });
+
+  it('propagates conversation and parent result headers into history metadata', async () => {
+    const { result } = await callWithPayload('history', {
+      'x-conversation-id': 'conversation-1',
+      'x-mcphub-parent-result-id': 'parent-result-1',
+    });
+
+    expect(result.isError).toBe(false);
+    expect(mockCaptureAndAnnotate).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        conversationId: 'conversation-1',
+        parentResultId: 'parent-result-1',
+      }),
+    );
   });
 
   it('passes through a boolean payload without throwing', async () => {

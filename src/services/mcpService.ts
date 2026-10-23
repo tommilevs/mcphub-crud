@@ -4136,6 +4136,18 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
   const requestContextService = RequestContextService.getInstance();
   const bearerKeyContext = requestContextService.getBearerKeyContext();
   const sessionId = extra.sessionId || '';
+  const readStringHeader = (names: string[]): string | undefined => {
+    for (const name of names) {
+      const value = extra?.headers?.[name] ?? requestContextService.getHeader(name);
+      if (typeof value === 'string' && value.trim()) return value.trim();
+      if (Array.isArray(value) && typeof value[0] === 'string' && value[0].trim()) {
+        return value[0].trim();
+      }
+    }
+    return undefined;
+  };
+  const conversationId = readStringHeader(['x-conversation-id', 'conversation-id']);
+  const parentResultId = readStringHeader(['x-mcphub-parent-result-id', 'parent-result-id']);
 
   // For OpenAPI cookie-session isolation, use a real per-caller session id.
   // Direct API controllers fall back to shared synthetic ids ('api-session' /
@@ -4393,6 +4405,8 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
           username,
           keyId,
           sessionId,
+          conversationId,
+          parentResultId,
           objective: typeof objective === 'string' ? objective : undefined,
           sensitive: hasPersonalAuthentication(targetServerInfo.config),
         });
@@ -4492,6 +4506,8 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         username,
         keyId,
         sessionId,
+        conversationId,
+        parentResultId,
         objective: typeof objective === 'string' ? objective : undefined,
         sensitive: hasPersonalAuthentication(targetServerInfo.config),
       });
@@ -4648,6 +4664,8 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         username,
         keyId,
         sessionId,
+        conversationId,
+        parentResultId,
         sensitive: hasPersonalAuthentication(serverInfo.config),
       });
 
@@ -4725,6 +4743,8 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
       username,
       keyId,
       sessionId,
+      conversationId,
+      parentResultId,
       sensitive: hasPersonalAuthentication(serverInfo.config),
     });
 
@@ -4802,6 +4822,8 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
       username,
       keyId,
       sessionId,
+      conversationId,
+      parentResultId,
       sensitive: hasPersonalAuthentication(serverInfo?.config),
     });
 
