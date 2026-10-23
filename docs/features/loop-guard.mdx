@@ -1,0 +1,28 @@
+---
+title: LoopGuard
+description: Conservative advice for repeated identical tool failures
+---
+
+The initial deterministic LoopGuard is opt-in with
+`MCPHUB_LOOP_GUARD_ENABLED=true`. It requires enabled attribution, a known trace
+and branch, and saved Tool Result History. It never blocks, replays or executes
+tools. There is no internal LLM call in this first implementation.
+
+After a failed execution, the hub compares the current result with the preceding
+two results in the same authenticated username/key, trace and branch. Advice is
+issued only when all three are failures with the same server, tool, serialized
+arguments and RAW digest, and each consecutive gap is less than ten seconds.
+Changed outputs, successful calls, pagination/cursor arguments, polling/status/wait
+tools and retries separated by at least ten seconds are excluded.
+
+Advice links the three original result IDs, is stored in mutable result state,
+and is returned in `_meta["dev.mcphub/loopguard"]`. RAW remains unchanged. The
+result-detail page displays the advice and evidence links. Telemetry failures
+leave the execution result untouched. Ordinary result retention also removes
+the associated advice.
+
+These are observations of repeated technical failures, not verified task failures
+or training labels. Intentional repeats can still occur and remain permitted.
+Alternating cycles, unchanged successful states, per-tool retry policies,
+false-positive/reaction tracking and optional ToolPilot reasoning escalation are
+subsequent parts of the broader ToolPilot design, not completed features here.

@@ -1,5 +1,6 @@
 {
   "attribution": {
+    "loopAdvice": "Three identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.",
     "taskReview": "Task review",
     "taskReviewHelp": "Review the whole task. This does not label every tool call as correct or identify which model caused the outcome.",
     "outcome": "Task outcome",

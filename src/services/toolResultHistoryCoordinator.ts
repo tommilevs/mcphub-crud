@@ -1,4 +1,5 @@
 import { getAppDataSource } from '../db/connection.js';
+import { observeLoopGuard } from './loopGuardCoordinator.js';
 import { ToolResultRepositoryDb } from '../db/repositories/ToolResultRepository.js';
 import type { ToolResultStatus } from '../types/toolResult.js';
 import { logger } from '../utils/logger.js';
@@ -158,6 +159,7 @@ export class ToolResultHistoryCoordinator {
           : undefined,
       });
       if (!saved) return result;
+      const loopGuardAdvice = await observeLoopGuard(saved);
       if (saved.payloadAvailable && saved.rawText) {
         const searchable = [saved.server, saved.tool, saved.objective, saved.rawText]
           .filter(Boolean)
@@ -201,6 +203,7 @@ export class ToolResultHistoryCoordinator {
         _meta: {
           ...currentMeta,
           'mcphub/result_id': saved.resultId,
+          ...(loopGuardAdvice ? { 'dev.mcphub/loopguard': loopGuardAdvice } : {}),
         },
       };
     } catch (error) {

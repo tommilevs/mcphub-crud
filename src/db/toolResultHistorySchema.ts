@@ -68,6 +68,7 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS payload_available boolean NOT NULL DEFAULT TRUE;
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS payload_omission_reason text;
     ALTER TABLE tool_result_state ADD COLUMN IF NOT EXISTS pinned boolean NOT NULL DEFAULT FALSE;
+    ALTER TABLE tool_result_state ADD COLUMN IF NOT EXISTS loop_guard_advice jsonb;
     ALTER TABLE tool_result_state ADD COLUMN IF NOT EXISTS use_count integer NOT NULL DEFAULT 0;
     ALTER TABLE tool_result_state ADD COLUMN IF NOT EXISTS last_referenced_at timestamptz;
     ALTER TABLE tool_result_chunks ADD COLUMN IF NOT EXISTS chunk_index integer NOT NULL DEFAULT 0;

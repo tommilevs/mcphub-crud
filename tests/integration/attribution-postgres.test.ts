@@ -9,6 +9,7 @@ jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => mockSum
 import { getAttributionSummary } from '../../src/controllers/attributionController.js';
 import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
+import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 
 const suite = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 suite('attribution PostgreSQL isolated schema', () => {
@@ -119,7 +120,7 @@ suite('attribution PostgreSQL isolated schema', () => {
     await pool.query(`ALTER TABLE tool_results ADD COLUMN result_id uuid;
       ALTER TABLE tool_results ADD COLUMN raw text;
       CREATE TABLE tool_result_state (result_id uuid PRIMARY KEY, pinned boolean DEFAULT false,
-        use_count integer DEFAULT 0, last_referenced_at timestamptz)`);
+        use_count integer DEFAULT 0, last_referenced_at timestamptz, loop_guard_advice jsonb)`);
     await pool.query('INSERT INTO tool_results (result_id, status, attribution, raw) VALUES ($1,$2,$3,$4)',
       [resultId, 'success', JSON.stringify({ taskId: task.taskId }), raw]);
     await pool.query('INSERT INTO tool_result_state (result_id) VALUES ($1)', [resultId]);
@@ -141,5 +142,35 @@ suite('attribution PostgreSQL isolated schema', () => {
     const rows = (await pool.query('SELECT evidence FROM attribution_discovery_events WHERE call_id=$1', [callId])).rows;
     expect(rows).toHaveLength(1);
     expect(rows[0].evidence).toEqual(evidence);
+  });
+  test('LoopGuard isolates trace branches and persists advice outside RAW', async () => {
+    const oldFlag = process.env.MCPHUB_LOOP_GUARD_ENABLED;
+    process.env.MCPHUB_LOOP_GUARD_ENABLED = 'true';
+    try {
+      await pool.query(`ALTER TABLE tool_results ADD COLUMN username text;
+        ALTER TABLE tool_results ADD COLUMN key_id text;
+        ALTER TABLE tool_results ADD COLUMN server text;
+        ALTER TABLE tool_results ADD COLUMN tool text;
+        ALTER TABLE tool_results ADD COLUMN arguments text;
+        ALTER TABLE tool_results ADD COLUMN raw_sha256 text`);
+      const traceId = randomUUID(), branchId = randomUUID();
+      let record: any;
+      for (let index = 0; index < 3; index++) {
+        record = { resultId: randomUUID(), timestamp: new Date(Date.now() - 3000 + index * 1000),
+          server: 'demo', tool: 'inspect', status: 'error', arguments: '{}', rawSha256: 'same-error',
+          username: 'loop-user', attribution: { traceId, branchId } };
+        await pool.query(`INSERT INTO tool_results (result_id,timestamp,server,tool,status,arguments,raw_sha256,username,attribution)
+          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [record.resultId, record.timestamp, record.server, record.tool,
+          record.status, record.arguments, record.rawSha256, record.username, JSON.stringify(record.attribution)]);
+        await pool.query('INSERT INTO tool_result_state (result_id) VALUES ($1)', [record.resultId]);
+      }
+      const advice = await observeLoopGuard(record);
+      expect(advice?.trigger).toBe('repeated_identical_failure');
+      expect((await pool.query('SELECT loop_guard_advice FROM tool_result_state WHERE result_id=$1', [record.resultId])).rows[0].loop_guard_advice).toEqual(advice);
+      expect(await observeLoopGuard({ ...record, attribution: { traceId, branchId: randomUUID() } })).toBeNull();
+    } finally {
+      if (oldFlag === undefined) delete process.env.MCPHUB_LOOP_GUARD_ENABLED;
+      else process.env.MCPHUB_LOOP_GUARD_ENABLED = oldFlag;
+    }
   });
 });

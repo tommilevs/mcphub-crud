@@ -199,6 +199,11 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           if (response.success && response.data) setDetail(response.data);
           else throw new Error(response.message || t('toolResults.fetchError'));
         }} />}
+      {detail.loopGuardAdvice && <section className="hub-card p-3 space-y-2">
+        <h2 className="text-sm font-medium">LoopGuard</h2>
+        <p className="text-xs">{t('attribution.loopAdvice', 'Three identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.')}</p>
+        <div className="flex flex-wrap gap-2">{detail.loopGuardAdvice.resultIds.map((id) => <Link key={id} className="hub-mono text-xs text-[var(--hub-accent)] break-all" to={`/tool-results/${encodeURIComponent(id)}`}>{id}</Link>)}</div>
+      </section>}
       {detail.trainingReadiness && <section className="hub-card p-3 space-y-2">
         <h2 className="text-sm font-medium">{t('attribution.trainingReadiness', 'Training readiness')}</h2>
         <p className="text-xs text-[var(--hub-ink-3)]">{t(`attribution.readiness.${detail.trainingReadiness.tier}`, detail.trainingReadiness.tier)}</p>
