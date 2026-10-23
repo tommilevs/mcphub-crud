@@ -33,6 +33,12 @@ let directory: string;
 const originalPath = process.env.MCPHUB_SETTING_PATH;
 const originalKey = process.env.MCPHUB_CREDENTIAL_ENCRYPTION_KEY;
 
+const expectPrivateFileIfSupported = (file: string) => {
+  if (process.platform !== 'win32') {
+    expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  }
+};
+
 beforeAll(async () => {
   await initI18n();
 });
@@ -58,7 +64,7 @@ test('encrypts at rest, isolates email principals, and returns status only', asy
   );
   const file = `${process.env.MCPHUB_SETTING_PATH}.credentials.json`;
   expect(fs.readFileSync(file, 'utf8')).not.toContain('-sentinel');
-  expect(fs.statSync(file).mode & 0o777).toBe(0o600);
+  expectPrivateFileIfSupported(file);
   expect(
     (await resolveCredentialBinding('shared', 'alice@example.com', stdio)).config.env?.PERSONAL_KEY,
   ).toBe('alice@example.com-sentinel');
@@ -239,7 +245,7 @@ test('generates one private persistent key and reuses it after loading a fresh s
   const keyFile = `${process.env.MCPHUB_SETTING_PATH}.credentials.key`;
   const key = fs.readFileSync(keyFile, 'utf8').trim();
   expect(Buffer.from(key, 'base64')).toHaveLength(32);
-  expect(fs.statSync(keyFile).mode & 0o777).toBe(0o600);
+  expectPrivateFileIfSupported(keyFile);
   expect(process.env.MCPHUB_CREDENTIAL_ENCRYPTION_KEY).toBeUndefined();
   await jest.isolateModulesAsync(async () => {
     const fresh = await import('../../src/services/credentialBindingService.js');

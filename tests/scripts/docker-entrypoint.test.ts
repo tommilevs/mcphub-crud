@@ -4,8 +4,9 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 
 const projectRoot = path.resolve(__dirname, '../..');
+const describeWithBash = process.platform === 'win32' ? describe.skip : describe;
 
-describe('Docker settings path selection', () => {
+describeWithBash('Docker settings path selection', () => {
   let directory: string;
 
   beforeEach(() => {
