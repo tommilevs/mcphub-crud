@@ -37,4 +37,7 @@ fn collects_notifications_before_matching_response() {
         7
     );
     supervisor.stop("fixture").expect("fixture stops");
+    let stopped = supervisor.statuses();
+    assert_eq!(stopped.len(), 1);
+    assert_eq!(stopped[0].state, "STOPPED");
 }

@@ -6,7 +6,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     io::{BufRead, BufReader, Read, Write},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     time::{Duration, Instant},
@@ -58,6 +58,7 @@ struct ManagedProcess {
     stdout: BufReader<ChildStdout>,
     restarts: u32,
     last_start: Instant,
+    unhealthy: bool,
     #[cfg(windows)]
     job: windows::JobHandle,
 }
@@ -76,6 +77,7 @@ pub struct ProcessStatus {
 
 pub struct RuntimeSupervisor {
     processes: HashMap<String, ManagedProcess>,
+    stopped: HashSet<String>,
 }
 
 fn drain_stderr(stderr: Option<std::process::ChildStderr>) {
@@ -94,6 +96,7 @@ impl RuntimeSupervisor {
     pub fn new() -> Self {
         Self {
             processes: HashMap::new(),
+            stopped: HashSet::new(),
         }
     }
 
@@ -102,6 +105,7 @@ impl RuntimeSupervisor {
             return Err(SupervisorError::AlreadyRunning(spec.id));
         }
         let id = spec.id.clone();
+        self.stopped.remove(&id);
         let mut command = Command::new(&spec.command);
         command
             .args(&spec.args)
@@ -141,6 +145,7 @@ impl RuntimeSupervisor {
                 stdout: BufReader::new(stdout),
                 restarts: 0,
                 last_start: Instant::now(),
+                unhealthy: false,
                 #[cfg(windows)]
                 job,
             },
@@ -155,6 +160,7 @@ impl RuntimeSupervisor {
             .ok_or_else(|| SupervisorError::NotFound(id.to_owned()))?;
         let _ = process.child.kill();
         let _ = process.child.wait();
+        self.stopped.insert(id.to_owned());
         Ok(())
     }
 
@@ -195,22 +201,40 @@ impl RuntimeSupervisor {
                     }
                     process.restarts += 1;
                     process.last_start = Instant::now();
+                    process.unhealthy = false;
                 }
             }
             let running = process.child.try_wait().ok().flatten().is_none();
             statuses.push(ProcessStatus {
                 id: id.clone(),
-                state: if running {
-                    "RUNNING"
-                } else if process.restarts >= process.spec.restart_limit {
-                    "CRASH_LOOP"
+                state: if !running {
+                    if process.restarts >= process.spec.restart_limit {
+                        "CRASH_LOOP"
+                    } else {
+                        "RESTARTING"
+                    }
+                } else if process.unhealthy {
+                    "UNHEALTHY"
                 } else {
-                    "RESTARTING"
+                    "RUNNING"
                 },
                 running,
                 pid: Some(process.child.id()),
                 restarts: process.restarts,
                 restart_limit: process.spec.restart_limit,
+            });
+        }
+        for id in self.stopped.iter() {
+            if self.processes.contains_key(id) {
+                continue;
+            }
+            statuses.push(ProcessStatus {
+                id: id.clone(),
+                state: "STOPPED",
+                running: false,
+                pid: None,
+                restarts: 0,
+                restart_limit: 0,
             });
         }
         statuses
@@ -230,15 +254,19 @@ impl RuntimeSupervisor {
             .processes
             .get_mut(id)
             .ok_or_else(|| SupervisorError::NotFound(id.to_owned()))?;
-        process
+        if let Err(source) = process
             .stdin
             .write_all(message.as_bytes())
             .and_then(|_| process.stdin.write_all(b"\n"))
             .and_then(|_| process.stdin.flush())
-            .map_err(|source| SupervisorError::Spawn {
+        {
+            process.unhealthy = true;
+            return Err(SupervisorError::Spawn {
                 id: id.to_owned(),
                 source,
-            })?;
+            });
+        }
+        process.unhealthy = false;
         // JSON-RPC notifications do not have a response. Waiting on stdout
         // for them would deadlock the named-pipe request/response loop.
         if serde_json::from_str::<serde_json::Value>(message)
@@ -254,13 +282,18 @@ impl RuntimeSupervisor {
         let mut frames = Vec::new();
         loop {
             let mut response = String::new();
-            let bytes = process.stdout.read_line(&mut response).map_err(|source| {
-                SupervisorError::Spawn {
-                    id: id.to_owned(),
-                    source,
+            let bytes = match process.stdout.read_line(&mut response) {
+                Ok(bytes) => bytes,
+                Err(source) => {
+                    process.unhealthy = true;
+                    return Err(SupervisorError::Spawn {
+                        id: id.to_owned(),
+                        source,
+                    });
                 }
-            })?;
+            };
             if bytes == 0 {
+                process.unhealthy = true;
                 break;
             }
             let trimmed = response.trim_end().to_owned();
