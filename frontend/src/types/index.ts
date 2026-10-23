@@ -965,6 +965,10 @@ export interface ToolResultSummary {
 export type ToolResultDetail = ToolResultSummary;
 
 export interface ToolResultFilter {
+  modelId?: string;
+  taskId?: string;
+  traceId?: string;
+  branchId?: string;
   query?: string;
   server?: string;
   tool?: string;

@@ -25,6 +25,10 @@ const requireRepository = (res: Response) => {
 
 const parseFilter = (req: Request): ToolResultFilter => {
   const filter: ToolResultFilter = {};
+  for (const field of ['modelId', 'taskId', 'traceId', 'branchId'] as const) {
+    const value = req.query[field];
+    if (typeof value === 'string' && value.length <= 255 && value) filter[field] = value;
+  }
   if (typeof req.query.server === 'string' && req.query.server) filter.server = req.query.server;
   if (typeof req.query.tool === 'string' && req.query.tool) filter.tool = req.query.tool;
   if (req.query.status === 'success' || req.query.status === 'error') filter.status = req.query.status;

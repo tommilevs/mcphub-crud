@@ -1,6 +1,16 @@
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 
 describe('ToolResultRepositoryDb', () => {
+  it('filters attribution fields using parameters instead of interpolating claims', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+    await repository.search('evidence', 10, { modelId: "model'claim", traceId: 'trace-one', taskId: 'task-one' });
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain("result.attribution->'identity'->>'modelId'");
+    expect(sql).toContain("result.attribution->>'traceId'");
+    expect(sql).not.toContain("model'claim");
+    expect(params).toEqual(["model'claim", 'task-one', 'trace-one', 'evidence', 10]);
+  });
   it('creates the immutable result and mutable state atomically', async () => {
     const query = jest.fn().mockResolvedValue([]);
     const repository = new ToolResultRepositoryDb({ query } as never);

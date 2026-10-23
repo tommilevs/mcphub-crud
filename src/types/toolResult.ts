@@ -47,6 +47,10 @@ export interface ToolResultCaptureInput {
 }
 
 export interface ToolResultFilter {
+  modelId?: string;
+  taskId?: string;
+  traceId?: string;
+  branchId?: string;
   server?: string;
   tool?: string;
   status?: ToolResultStatus;

@@ -89,6 +89,10 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
       ON tool_results (conversation_id, timestamp DESC, result_id DESC);
     CREATE INDEX IF NOT EXISTS tool_results_parent_idx
       ON tool_results (parent_result_id);
+    CREATE INDEX IF NOT EXISTS tool_results_attribution_trace_idx
+      ON tool_results ((attribution->>'traceId'), timestamp DESC);
+    CREATE INDEX IF NOT EXISTS tool_results_attribution_task_idx
+      ON tool_results ((attribution->>'taskId'), timestamp DESC);
     CREATE INDEX IF NOT EXISTS tool_results_search_idx
       ON tool_results USING gin (
         to_tsvector('simple', coalesce(server, '') || ' ' || coalesce(tool, '') || ' ' ||

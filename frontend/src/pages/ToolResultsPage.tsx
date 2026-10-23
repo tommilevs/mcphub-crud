@@ -149,6 +149,11 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
         {detail.attribution.conflictReason && <p role="status" className="rounded border border-[var(--hub-line)] p-2 text-xs">
           {t('attribution.conflict', 'Conflicting identity data')}: {detail.attribution.conflictReason}
         </p>}
+        <div className="flex flex-wrap gap-2">
+          {detail.attribution.traceId && <Link className="hub-btn text-xs" to={`/tool-results?traceId=${encodeURIComponent(detail.attribution.traceId)}`}>{t('attribution.trace', 'Trace')}</Link>}
+          {detail.attribution.taskId && <Link className="hub-btn text-xs" to={`/tool-results?taskId=${encodeURIComponent(detail.attribution.taskId)}`}>{t('attribution.task', 'Task')}</Link>}
+          {detail.attribution.branchId && <Link className="hub-btn text-xs" to={`/tool-results?branchId=${encodeURIComponent(detail.attribution.branchId)}`}>{t('attribution.branch', 'Branch')}</Link>}
+        </div>
       </section>}
       {detail.objective && <div className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.objective')}</div><div className="mt-1 text-sm">{detail.objective}</div></div>}
       {lineage && (lineage.ancestors.length > 0 || lineage.children.length > 0) && <div className="hub-card p-3 space-y-3">
@@ -213,8 +218,9 @@ const ToolResultsPage: React.FC = () => {
   const [stats, setStats] = useState<ToolResultStats | null>(null);
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);
   const [page, setPage] = useState(1);
-  const [draft, setDraft] = useState<ToolResultFilter>({ sessionId: initialSessionId, conversationId: initialConversationId });
-  const [filter, setFilter] = useState<ToolResultFilter>({ sessionId: initialSessionId, conversationId: initialConversationId });
+  const initialAttribution = Object.fromEntries(['modelId', 'taskId', 'traceId', 'branchId'].map((key) => [key, searchParams.get(key) || undefined]));
+  const [draft, setDraft] = useState<ToolResultFilter>({ ...initialAttribution, sessionId: initialSessionId, conversationId: initialConversationId });
+  const [filter, setFilter] = useState<ToolResultFilter>({ ...initialAttribution, sessionId: initialSessionId, conversationId: initialConversationId });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
@@ -323,6 +329,9 @@ const ToolResultsPage: React.FC = () => {
       <input className="hub-input min-w-56 flex-1" placeholder={t('toolResults.query')} value={draft.query || ''} onChange={(e) => setDraft({ ...draft, query: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.server')} value={draft.server || ''} onChange={(e) => setDraft({ ...draft, server: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.tool')} value={draft.tool || ''} onChange={(e) => setDraft({ ...draft, tool: e.target.value })} />
+      {(['modelId', 'taskId', 'traceId', 'branchId'] as const).map((field) => <input key={field}
+        className="hub-input min-w-44" aria-label={t(`attribution.${field.slice(0, -2)}`, field)} placeholder={t(`attribution.${field.slice(0, -2)}`, field)}
+        value={draft[field] || ''} onChange={(event) => setDraft({ ...draft, [field]: event.target.value })} />)}
       <input className="hub-input min-w-44" placeholder={t('toolResults.session')} value={draft.sessionId || ''} onChange={(e) => setDraft({ ...draft, sessionId: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.conversation')} value={draft.conversationId || ''} onChange={(e) => setDraft({ ...draft, conversationId: e.target.value })} />
       <label className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.from')}<input className="hub-input mt-1" type="datetime-local" value={draft.startDate || ''} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label>

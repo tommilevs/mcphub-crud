@@ -401,6 +401,10 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
       conditions.push(condition.replace('?', `$${params.length}`));
     };
     if (filter.server) add('result.server = ?', filter.server);
+    if (filter.modelId) add("result.attribution->'identity'->>'modelId' = ?", filter.modelId);
+    if (filter.taskId) add("result.attribution->>'taskId' = ?", filter.taskId);
+    if (filter.traceId) add("result.attribution->>'traceId' = ?", filter.traceId);
+    if (filter.branchId) add("result.attribution->>'branchId' = ?", filter.branchId);
     if (filter.tool) add('result.tool = ?', filter.tool);
     if (filter.status) add('result.status = ?', filter.status);
     if (filter.username) add('result.username = ?', filter.username);
