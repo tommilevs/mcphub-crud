@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
 import AttributionSummaryPanel from '@/components/AttributionSummaryPanel';
+import TaskReviewForm from '@/components/TaskReviewForm';
 import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
   getToolResult,
@@ -192,6 +193,12 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           {identityEventsCursor && <li><button type="button" className="hub-btn text-xs" disabled={identityEventsLoading} onClick={() => void loadIdentityEvents(true)}>{t('attribution.loadMore', 'Load more events')}</button></li>}
         </ol>}
       </section>}
+      {detail.attribution?.taskId && <TaskReviewForm key={`${detail.resultId}:${detail.taskReview?.revision ?? 0}`}
+        taskId={detail.attribution.taskId} review={detail.taskReview} onSaved={async () => {
+          const response = await getToolResult(resultId);
+          if (response.success && response.data) setDetail(response.data);
+          else throw new Error(response.message || t('toolResults.fetchError'));
+        }} />}
       {detail.trainingReadiness && <section className="hub-card p-3 space-y-2">
         <h2 className="text-sm font-medium">{t('attribution.trainingReadiness', 'Training readiness')}</h2>
         <p className="text-xs text-[var(--hub-ink-3)]">{t(`attribution.readiness.${detail.trainingReadiness.tier}`, detail.trainingReadiness.tier)}</p>

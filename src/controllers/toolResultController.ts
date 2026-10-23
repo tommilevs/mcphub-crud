@@ -13,7 +13,10 @@ import { reindexToolResultHistory } from '../services/toolResultHistoryCoordinat
 
 const publicRecord = (record: ToolResultRecord): Omit<ToolResultRecord, 'raw' | 'rawText'> & { trainingReadiness: ReturnType<typeof assessTrainingReadiness> } => {
   const { raw: _raw, rawText: _rawText, ...metadata } = record;
-  return { ...metadata, trainingReadiness: assessTrainingReadiness(record) };
+  return { ...metadata, trainingReadiness: assessTrainingReadiness(record, {
+    consent: record.taskReview?.trainingConsent === true,
+    outcomeReviewed: Boolean(record.taskReview?.reviewedBy && record.taskReview.outcome !== 'unknown'),
+  }) };
 };
 
 const requireRepository = (res: Response) => {

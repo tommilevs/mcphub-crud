@@ -1,5 +1,10 @@
 {
   "attribution": {
+    "taskReview": "任务审核",
+    "taskReviewHelp": "审核整个任务。这不会将每个工具调用标记为正确，也不会确定哪个模型导致了结果。",
+    "outcome": "任务结果",
+    "outcomes": { "unknown": "未评估", "success": "成功", "failure": "失败", "partial": "部分完成", "abandoned": "已放弃" },
+    "trainingConsent": "其余质量和隐私检查通过后，我允许将此任务的数据用于训练。",
     "trainingReadiness": "训练就绪状态",
     "readiness": { "trusted": "可信归属", "unverified": "未经验证的归属", "unknown": "未知归属", "conflicted": "归属冲突", "excluded": "已排除" },
     "trainingReasons": {

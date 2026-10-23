@@ -11,7 +11,7 @@ import type {
   ToolResultChunk,
   ToolResultSearchDiagnostics,
 } from '@/types';
-import { apiGet, apiPatch, apiPost, fetchWithInterceptors } from '@/utils/fetchInterceptor';
+import { apiGet, apiPatch, apiPost, apiPut, fetchWithInterceptors } from '@/utils/fetchInterceptor';
 import { getApiUrl } from '@/utils/runtime';
 
 const query = (values: object): string => {
@@ -40,6 +40,8 @@ export interface AttributionSummary {
   executionErrors: number;
   models: Array<{ model_id: string | null; source: string; calls: number; execution_errors: number }>;
 }
+export const saveTaskReview = (taskId: string, review: { outcome: string; trainingConsent: boolean; revision: number }) =>
+  apiPut<ApiResponse<unknown>>(`/attribution/tasks/${encodeURIComponent(taskId)}/review`, review);
 export const getAttributionSummary = (days = 30) =>
   apiGet<ApiResponse<AttributionSummary>>(`/attribution/summary?days=${days}`);
 export const getAttributionEvents = (traceId: string, cursor?: string) =>

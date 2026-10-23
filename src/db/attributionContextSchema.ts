@@ -35,5 +35,16 @@ export const ensureAttributionContextSchema = async (db: {
     );
     CREATE INDEX IF NOT EXISTS attribution_identity_events_trace_idx
       ON attribution_identity_events (trace_id, occurred_at, event_id);
+    CREATE TABLE IF NOT EXISTS attribution_task_reviews (
+      task_id uuid NOT NULL,
+      revision integer NOT NULL CHECK (revision > 0),
+      outcome varchar(20) NOT NULL CHECK (outcome IN ('unknown', 'success', 'failure', 'partial', 'abandoned')),
+      training_consent boolean NOT NULL DEFAULT FALSE,
+      reviewed_by text NOT NULL,
+      reviewed_at timestamptz NOT NULL DEFAULT NOW(),
+      PRIMARY KEY (task_id, revision)
+    );
+    CREATE INDEX IF NOT EXISTS attribution_task_reviews_text_task_idx
+      ON attribution_task_reviews ((task_id::text), revision DESC);
   `);
 };

@@ -928,6 +928,7 @@ export interface OpenApiToolStats {
 export type ToolResultStatus = 'success' | 'error';
 
 export interface ToolResultSummary {
+  taskReview?: { revision: number; outcome: string; trainingConsent: boolean; reviewedBy: string; reviewedAt: string };
   trainingReadiness?: {
     tier: 'trusted' | 'unverified' | 'unknown' | 'conflicted' | 'excluded';
     eligible: boolean;

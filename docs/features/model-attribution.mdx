@@ -80,7 +80,16 @@ shown in result details. It distinguishes trusted, unverified, unknown,
 conflicted and excluded attribution, and lists missing consent, reviewed
 outcome, discovery context, redaction review or available payload.
 Verified host/gateway claims additionally require server-verified causal
-correlation. Request metadata cannot supply these review gates. Until persisted
-reviews and trusted adapters are implemented, records remain ineligible for
+correlation. Request metadata cannot supply these review gates. Until trusted
+adapters and remaining per-call evidence are implemented, records remain ineligible for
 model-specific training. This assessment does not export data or create SFT/DPO
 examples, and successful tool execution never substitutes for an assessed outcome.
+
+Administrators can explicitly review a task outcome and grant or withdraw training
+permission in result details. `PUT /api/attribution/tasks/:taskId/review` accepts
+`outcome` (`unknown`, `success`, `failure`, `partial`, `abandoned`), an explicit
+boolean `trainingConsent`, and the current `revision` (0 for a first review).
+Each change appends an auditable revision with reviewer and timestamp. Concurrent
+or stale writes return 409. New tasks have no outcome assessment and no training
+permission. The latest review applies across the task's results, without changing
+RAW, attributing the whole outcome to a model, or marking each call as correct.

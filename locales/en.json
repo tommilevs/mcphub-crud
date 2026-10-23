@@ -1,5 +1,10 @@
 {
   "attribution": {
+    "taskReview": "Task review",
+    "taskReviewHelp": "Review the whole task. This does not label every tool call as correct or identify which model caused the outcome.",
+    "outcome": "Task outcome",
+    "outcomes": { "unknown": "Not assessed", "success": "Success", "failure": "Failure", "partial": "Partial", "abandoned": "Abandoned" },
+    "trainingConsent": "I permit using this task’s data for training after the remaining quality and privacy checks pass.",
     "trainingReadiness": "Training readiness",
     "readiness": { "trusted": "Trusted attribution", "unverified": "Unverified attribution", "unknown": "Unknown attribution", "conflicted": "Conflicting attribution", "excluded": "Excluded" },
     "trainingReasons": {

@@ -18,6 +18,7 @@ type Queryable = {
 type ToolResultRow = Record<string, unknown>;
 
 const mapRow = (row: ToolResultRow): ToolResultRecord => ({
+  taskReview: row.task_review as ToolResultRecord['taskReview'] ?? undefined,
   attribution: row.attribution as ToolResultRecord['attribution'] ?? undefined,
   resultId: String(row.result_id),
   timestamp: new Date(String(row.timestamp)),
@@ -49,9 +50,15 @@ const mapRow = (row: ToolResultRow): ToolResultRecord => ({
 });
 
 const SELECT_COLUMNS = `
-  result.*, state.pinned, state.use_count, state.last_referenced_at
+  result.*, state.pinned, state.use_count, state.last_referenced_at, review.task_review
   FROM tool_results result
   JOIN tool_result_state state ON state.result_id = result.result_id
+  LEFT JOIN LATERAL (
+    SELECT jsonb_build_object('revision', revision, 'outcome', outcome,
+      'trainingConsent', training_consent, 'reviewedBy', reviewed_by, 'reviewedAt', reviewed_at) AS task_review
+    FROM attribution_task_reviews WHERE task_id::text = result.attribution->>'taskId'
+    ORDER BY revision DESC LIMIT 1
+  ) review ON TRUE
 `;
 
 export class ToolResultRepositoryDb implements ToolResultRepository {

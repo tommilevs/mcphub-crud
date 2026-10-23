@@ -7,6 +7,7 @@ import type { Request, Response } from 'express';
 let mockSummaryDb: { query: (sql: string, parameters?: unknown[]) => Promise<any> };
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => mockSummaryDb }));
 import { getAttributionSummary } from '../../src/controllers/attributionController.js';
+import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
 
 const suite = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 suite('attribution PostgreSQL isolated schema', () => {
@@ -92,5 +93,22 @@ suite('attribution PostgreSQL isolated schema', () => {
     } as unknown as Response);
     expect(payload.data).toMatchObject({ total: 3, known: 1, verified: 0, conflicted: 1, executionErrors: 1 });
     expect(payload.data.models.find((row: any) => row.model_id === 'model-a')).toMatchObject({ calls: 1, execution_errors: 1, source: 'self_reported' });
+  });
+  test('task reviews reject concurrent stale writes and preserve consent revocation history', async () => {
+    const task = await service.start('review-user');
+    const save = async (revision: number, consent: boolean) => {
+      let status = 200;
+      let data: any;
+      const res = { status: (value: number) => { status = value; return res; }, json: (value: any) => { data = value; } };
+      await saveTaskReview({ user: { isAdmin: true, username: 'reviewer' }, params: { taskId: task.taskId },
+        body: { outcome: 'partial', trainingConsent: consent, revision },
+      } as unknown as Request, res as unknown as Response);
+      return { status, data };
+    };
+    const concurrent = await Promise.all([save(0, true), save(0, true)]);
+    expect(concurrent.map((result) => result.status).sort()).toEqual([200, 409]);
+    expect((await save(1, false)).status).toBe(200);
+    const reviews = (await pool.query('SELECT revision, training_consent FROM attribution_task_reviews WHERE task_id=$1 ORDER BY revision', [task.taskId])).rows;
+    expect(reviews).toEqual([{ revision: 1, training_consent: true }, { revision: 2, training_consent: false }]);
   });
 });

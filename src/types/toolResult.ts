@@ -2,6 +2,7 @@ import type { CallAttribution } from '../services/callAttribution.js';
 export type ToolResultStatus = 'success' | 'error';
 
 export interface ToolResultRecord {
+  taskReview?: { revision: number; outcome: string; trainingConsent: boolean; reviewedBy: string; reviewedAt: string };
   attribution?: CallAttribution;
   resultId: string;
   timestamp: Date;
