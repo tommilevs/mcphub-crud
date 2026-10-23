@@ -1509,6 +1509,9 @@
     "hits": "hits",
     "lexical": "lexical",
     "vector": "vector",
-    "fused": "fused"
+    "fused": "fused",
+    "reindex": "Rebuild missing indexes",
+    "reindexDescription": "Restore missing result chunk indexes from immutable RAW",
+    "reindexError": "Result reindex failed"
   }
 }

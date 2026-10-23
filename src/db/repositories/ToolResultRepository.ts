@@ -147,6 +147,21 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     return { data: rows.map(mapRow), total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  async findForReindex(limit: number, onlyMissing: boolean): Promise<ToolResultRecord[]> {
+    const rows = await this.dataSource.query<ToolResultRow[]>(
+      `SELECT ${SELECT_COLUMNS}
+       WHERE result.payload_available = TRUE
+         AND result.raw_text IS NOT NULL
+         AND ($2::boolean = FALSE OR NOT EXISTS (
+           SELECT 1 FROM tool_result_chunks chunks WHERE chunks.result_id = result.result_id
+         ))
+       ORDER BY result.timestamp ASC, result.result_id ASC
+       LIMIT $1`,
+      [limit, onlyMissing],
+    );
+    return rows.map(mapRow);
+  }
+
   async search(
     query: string,
     limit: number,

@@ -25,6 +25,16 @@ export interface ToolResultHistoryCapture {
 
 export const TOOL_RESULT_CHUNK_CHARS = 12_000;
 
+export interface ToolResultReindexSummary {
+  requested: number;
+  selected: number;
+  indexed: number;
+  skipped: number;
+  embeddingFailures: number;
+}
+
+let reindexInFlight = false;
+
 export const chunkToolResultText = (
   text: string,
   maxChars = TOOL_RESULT_CHUNK_CHARS,
@@ -53,6 +63,75 @@ export const chunkToolResultText = (
   }
   if (current) chunks.push(current);
   return chunks;
+};
+
+export const reindexToolResultHistory = async (
+  limit = 25,
+  onlyMissing = true,
+): Promise<ToolResultReindexSummary> => {
+  if (reindexInFlight) throw new Error('A tool result reindex pass is already running');
+  const repository = getToolResultRepository();
+  if (!repository?.findForReindex || (!repository.indexChunks && !repository.indexContent)) {
+    throw new Error('Tool result reindex is unavailable');
+  }
+  reindexInFlight = true;
+  const summary: ToolResultReindexSummary = {
+    requested: limit,
+    selected: 0,
+    indexed: 0,
+    skipped: 0,
+    embeddingFailures: 0,
+  };
+  try {
+    const records = await repository.findForReindex(limit, onlyMissing);
+    summary.selected = records.length;
+    for (const record of records) {
+      if (!record.rawText) {
+        summary.skipped += 1;
+        continue;
+      }
+      const searchable = [record.server, record.tool, record.objective, record.rawText]
+        .filter(Boolean)
+        .join('\n')
+        .slice(0, 64_000);
+      const chunks = chunkToolResultText(searchable);
+      if (chunks.length === 0) {
+        summary.skipped += 1;
+        continue;
+      }
+      if (repository.indexChunks) {
+        const indexed = [];
+        for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
+          recordToolResultIndexAttempt();
+          let embedding: number[] | null = null;
+          try {
+            embedding = await generateEmbedding(chunks[chunkIndex], 'document');
+          } catch (error) {
+            summary.embeddingFailures += 1;
+            recordToolResultIndexFailure();
+            logger.warn('Failed to generate tool result reindex embedding:', error);
+          }
+          indexed.push({ chunkIndex, chunkVersion: 1, content: chunks[chunkIndex], embedding });
+        }
+        await repository.indexChunks(record.resultId, indexed);
+      } else {
+        recordToolResultIndexAttempt();
+        let embedding: number[] | null = null;
+        try {
+          embedding = await generateEmbedding(searchable, 'document');
+        } catch (error) {
+          summary.embeddingFailures += 1;
+          recordToolResultIndexFailure();
+          logger.warn('Failed to generate tool result reindex embedding:', error);
+        }
+        await repository.indexContent!(record.resultId, searchable, embedding);
+      }
+      summary.indexed += 1;
+    }
+    return summary;
+  } finally {
+    reindexInFlight = false;
+  }
 };
 
 type ToolResultObject = Record<string, unknown>;

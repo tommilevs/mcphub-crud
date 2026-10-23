@@ -121,4 +121,17 @@ describe('ToolResultRepositoryDb', () => {
     ]);
     expect(query.mock.calls[0][1]).toEqual(['result-1']);
   });
+
+  it('selects only payload-bearing results for safe derived-index rebuilds', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+
+    await repository.findForReindex(25, true);
+
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain('result.payload_available = TRUE');
+    expect(sql).toContain('NOT EXISTS');
+    expect(sql).toContain('tool_result_chunks');
+    expect(params).toEqual([25, true]);
+  });
 });

@@ -183,6 +183,7 @@ import {
   getToolResultLineage,
   searchToolResultChunks,
   getToolResultChunks,
+  reindexToolResults,
   compareToolResults,
 } from '../controllers/toolResultController.js';
 import {
@@ -417,6 +418,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.get('/tool-results/:id/lineage', getToolResultLineage);
   authenticatedRouter.get('/tool-results/:id/chunks', getToolResultChunks);
   authenticatedRouter.get('/tool-results/:id/search', searchToolResultChunks);
+  authenticatedRouter.post('/tool-results/reindex', reindexToolResults);
   authenticatedRouter.post('/tool-results/compare', compareToolResults);
   authenticatedRouter.get('/tool-results/:id', getToolResultById);
   authenticatedRouter.get('/tool-results/:id/raw', getToolResultRaw);

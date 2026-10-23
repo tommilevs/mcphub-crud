@@ -16,6 +16,7 @@ import {
   getToolResultLineage,
   searchToolResultChunks,
   getToolResultChunks,
+  reindexToolResults,
   setToolResultPinned,
 } from '@/services/toolResultHistoryService';
 
@@ -200,6 +201,8 @@ const ToolResultsPage: React.FC = () => {
   const [timelineError, setTimelineError] = useState('');
   const [timelineContext, setTimelineContext] = useState<{ kind: 'session' | 'conversation'; id: string } | null>(null);
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<ToolResultSearchDiagnostics | null>(null);
+  const [reindexing, setReindexing] = useState(false);
+  const [reindexMessage, setReindexMessage] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true); setError('');
@@ -220,6 +223,23 @@ const ToolResultsPage: React.FC = () => {
       setComparison(response.data);
       setComparisonRaw({});
       setComparisonRawError('');
+    }
+  };
+
+  const runReindex = async () => {
+    setReindexing(true);
+    setReindexMessage('');
+    try {
+      const response = await reindexToolResults(25, true);
+      if (response.success && response.data) {
+        setReindexMessage(`${response.data.indexed} indexed · ${response.data.skipped} skipped · ${response.data.embeddingFailures} embedding failures`);
+      } else {
+        setReindexMessage(response.message || t('toolResults.reindexError'));
+      }
+    } catch (cause) {
+      setReindexMessage(cause instanceof Error ? cause.message : t('toolResults.reindexError'));
+    } finally {
+      setReindexing(false);
     }
   };
 
@@ -272,6 +292,7 @@ const ToolResultsPage: React.FC = () => {
     </div>}
     {stats?.retrieval && <div className="hub-card px-3 py-2 text-xs text-[var(--hub-ink-3)]">{t('toolResults.retrievalMetrics')}: {stats.retrieval.searches} {t('toolResults.searches')} · {stats.retrieval.hybridSearches} {t('toolResults.hybrid')} · {stats.retrieval.indexFailures} {t('toolResults.indexFailures')}</div>}
     {retrievalDiagnostics && <div className="hub-card px-3 py-2 text-xs text-[var(--hub-ink-3)]">{t('toolResults.searchDiagnostics')}: {retrievalDiagnostics.mode} · {retrievalDiagnostics.resultCount} {t('toolResults.hits')} · {retrievalDiagnostics.lexicalMatches} {t('toolResults.lexical')} · {retrievalDiagnostics.vectorMatches} {t('toolResults.vector')} · {retrievalDiagnostics.fusedMatches} {t('toolResults.fused')}</div>}
+    <div className="hub-card flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs text-[var(--hub-ink-3)]"><span>{reindexMessage || t('toolResults.reindexDescription')}</span><button className="hub-btn" type="button" onClick={() => void runReindex()} disabled={reindexing}>{reindexing ? t('app.loading') : t('toolResults.reindex')}</button></div>
     <form className="hub-card p-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setPage(1); setFilter({ ...draft, startDate: draft.startDate ? new Date(draft.startDate).toISOString() : undefined, endDate: draft.endDate ? new Date(draft.endDate).toISOString() : undefined }); }}>
       <input className="hub-input min-w-56 flex-1" placeholder={t('toolResults.query')} value={draft.query || ''} onChange={(e) => setDraft({ ...draft, query: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.server')} value={draft.server || ''} onChange={(e) => setDraft({ ...draft, server: e.target.value })} />

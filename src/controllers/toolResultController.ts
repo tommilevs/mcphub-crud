@@ -8,6 +8,7 @@ import { requireAdmin } from '../utils/requireAdmin.js';
 import { logger } from '../utils/logger.js';
 import { generateEmbedding } from '../services/vectorSearchService.js';
 import { getToolResultRetrievalMetrics, recordToolResultSearch } from '../services/toolResultMetricsService.js';
+import { reindexToolResultHistory } from '../services/toolResultHistoryCoordinator.js';
 
 const publicRecord = (record: ToolResultRecord): Omit<ToolResultRecord, 'raw' | 'rawText'> => {
   const { raw: _raw, rawText: _rawText, ...metadata } = record;
@@ -269,6 +270,26 @@ export const getToolResultChunks = async (req: Request, res: Response): Promise<
   const data = await repository.listChunks(resultId);
   await repository.incrementUseCount(resultId);
   res.json({ success: true, data });
+};
+
+export const reindexToolResults = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
+  if (!getToolResultRepository()) {
+    res.status(404).json({ success: false, message: 'Tool result history requires database mode' });
+    return;
+  }
+  const limit = req.body?.limit === undefined ? 25 : Number(req.body.limit);
+  const onlyMissing = req.body?.onlyMissing !== false;
+  if (!Number.isInteger(limit) || limit < 1 || limit > 100 || typeof onlyMissing !== 'boolean') {
+    res.status(400).json({ success: false, message: 'limit must be between 1 and 100' });
+    return;
+  }
+  try {
+    res.json({ success: true, data: await reindexToolResultHistory(limit, onlyMissing) });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Tool result reindex failed';
+    res.status(message.includes('already running') ? 409 : 503).json({ success: false, message });
+  }
 };
 
 export const searchToolResults = async (req: Request, res: Response): Promise<void> => {
