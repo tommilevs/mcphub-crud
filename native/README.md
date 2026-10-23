@@ -23,6 +23,9 @@ service resolves them from its machine-scoped DPAPI store only when spawning a
 managed process. The dashboard admin API (`/api/native-runtime/secrets/:id`)
 enrolls and removes values, while `/api/native-runtime/status` reports managed
 process state without returning secret material.
+The status payload includes `STARTING`, `RUNNING`, `UNHEALTHY`, `RESTARTING`,
+`CRASH_LOOP`, and `STOPPED`; `UNHEALTHY` is set after a managed stdio read or
+write fails, while restart attempts remain bounded by the process policy.
 
 `runtime-core::dpapi` provides the Windows machine-scoped DPAPI
 protect/unprotect primitive used by the credential broker. Native mode accepts
