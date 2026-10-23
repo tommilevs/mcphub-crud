@@ -2,6 +2,7 @@ import {getAppDataSource} from '../db/connection.js';
 import {listExperienceEntries} from './experienceMemory.js';
 import {mineWorkflowCandidate} from './skillsMiner.js';
 import {experienceAppliesTo} from './experienceScope.js';
+import {renderSkillDraft} from './skillDraft.js';
 
 export async function previewSkillFromExperience(id:string,username:string,keyId:string|null){
   const entries=await listExperienceEntries({id,username,keyId,status:'approved',limit:1});
@@ -16,5 +17,6 @@ export async function previewSkillFromExperience(id:string,username:string,keyId
     identitySource:row.attribution?.identity?.source??'unknown'})));
   if(!candidate)return null;
   return {status:'draft',sourceExperienceId:id,sourceExperienceRevision:source.revision,title:source.title,
-    applicability:{taskType:source.task_type,scope:source.scope,reportedToolVersions:source.tool_versions},candidate};
+    applicability:{taskType:source.task_type,scope:source.scope,reportedToolVersions:source.tool_versions},candidate,
+    markdown:renderSkillDraft({...candidate,title:source.title,taskType:source.task_type,reportedToolVersions:source.tool_versions})};
 }
