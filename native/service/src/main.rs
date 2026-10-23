@@ -4,7 +4,17 @@
 #[cfg(windows)]
 use mcphub_runtime_core::secret_store::SecretStore;
 #[cfg(windows)]
+mod options;
+#[cfg(windows)]
 mod pipe_access;
+#[cfg(windows)]
+static OPTIONS: std::sync::OnceLock<options::Options> = std::sync::OnceLock::new();
+#[cfg(windows)]
+fn options() -> &'static options::Options {
+    OPTIONS
+        .get()
+        .expect("runtime options initialized before service dispatch")
+}
 use mcphub_runtime_core::{ManagedProcessSpec, RuntimeSupervisor};
 use std::io::{self, BufRead, BufReader};
 #[cfg(not(windows))]
@@ -171,7 +181,7 @@ fn handle_request(
             {
                 serde_json::json!({
                     "processes": processes,
-                    "gatewayHealthy": gateway_healthy(),
+                    "gatewayHealthy": !options().no_gateway && gateway_healthy(),
                 })
             }
             #[cfg(not(windows))]
@@ -320,7 +330,7 @@ fn run_named_pipe(
             PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
         },
     };
-    let name: Vec<u16> = "\\\\.\\pipe\\mcphub-runtime"
+    let name: Vec<u16> = format!("\\\\.\\pipe\\{}", options().pipe_name)
         .encode_utf16()
         .chain(std::iter::once(0))
         .collect();
@@ -350,7 +360,10 @@ fn run_named_pipe(
         lpSecurityDescriptor: security_descriptor,
         bInheritHandle: 0,
     };
-    let secrets = std::sync::Arc::new(SecretStore::machine_default()?);
+    let secrets = std::sync::Arc::new(match &options().secret_dir {
+        Some(path) => SecretStore::new(path)?,
+        None => SecretStore::machine_default()?,
+    });
     loop {
         let pipe = unsafe {
             CreateNamedPipeW(
@@ -419,13 +432,14 @@ fn service_main(_arguments: Vec<OsString>) {
             _ => ServiceControlHandlerResult::NotImplemented,
         }
     };
-    let status_handle = match service_control_handler::register("MCPHub", event_handler) {
-        Ok(handle) => handle,
-        Err(error) => {
-            eprintln!("failed to register MCPHub service: {error}");
-            return;
-        }
-    };
+    let status_handle =
+        match service_control_handler::register(&options().service_name, event_handler) {
+            Ok(handle) => handle,
+            Err(error) => {
+                eprintln!("failed to register MCPHub service: {error}");
+                return;
+            }
+        };
     let status = ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: ServiceState::Running,
@@ -439,7 +453,8 @@ fn service_main(_arguments: Vec<OsString>) {
         eprintln!("failed to publish MCPHub service status: {error}");
         return;
     }
-    let _gateway_watchdog = run_gateway_watchdog(Arc::clone(&gateway_child), Arc::clone(&stopping));
+    let _gateway_watchdog = (!options().no_gateway)
+        .then(|| run_gateway_watchdog(Arc::clone(&gateway_child), Arc::clone(&stopping)));
     let supervisor = std::sync::Arc::new(std::sync::Mutex::new(RuntimeSupervisor::new()));
     // Keep restart policy active even when no dashboard/API client is polling
     // status. The named-pipe handlers share the same supervisor lock.
@@ -462,7 +477,10 @@ fn service_main(_arguments: Vec<OsString>) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     {
-        service_dispatcher::start("MCPHub", ffi_service_main)?;
+        OPTIONS
+            .set(options::Options::parse(std::env::args().skip(1))?)
+            .map_err(|_| "runtime options already initialized")?;
+        service_dispatcher::start(&options().service_name, ffi_service_main)?;
         return Ok(());
     }
 

@@ -81,6 +81,22 @@ For a separately launched development gateway with native mode enabled, run that
 gateway elevated. The default Node-owned stdio transport requires no elevation.
 The tray opens the HTTP dashboard and does not need direct pipe access.
 
+The service also accepts explicit diagnostic arguments `--service-name NAME`,
+`--pipe-name NAME`, `--secret-dir ABSOLUTE_PATH` and `--no-gateway`. Defaults stay
+`MCPHub`, `mcphub-runtime`, the machine secret store and gateway watchdog enabled.
+Names allow only letters, digits, dots, underscores and hyphens. These arguments
+let acceptance tests use a separate SCM registration and credential directory
+without touching an existing gateway or production secrets.
+
+After building the service, run `./native/test-service-windows.ps1` from an
+elevated Windows shell. It registers a unique demand-start service with gateway
+launch disabled, exercises a real SDK initialize/list/call through the service,
+machine-DPAPI enrollment/reference resolution/deletion, automatic child restarts
+without dashboard polling and management during a silent stdio exchange. Only
+synthetic fixture values are used. It verifies removal of the temporary service
+and its owned test directory; existing service registrations and port 3000 are
+not changed. This test does not prove bundled gateway, tray or installer behavior.
+
 The Windows Tauri installer can include a self-contained gateway runtime. Run
 `native/package-windows.ps1` before `cargo tauri build` to stage portable
 `node.exe`, the compiled backend `dist`, frontend `frontend/dist`, and production `node_modules`. The installed
