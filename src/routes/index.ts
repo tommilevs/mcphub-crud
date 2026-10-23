@@ -6,6 +6,7 @@ import { saveToolResultReview } from '../controllers/toolResultReviewController.
 import { saveTrainingContext, getTrainingContext } from '../controllers/trainingContextController.js';
 import { previewDataset,exportDataset,getDatasetAvailability } from '../controllers/datasetController.js';
 import {saveExperience,findExperiences,reviewExperience,listExperiences,readExperience,getExperienceAvailability} from '../controllers/experienceController.js';
+import {previewSkillProposal} from '../controllers/skillsMinerController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
 import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
 import express from 'express';
@@ -448,6 +449,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.get('/experiences/search',findExperiences);
   authenticatedRouter.get('/experiences/:id',readExperience);
   authenticatedRouter.patch('/experiences/:id/status',reviewExperience);
+  authenticatedRouter.post('/skills/preview',previewSkillProposal);
 
   // Configuration template routes
   authenticatedRouter.post('/templates/export', templateRateLimiter, auth, exportConfigTemplate);

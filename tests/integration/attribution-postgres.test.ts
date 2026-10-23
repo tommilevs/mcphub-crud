@@ -21,6 +21,7 @@ import {ensureExperienceSchema} from '../../src/db/experienceSchema.js';
 import {createExperience,searchExperiences,listExperienceEntries} from '../../src/services/experienceMemory.js';
 import {reviewExperience,readExperience} from '../../src/controllers/experienceController.js';
 import {getExperienceAdvice} from '../../src/services/experienceAdvice.js';
+import {previewSkillFromExperience} from '../../src/services/skillProposalService.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
@@ -390,15 +391,22 @@ suite('attribution PostgreSQL isolated schema', () => {
     await ensureExperienceSchema(pool);await ensureExperienceSchema(pool);
     const ids:string[]=[],digest='e'.repeat(64);
     for(let index=0;index<2;index++){
-      const task=await service.start('experience-owner'),id=randomUUID();ids.push(id);
-      await pool.query(`INSERT INTO tool_results(result_id,username,key_id,raw_sha256,attribution) VALUES($1,'experience-owner',NULL,$2,$3)`,
-        [id,digest,JSON.stringify({taskId:task.taskId})]);
+      const task=await service.start('experience-owner');
       await pool.query(`INSERT INTO attribution_task_reviews(task_id,revision,outcome,training_consent,reviewed_by) VALUES($1,1,'success',false,'reviewer')`,[task.taskId]);
-      await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,1,$2,'correct','approved','reviewer')`,[id,digest]);
+      for(let step=0;step<2;step++){
+        const id=randomUUID();ids.push(id);
+        await pool.query(`INSERT INTO tool_results(result_id,timestamp,server,tool,username,key_id,raw_sha256,attribution)
+          VALUES($1,$2,'demo',$3,'experience-owner',NULL,$4,$5)`,[id,new Date(Date.now()-2000+step*1000),step?'verify':'inspect',digest,
+          JSON.stringify({taskId:task.taskId,traceId:task.traceId,branchId:task.branchId,modelSegmentId:task.modelSegmentId})]);
+        await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,1,$2,'correct','approved','reviewer')`,[id,digest]);
+      }
     }
     const entry=await createExperience({username:'experience-owner',keyId:null,title:'GPU diagnostic strategy',summary:'Inspect errors before retrying',
       taskType:'diagnostic',scope:{servers:['demo']},toolVersions:{},evidenceIds:ids,approved:true});
     expect(entry?.assessment).toMatchObject({usable:true,confidence:'supported',independentTasks:2});
+    expect((await previewSkillFromExperience(entry!.experience_id,'experience-owner',null))?.candidate).toMatchObject({
+      independentTasks:2,confidence:'proposal',steps:[{server:'demo',tool:'inspect'},{server:'demo',tool:'verify'}]});
+    expect(await previewSkillFromExperience(entry!.experience_id,'other-owner',null)).toBeNull();
     const search=(username='experience-owner')=>searchExperiences({username,keyId:null,query:'diagnostic',limit:10});
     expect(await search()).toHaveLength(1);expect(await search('other-owner')).toHaveLength(0);
     const readCurrent=async(username='experience-owner')=>{
@@ -422,6 +430,7 @@ suite('attribution PostgreSQL isolated schema', () => {
     }
     await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,2,$2,'correct','rejected','reviewer')`,[ids[0],digest]);
     expect(await search()).toHaveLength(0);
+    expect(await previewSkillFromExperience(entry!.experience_id,'experience-owner',null)).toBeNull();
     expect(await readCurrent()).toBe(404);
     expect((await listExperienceEntries({username:'experience-owner',keyId:null,limit:20}))[0].assessment.usable).toBe(false);
     const old=process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED;process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED='true';

@@ -1,0 +1,32 @@
+---
+title: Skills Miner
+description: Evidence-backed draft workflow candidates, never automatic installation
+---
+
+The initial preview stage requires both `MCPHUB_SKILLS_MINER_ENABLED=true` and
+`MCPHUB_EXPERIENCE_MEMORY_ENABLED=true`. Both default off. Admin
+`POST /api/skills/preview` accepts an approved `experienceId` and optional `keyId`;
+the owner is always the authenticated user, never request-body identity.
+
+The source experience must still have current, retained, privacy-approved,
+reviewed-correct results and reviewed successful task outcomes. Mining reads
+result IDs, task/trace/branch, timestamps, tool identity and model-source labels;
+it does not copy arguments or RAW into the candidate.
+
+A candidate needs two independent tasks with the same multi-step server/tool
+sequence. Each task must have a single known trace/branch, strictly ordered
+timestamps and at least two reviewed calls. Duplicate result IDs, unknown branch,
+ambiguous order, differing sequences or revoked sources are rejected. Scope must
+apply to every step. One random successful call never creates a proposal.
+
+The returned object is always a **draft proposal**. Timestamp order is explicitly
+temporal evidence, not proof of causal ordering or a universally correct workflow.
+It retains task/result IDs, the sequence signature, model-source observations,
+applicability and reported version claims. Multiple model segments are not
+credited to the last model. Unknown/self-reported identities remain labeled as
+such; no model performance or generalized confidence is invented.
+
+This slice implements preview eligibility only. Versioned proposal storage,
+prerequisites/safety authoring, user review/approval, SKILL.md export and the
+dashboard remain subsequent stages. No skill file is written, installed or
+executed by the preview endpoint; no tool permissions are changed.
