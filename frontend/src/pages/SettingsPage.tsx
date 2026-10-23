@@ -569,10 +569,12 @@ const SettingsPage: React.FC = () => {
     minTokens: string;
     maxOutputTokens: string;
     strategy: 'auto' | 'json' | 'log' | 'search' | 'diff' | 'text';
+    policiesJson: string;
   }>({
     minTokens: '2000',
     maxOutputTokens: '1200',
     strategy: 'auto',
+    policiesJson: '{}',
   });
 
   const [tempMCPRouterConfig, setTempMCPRouterConfig] = useState<{
@@ -757,6 +759,7 @@ const SettingsPage: React.FC = () => {
         minTokens: String(toolResultCompressionConfig.minTokens || 2000),
         maxOutputTokens: String(toolResultCompressionConfig.maxOutputTokens || 1200),
         strategy: toolResultCompressionConfig.strategy || 'auto',
+        policiesJson: JSON.stringify(toolResultCompressionConfig.policies || {}, null, 2),
       });
     }
   }, [toolResultCompressionConfig]);
@@ -1556,6 +1559,18 @@ const SettingsPage: React.FC = () => {
     }
     if (tempToolResultCompressionConfig.strategy !== toolResultCompressionConfig.strategy) {
       updates.strategy = tempToolResultCompressionConfig.strategy;
+    }
+    let policies: Record<string, unknown>;
+    try {
+      const parsed = JSON.parse(tempToolResultCompressionConfig.policiesJson || '{}');
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('object');
+      policies = parsed as Record<string, unknown>;
+    } catch {
+      showToast(t('settings.toolResultCompressionPoliciesInvalid') || 'Per-tool policies must be valid JSON object', 'error');
+      return;
+    }
+    if (JSON.stringify(policies) !== JSON.stringify(toolResultCompressionConfig.policies || {})) {
+      updates.policies = policies;
     }
 
     if (Object.keys(updates).length > 0) {
@@ -3161,6 +3176,25 @@ const SettingsPage: React.FC = () => {
                       disabled={loading}
                     />
                   </div>
+                </div>
+                <div className="p-3 bg-gray-50 dark:bg-gray-800 rounded-md">
+                  <div className="mb-2">
+                    <h3 className="font-medium text-gray-700">
+                      {t('settings.toolResultCompressionPolicies') || 'Per-tool policies'}
+                    </h3>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {t('settings.toolResultCompressionPoliciesDescription') || 'JSON keyed by server/tool or tool name. Each value may override enabled, minTokens, maxOutputTokens, and strategy.'}
+                    </p>
+                  </div>
+                  <textarea
+                    value={tempToolResultCompressionConfig.policiesJson}
+                    onChange={(e) => setTempToolResultCompressionConfig((prev) => ({ ...prev, policiesJson: e.target.value }))}
+                    rows={7}
+                    spellCheck={false}
+                    className="hub-input w-full font-mono text-xs"
+                    disabled={loading}
+                    aria-label={t('settings.toolResultCompressionPolicies') || 'Per-tool policies'}
+                  />
                 </div>
               </div>
 

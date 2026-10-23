@@ -38,6 +38,7 @@ export interface SystemConfig {
     minTokens?: number;
     maxOutputTokens?: number;
     strategy?: 'auto' | 'json' | 'log' | 'search' | 'diff' | 'text';
+    policies?: Record<string, Record<string, unknown>>;
   };
   nameSeparator?: string;
   auth?: {

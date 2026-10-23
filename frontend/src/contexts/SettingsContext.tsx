@@ -68,6 +68,12 @@ interface ToolResultCompressionConfig {
   minTokens: number;
   maxOutputTokens: number;
   strategy: ToolResultCompressionStrategy;
+  policies: Record<string, {
+    enabled?: boolean;
+    minTokens?: number;
+    maxOutputTokens?: number;
+    strategy?: ToolResultCompressionStrategy;
+  }>;
 }
 
 interface MCPRouterConfig {
@@ -396,6 +402,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
       minTokens: 2000,
       maxOutputTokens: 1200,
       strategy: 'auto',
+      policies: {},
     });
 
   const [mcpRouterConfig, setMCPRouterConfig] = useState<MCPRouterConfig>({
@@ -504,6 +511,9 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
           strategy: ['auto', 'json', 'log', 'search', 'diff', 'text'].includes(strategy)
             ? strategy
             : 'auto',
+          policies: toolResultCompression.policies && typeof toolResultCompression.policies === 'object'
+            ? toolResultCompression.policies
+            : {},
         });
       }
       if (data.success && data.data?.systemConfig?.mcpRouter) {
