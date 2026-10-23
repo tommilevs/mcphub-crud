@@ -22,7 +22,7 @@ use std::sync::{
     Arc, Mutex,
 };
 #[cfg(windows)]
-use std::time::Duration;
+use std::time::{Duration, Instant};
 #[cfg(windows)]
 use windows_service::{define_windows_service, service_dispatcher};
 
@@ -49,24 +49,26 @@ fn gateway_healthy() -> bool {
 }
 
 #[cfg(windows)]
-fn spawn_gateway() -> Option<Child> {
+fn spawn_gateway() -> Option<(Child, Instant)> {
     if gateway_healthy() {
         return None;
     }
     let executable = std::env::current_exe().ok()?;
     let install_dir = executable.parent()?;
-    let resource_dir = install_dir.join("runtime");
+    // Tauri places bundled resources under `<install>\\resources`; keep the
+    // install-root fallback for development and older bundles.
+    let resource_dir = [install_dir.join("resources"), install_dir.to_path_buf()]
+        .into_iter()
+        .map(|dir| dir.join("runtime"))
+        .find(|dir| dir.join("node.exe").exists() && dir.join("dist").join("index.js").exists())?;
     let node = resource_dir.join("node.exe");
     let backend = resource_dir.join("dist").join("index.js");
-    if !node.exists() || !backend.exists() {
-        return None;
-    }
     let data_dir = std::env::var_os("ProgramData")
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| install_dir.to_path_buf())
         .join("MCPHub");
     std::fs::create_dir_all(&data_dir).ok()?;
-    Command::new(node)
+    let child = Command::new(node)
         .arg(backend)
         .current_dir(resource_dir)
         .stdin(Stdio::null())
@@ -77,12 +79,13 @@ fn spawn_gateway() -> Option<Child> {
         .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
         .env("MCPHUB_SETTING_PATH", data_dir.join("mcp_settings.json"))
         .spawn()
-        .ok()
+        .ok()?;
+    Some((child, Instant::now()))
 }
 
 #[cfg(windows)]
 fn run_gateway_watchdog(
-    child: Arc<Mutex<Option<Child>>>,
+    child: Arc<Mutex<Option<(Child, Instant)>>>,
     stopping: Arc<AtomicBool>,
 ) -> std::thread::JoinHandle<()> {
     std::thread::Builder::new()
@@ -95,12 +98,17 @@ fn run_gateway_watchdog(
                         Err(_) => break,
                     };
                     match guard.as_mut() {
-                        Some(process) => match process.try_wait() {
+                        Some((process, started)) => match process.try_wait() {
                             Ok(Some(_)) => {
                                 *guard = None;
                                 true
                             }
-                            Ok(None) => !gateway_healthy(),
+                            // Give the bundled Node gateway time to load its
+                            // dependencies and run migrations before treating
+                            // an unready health endpoint as a failure.
+                            Ok(None) => {
+                                started.elapsed() >= Duration::from_secs(30) && !gateway_healthy()
+                            }
                             Err(_) => {
                                 *guard = None;
                                 true
@@ -111,7 +119,7 @@ fn run_gateway_watchdog(
                 };
                 if needs_start {
                     if let Ok(mut guard) = child.lock() {
-                        if let Some(mut process) = guard.take() {
+                        if let Some((mut process, _)) = guard.take() {
                             let _ = process.kill();
                             let _ = process.wait();
                         }
@@ -125,7 +133,7 @@ fn run_gateway_watchdog(
                 std::thread::sleep(Duration::from_secs(2));
             }
             if let Ok(mut guard) = child.lock() {
-                if let Some(mut process) = guard.take() {
+                if let Some((mut process, _)) = guard.take() {
                     let _ = process.kill();
                     let _ = process.wait();
                 }
@@ -346,7 +354,7 @@ fn service_main(_arguments: Vec<OsString>) {
     };
 
     let stopping = Arc::new(AtomicBool::new(false));
-    let gateway_child: Arc<Mutex<Option<Child>>> = Arc::new(Mutex::new(None));
+    let gateway_child: Arc<Mutex<Option<(Child, Instant)>>> = Arc::new(Mutex::new(None));
     let event_stopping = Arc::clone(&stopping);
     let event_gateway = Arc::clone(&gateway_child);
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
@@ -354,7 +362,7 @@ fn service_main(_arguments: Vec<OsString>) {
             ServiceControl::Stop | ServiceControl::Shutdown => {
                 event_stopping.store(true, Ordering::Release);
                 if let Ok(mut guard) = event_gateway.lock() {
-                    if let Some(mut process) = guard.take() {
+                    if let Some((mut process, _)) = guard.take() {
                         let _ = process.kill();
                         let _ = process.wait();
                     }
