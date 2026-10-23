@@ -1,5 +1,15 @@
 {
   "attribution": {
+    "loopSummary": "LoopGuard feedback",
+    "loopCycleAdviceCount": "A two-step failure cycle repeated {{count}} times. Review both errors and consider changing the diagnostic strategy. Intentional retries remain allowed.",
+    "loopAdviceCount": "{{count}} identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.",
+    "loopSummaryHelp": "Retained warnings from the last 30 days. Each warning uses its latest explicit review; repeated votes do not multiply counts. Unreviewed or ignored warnings are not accuracy assessments. These reports do not establish task outcomes or agent reactions.",
+    "loopWarnings": "Warnings",
+    "loopHelpful": "Reported helpful",
+    "loopFalsePositive": "Reported false positives",
+    "loopIgnored": "Explicitly ignored",
+    "loopUnreviewed": "Unreviewed",
+    "loopReportedRate": "False-positive reports / assessed",
     "loopFeedback": { "helpful": "Helpful", "false_positive": "False positive", "ignored": "Skipped" },
     "loopSettingsHelp": "Advice for repeated failures within a task branch. Requires attribution; never blocks tools.",
     "loopIgnoredTools": "Tools excluded from LoopGuard, one server/tool per line",

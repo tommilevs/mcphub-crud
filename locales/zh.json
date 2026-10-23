@@ -1,5 +1,15 @@
 {
   "attribution": {
+    "loopSummary": "LoopGuard 反馈",
+    "loopCycleAdviceCount": "双步骤失败循环重复了{{count}}次。请检查两个错误并考虑改变诊断策略。仍允许有意重试。",
+    "loopAdviceCount": "观察到{{count}}次相同的快速失败。重试前请检查已保存的错误和工具模式。仍允许有意重试。",
+    "loopSummaryHelp": "最近30天保留的警告。每条警告仅采用最新的明确评价，重复投票不会增加计数。未评价或忽略的警告不属于准确性评价。这些报告不能证明任务结果或代理反应。",
+    "loopWarnings": "警告",
+    "loopHelpful": "报告有帮助",
+    "loopFalsePositive": "报告误报",
+    "loopIgnored": "明确忽略",
+    "loopUnreviewed": "未评价",
+    "loopReportedRate": "误报报告 / 已评估",
     "loopFeedback": { "helpful": "有帮助", "false_positive": "误报", "ignored": "已跳过" },
     "loopSettingsHelp": "针对任务分支中重复失败的建议。需要启用归属功能；绝不会阻止工具。",
     "loopIgnoredTools": "LoopGuard 排除的工具，每行一个 server/tool",

@@ -1,7 +1,7 @@
 import { metrics } from '../controllers/metricsController.js';
 import { getAttributionEvents, getAttributionSummary } from '../controllers/attributionController.js';
 import { saveTaskReview } from '../controllers/taskReviewController.js';
-import { submitLoopGuardFeedback } from '../controllers/loopGuardFeedbackController.js';
+import { submitLoopGuardFeedback, getLoopGuardSummary } from '../controllers/loopGuardFeedbackController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
 import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
 import express from 'express';
@@ -414,6 +414,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   // Immutable tool execution result history (database mode, admin-only handlers)
   authenticatedRouter.get('/attribution/traces/:traceId/events', getAttributionEvents);
   authenticatedRouter.get('/attribution/summary', getAttributionSummary);
+  authenticatedRouter.get('/loopguard/summary', getLoopGuardSummary);
   authenticatedRouter.put('/attribution/tasks/:taskId/review', saveTaskReview);
   authenticatedRouter.get('/tool-results/available', checkToolResultHistoryAvailable);
   authenticatedRouter.get('/tool-results', getToolResults);

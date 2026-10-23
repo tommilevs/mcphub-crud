@@ -11,7 +11,7 @@ import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
-import { submitLoopGuardFeedback } from '../../src/controllers/loopGuardFeedbackController.js';
+import { submitLoopGuardFeedback, getLoopGuardSummary } from '../../src/controllers/loopGuardFeedbackController.js';
 
 const suite = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 suite('attribution PostgreSQL isolated schema', () => {
@@ -204,5 +204,14 @@ suite('attribution PostgreSQL isolated schema', () => {
     }
     expect((await pool.query('SELECT count(*) FROM tool_result_loop_feedback WHERE result_id=$1', [resultId])).rows[0].count).toBe('2');
     expect((await pool.query('SELECT raw FROM tool_results WHERE result_id=$1', [resultId])).rows[0].raw).toBe(before);
+    let summary: any;
+    await getLoopGuardSummary({ user: { isAdmin: true }, query: { days: '30' } } as unknown as Request,
+      { json: (value: any) => { summary = value.data; }, status: () => { throw new Error('Summary failed'); } } as unknown as Response);
+    expect(summary).toMatchObject({ reviewed: 1, helpful: 0, falsePositive: 1, assessed: 1, reportedFalsePositiveRate: 1 });
+    expect(summary.unreviewed).toBe(summary.advice - 1);
+    await pool.query(`UPDATE tool_result_state SET loop_guard_feedback='{"verdict":"ignored"}'::jsonb WHERE result_id=$1`, [resultId]);
+    await getLoopGuardSummary({ user: { isAdmin: true }, query: {} } as unknown as Request,
+      { json: (value: any) => { summary = value.data; }, status: () => { throw new Error('Summary failed'); } } as unknown as Response);
+    expect(summary).toMatchObject({ reviewed: 1, helpful: 0, falsePositive: 0, ignored: 1, assessed: 0, reportedFalsePositiveRate: null });
   });
 });

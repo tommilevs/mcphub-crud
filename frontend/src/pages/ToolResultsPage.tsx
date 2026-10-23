@@ -4,6 +4,7 @@ import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
 import AttributionSummaryPanel from '@/components/AttributionSummaryPanel';
+import LoopGuardSummaryPanel from '@/components/LoopGuardSummaryPanel';
 import TaskReviewForm from '@/components/TaskReviewForm';
 import LoopGuardFeedbackButtons from '@/components/LoopGuardFeedbackButtons';
 import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
@@ -203,8 +204,8 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
       {detail.loopGuardAdvice && <section className="hub-card p-3 space-y-2">
         <h2 className="text-sm font-medium">LoopGuard</h2>
         <p className="text-xs">{detail.loopGuardAdvice.trigger === 'alternating_failure_cycle'
-          ? t('attribution.loopCycleAdvice', 'A two-step failure cycle repeated three times. Review both errors and consider changing the diagnostic strategy. Intentional retries remain allowed.')
-          : t('attribution.loopAdvice', 'Three identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.')}</p>
+          ? t('attribution.loopCycleAdviceCount', { count: detail.loopGuardAdvice.resultIds.length / 2, defaultValue: 'A two-step failure cycle repeated {{count}} times. Review both errors and consider changing the diagnostic strategy. Intentional retries remain allowed.' })
+          : t('attribution.loopAdviceCount', { count: detail.loopGuardAdvice.resultIds.length, defaultValue: '{{count}} identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.' })}</p>
         <div className="flex flex-wrap gap-2">{detail.loopGuardAdvice.resultIds.map((id) => <Link key={id} className="hub-mono text-xs text-[var(--hub-accent)] break-all" to={`/tool-results/${encodeURIComponent(id)}`}>{id}</Link>)}</div>
         <LoopGuardFeedbackButtons key={detail.resultId} resultId={detail.resultId} initialVerdict={detail.loopGuardFeedback?.verdict} />
       </section>}
@@ -268,6 +269,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
 
 const ToolResultsPage: React.FC = () => {
   const [showAttributionSummary, setShowAttributionSummary] = useState(false);
+  const [showLoopGuardSummary, setShowLoopGuardSummary] = useState(false);
   const { resultId } = useParams<{ resultId?: string }>();
   const [searchParams] = useSearchParams();
   const { t } = useTranslation();
@@ -381,6 +383,8 @@ const ToolResultsPage: React.FC = () => {
     <section className="hub-card">
       <button type="button" className="hub-btn m-3" aria-expanded={showAttributionSummary} onClick={() => setShowAttributionSummary(!showAttributionSummary)}>{t('attribution.title', 'Model attribution')}</button>
       {showAttributionSummary && <AttributionSummaryPanel />}
+      <button type="button" className="hub-btn m-3" aria-expanded={showLoopGuardSummary} onClick={() => setShowLoopGuardSummary(!showLoopGuardSummary)}>{t('attribution.loopSummary', 'LoopGuard feedback')}</button>
+      {showLoopGuardSummary && <LoopGuardSummaryPanel />}
     </section>
     {stats && <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {[[t('toolResults.total'), stats.total], [t('toolResults.pinned'), stats.pinned], [t('toolResults.payloads'), stats.payloadAvailable], [t('toolResults.storage'), bytes(stats.totalRawBytes)]].map(([label, value]) => <div key={label} className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{label}</div><div className="hub-num mt-1 text-xl">{value}</div></div>)}

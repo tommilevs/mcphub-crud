@@ -40,6 +40,12 @@ export interface AttributionSummary {
   executionErrors: number;
   models: Array<{ model_id: string | null; source: string; calls: number; execution_errors: number }>;
 }
+export interface LoopGuardSummary {
+  advice: number; reviewed: number; helpful: number; falsePositive: number; ignored: number;
+  unreviewed: number; assessed: number; reportedFalsePositiveRate: number | null;
+}
+export const getLoopGuardSummary = (days = 30) =>
+  apiGet<ApiResponse<LoopGuardSummary>>(`/loopguard/summary?days=${days}`);
 export const saveTaskReview = (taskId: string, review: { outcome: string; trainingConsent: boolean; revision: number }) =>
   apiPut<ApiResponse<unknown>>(`/attribution/tasks/${encodeURIComponent(taskId)}/review`, review);
 export const submitLoopGuardFeedback = (resultId: string, verdict: 'helpful' | 'false_positive' | 'ignored') =>
