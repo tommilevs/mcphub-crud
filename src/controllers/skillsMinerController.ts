@@ -1,7 +1,7 @@
 import type {Request,Response} from 'express';
 import {requireAdmin} from '../utils/requireAdmin.js';
 import {previewSkillFromExperience} from '../services/skillProposalService.js';
-import {createSkillProposal,listSkillProposals,reviseSkillProposal,exportSkillProposal} from '../services/storedSkillProposals.js';
+import {createSkillProposal,listSkillProposals,reviseSkillProposal,exportSkillProposal,readSkillVersions} from '../services/storedSkillProposals.js';
 export async function previewSkillProposal(req:Request,res:Response):Promise<void>{
   if(!await requireAdmin(req,res))return;
   if(process.env.MCPHUB_SKILLS_MINER_ENABLED!=='true'||process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED!=='true'){
@@ -57,4 +57,21 @@ export async function manageSkillProposals(req:Request,res:Response):Promise<voi
     if(!data){res.status(409).json({success:false,message:'Skill revision or reviewed source is no longer current'});return;}
     res.json({success:true,data});
   }catch{res.status(503).json({success:false,message:'Skills Miner is unavailable'});}
+}
+export async function getSkillVersions(req:Request,res:Response):Promise<void>{
+  if(!await requireAdmin(req,res))return;
+  if(process.env.MCPHUB_SKILLS_MINER_ENABLED!=='true'||process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED!=='true'){
+    res.status(404).json({success:false,message:'Skills Miner is disabled'});return;
+  }
+  const id=req.params.id,username=(req as any).user?.username,keyId=req.query.keyId??null,cursor=req.query.beforeRevision;
+  if(typeof id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)||
+    typeof username!=='string'||!username||(keyId!==null&&(typeof keyId!=='string'||!keyId||keyId.length>255))||
+    (cursor!==undefined&&(typeof cursor!=='string'||!/^\d+$/.test(cursor)||!Number.isSafeInteger(Number(cursor))||Number(cursor)<1||Number(cursor)>2147483647))){
+    res.status(400).json({success:false,message:'Invalid version cursor or skill scope'});return;
+  }
+  try{
+    const data=await readSkillVersions(id,{username,keyId:keyId as string|null},cursor===undefined?undefined:Number(cursor));
+    if(!data){res.status(404).json({success:false,message:'Skill not found'});return;}
+    res.setHeader('Cache-Control','no-store');res.json({success:true,data});
+  }catch{res.status(503).json({success:false,message:'Skill versions are unavailable'});}
 }

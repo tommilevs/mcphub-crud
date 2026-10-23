@@ -1,7 +1,7 @@
 import type {Request,Response} from 'express';
-jest.mock('../../src/services/storedSkillProposals.js',()=>({createSkillProposal:jest.fn(),listSkillProposals:jest.fn(),reviseSkillProposal:jest.fn(),exportSkillProposal:jest.fn()}));
-import {manageSkillProposals} from '../../src/controllers/skillsMinerController.js';
-import {exportSkillProposal,reviseSkillProposal,listSkillProposals} from '../../src/services/storedSkillProposals.js';
+jest.mock('../../src/services/storedSkillProposals.js',()=>({createSkillProposal:jest.fn(),listSkillProposals:jest.fn(),reviseSkillProposal:jest.fn(),exportSkillProposal:jest.fn(),readSkillVersions:jest.fn()}));
+import {manageSkillProposals,getSkillVersions} from '../../src/controllers/skillsMinerController.js';
+import {exportSkillProposal,reviseSkillProposal,listSkillProposals,readSkillVersions} from '../../src/services/storedSkillProposals.js';
 const id='af3e4f22-cd76-4b99-8cf7-52db210e54de';
 const old=[process.env.MCPHUB_SKILLS_MINER_ENABLED,process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED];
 const response=()=>({status:jest.fn().mockReturnThis(),json:jest.fn(),send:jest.fn(),setHeader:jest.fn()});
@@ -33,4 +33,12 @@ test('disabled and nonadmin requests never reach storage, and key scope is not w
   process.env.MCPHUB_SKILLS_MINER_ENABLED='true';(listSkillProposals as jest.Mock).mockResolvedValue([]);
   await manageSkillProposals(request({method:'GET',params:{},query:{keyId:'specific'}}),response() as unknown as Response);
   expect(listSkillProposals).toHaveBeenCalledWith({username:'owner',keyId:'specific'},undefined);
+});
+test('history validates its cursor and never returns foreign/missing proposals',async()=>{
+  const bad=response();await getSkillVersions(request({method:'GET',query:{beforeRevision:'-1'}}),bad as unknown as Response);
+  expect(bad.status).toHaveBeenCalledWith(400);expect(readSkillVersions).not.toHaveBeenCalled();
+  (readSkillVersions as jest.Mock).mockResolvedValue(null);
+  const missing=response();await getSkillVersions(request({method:'GET',query:{beforeRevision:'10',keyId:'specific'}}),missing as unknown as Response);
+  expect(readSkillVersions).toHaveBeenCalledWith(id,{username:'owner',keyId:'specific'},10);
+  expect(missing.status).toHaveBeenCalledWith(404);
 });

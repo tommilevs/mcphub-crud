@@ -2,7 +2,7 @@ jest.mock('../../src/db/connection.js',()=>({getAppDataSource:jest.fn()}));
 jest.mock('../../src/services/skillProposalService.js',()=>({previewSkillFromExperience:jest.fn()}));
 import {getAppDataSource} from '../../src/db/connection.js';
 import {previewSkillFromExperience} from '../../src/services/skillProposalService.js';
-import {reviseSkillProposal,exportSkillProposal} from '../../src/services/storedSkillProposals.js';
+import {reviseSkillProposal,exportSkillProposal,readSkillVersions} from '../../src/services/storedSkillProposals.js';
 const owner={username:'alice',keyId:null};
 const proposal={revision:1,status:'approved',source_experience_id:'source',source_revision:2,markdown:'reviewed',source_snapshot:{candidate:{workflowSignature:'sequence'}}};
 const query=jest.fn();
@@ -26,4 +26,12 @@ test('export refuses stale sources, drafts and concurrent retirement',async()=>{
   expect(await exportSkillProposal('id',owner)).toBeNull();
   query.mockResolvedValue([{...proposal,status:'draft'}]);
   expect(await exportSkillProposal('id',owner)).toBeNull();
+});
+test('version reader is owner scoped and uses a bounded descending revision cursor',async()=>{
+  query.mockResolvedValueOnce([]);
+  expect(await readSkillVersions('id',owner)).toBeNull();
+  query.mockResolvedValueOnce([proposal]).mockResolvedValueOnce(Array.from({length:11},(_,index)=>({revision:20-index,snapshot:{markdown:`version ${20-index}`}})));
+  const page=await readSkillVersions('id',owner,21);
+  expect(page?.versions).toHaveLength(10);expect(page?.nextBeforeRevision).toBe(11);
+  expect(query.mock.calls[2][1]).toEqual(['id','alice',null,21]);
 });

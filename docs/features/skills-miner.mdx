@@ -38,6 +38,14 @@ maximum). Every edit resets status to draft; approval is a separate request agai
 the exact revision. Concurrent changes have one winner and return 409 otherwise.
 Each change atomically appends a version snapshot, preserving previous content.
 
+`GET /api/skills/:id/versions?keyId=...&beforeRevision=...` reads saved revisions
+in descending order, ten per page. `nextBeforeRevision` is an exclusive cursor;
+missing and foreign proposals both return 404. The dashboard offers a read-only,
+plain-text version viewer with older pages loaded on request. Historical approval
+does not authorize exporting an old snapshot: the export endpoint always checks
+the current proposal and current evidence. History remains available for owner
+governance even when evidence no longer qualifies for export.
+
 `POST /api/skills/:id/export` downloads the reviewed Markdown as `SKILL.md` only
 when the proposal is approved and its source experience revision and reviewed
 workflow remain current. Privacy revocation, missing evidence, retirement or changed

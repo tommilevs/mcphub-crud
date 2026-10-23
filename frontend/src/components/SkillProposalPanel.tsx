@@ -1,11 +1,17 @@
 import {useState} from 'react';
 import {useTranslation} from 'react-i18next';
-import {createSkill,listSkills,reviseSkill,downloadSkill,type SkillProposal} from '@/services/skillService';
+import {createSkill,listSkills,reviseSkill,downloadSkill,readSkillVersions,type SkillProposal,type SkillVersion} from '@/services/skillService';
 
 function SkillEditor({entry,keyId,busy,perform,refresh}:{entry:SkillProposal;keyId:string;busy:boolean;
   perform:(action:()=>Promise<void>)=>Promise<void>;refresh:()=>Promise<void>}){
   const {t}=useTranslation();
   const [markdown,setMarkdown]=useState(entry.markdown),[reviewed,setReviewed]=useState(false);
+  const [versions,setVersions]=useState<SkillVersion[]>(),[cursor,setCursor]=useState<number|null>(null);
+  const loadVersions=async(append=false)=>{
+    const response=await readSkillVersions(entry.proposal_id,keyId,append?cursor??undefined:undefined);
+    if(!response.success||!response.data)throw new Error(response.message||t('app.error'));
+    setVersions(append?[...(versions??[]),...response.data.versions]:response.data.versions);setCursor(response.data.nextBeforeRevision);
+  };
   const dirty=markdown!==entry.markdown;
   const update=async(status:string,edit=false)=>{
     const response=await reviseSkill(entry.proposal_id,{revision:entry.revision,status,...(edit?{markdown}:{})},keyId);
@@ -30,7 +36,16 @@ function SkillEditor({entry,keyId,busy,perform,refresh}:{entry:SkillProposal;key
         setTimeout(()=>URL.revokeObjectURL(url),1000);
       })}>{t('skills.download','Download SKILL.md')}</button>
       <button type="button" className="hub-btn" disabled={busy||entry.status==='retired'} onClick={()=>perform(()=>update('retired'))}>{t('experiences.actions.retired','Retire')}</button>
+      <button type="button" className="hub-btn" disabled={busy} onClick={()=>perform(()=>loadVersions())}>{t('skills.versions','View saved versions')}</button>
     </div>
+    {versions&&<div className="space-y-2">
+      <p className="text-xs text-[var(--hub-ink-3)]">{t('skills.historyHelp','Historical snapshots are read-only. Past approval does not authorize exporting an old version; export always checks the current proposal and evidence.')}</p>
+      {versions.map(version=><details key={version.revision} className="rounded border border-[var(--hub-line)] p-2 text-xs">
+        <summary>#{version.revision} · {version.status} · {version.reviewedBy} · {new Date(version.reviewedAt).toLocaleString()}</summary>
+        <pre className="mt-2 whitespace-pre-wrap break-words">{version.markdown}</pre>
+      </details>)}
+      {cursor!==null&&<button type="button" className="hub-btn" disabled={busy} onClick={()=>perform(()=>loadVersions(true))}>{t('skills.moreVersions','Load earlier versions')}</button>}
+    </div>}
   </article>;
 }
 

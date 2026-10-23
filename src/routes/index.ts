@@ -6,7 +6,7 @@ import { saveToolResultReview } from '../controllers/toolResultReviewController.
 import { saveTrainingContext, getTrainingContext } from '../controllers/trainingContextController.js';
 import { previewDataset,exportDataset,getDatasetAvailability,listDatasetExports } from '../controllers/datasetController.js';
 import {saveExperience,findExperiences,reviewExperience,listExperiences,readExperience,getExperienceAvailability} from '../controllers/experienceController.js';
-import {previewSkillProposal,manageSkillProposals} from '../controllers/skillsMinerController.js';
+import {previewSkillProposal,manageSkillProposals,getSkillVersions} from '../controllers/skillsMinerController.js';
 import {manageDatasetPreferences,datasetPreferenceAvailability} from '../controllers/datasetPreferenceController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
 import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
@@ -458,6 +458,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.post('/skills/preview',previewSkillProposal);
   authenticatedRouter.post('/skills',manageSkillProposals);
   authenticatedRouter.get('/skills',manageSkillProposals);
+  authenticatedRouter.get('/skills/:id/versions',getSkillVersions);
   authenticatedRouter.patch('/skills/:id',manageSkillProposals);
   authenticatedRouter.post('/skills/:id/export',manageSkillProposals);
 

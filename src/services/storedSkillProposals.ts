@@ -18,6 +18,17 @@ export async function listSkillProposals(owner:Owner,id?:string){
   return getAppDataSource().query(`SELECT * FROM skill_proposals WHERE username=$1 AND key_id IS NOT DISTINCT FROM $2
     AND ($3::uuid IS NULL OR proposal_id=$3) ORDER BY reviewed_at DESC,proposal_id LIMIT 50`,[owner.username,owner.keyId,id??null]);
 }
+export async function readSkillVersions(id:string,owner:Owner,beforeRevision?:number){
+  if(!(await listSkillProposals(owner,id)).length)return null;
+  const rows=await getAppDataSource().query(`SELECT version.revision,version.snapshot FROM skill_proposal_versions version
+    JOIN skill_proposals proposal USING(proposal_id)
+    WHERE proposal.proposal_id=$1 AND proposal.username=$2 AND proposal.key_id IS NOT DISTINCT FROM $3
+      AND ($4::integer IS NULL OR version.revision<$4) ORDER BY version.revision DESC LIMIT 11`,
+    [id,owner.username,owner.keyId,beforeRevision??null]);
+  const versions=rows.slice(0,10).map((row:any)=>({revision:row.revision,markdown:row.snapshot.markdown,status:row.snapshot.status,
+    reviewedBy:row.snapshot.reviewed_by,reviewedAt:row.snapshot.reviewed_at,sourceExperienceRevision:row.snapshot.source_revision}));
+  return {versions,nextBeforeRevision:rows.length>10?versions[versions.length-1].revision:null};
+}
 async function sourceIsCurrent(proposal:any,owner:Owner){
   const current=await previewSkillFromExperience(proposal.source_experience_id,owner.username,owner.keyId);
   return !!current&&current.sourceExperienceRevision===proposal.source_revision&&

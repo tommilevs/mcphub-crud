@@ -26,7 +26,7 @@ import {ensureSkillProposalSchema} from '../../src/db/skillProposalSchema.js';
 import {ensureDatasetExportSchema} from '../../src/db/datasetExportSchema.js';
 import {ensureDatasetPreferenceSchema} from '../../src/db/datasetPreferenceSchema.js';
 import {createPreference,reviewPreference} from '../../src/services/datasetPreference.js';
-import {createSkillProposal,reviseSkillProposal,exportSkillProposal,listSkillProposals} from '../../src/services/storedSkillProposals.js';
+import {createSkillProposal,reviseSkillProposal,exportSkillProposal,listSkillProposals,readSkillVersions} from '../../src/services/storedSkillProposals.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
@@ -498,6 +498,14 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect(await exportSkillProposal(skill.proposal_id,skillOwner)).toBeNull();
     expect(await reviseSkillProposal(skill.proposal_id,skillOwner,{revision:3,status:'approved'})).toMatchObject({status:'approved',revision:4});
     expect((await pool.query('SELECT count(*) FROM skill_proposal_versions WHERE proposal_id=$1',[skill.proposal_id])).rows[0].count).toBe('4');
+    const history=await readSkillVersions(skill.proposal_id,skillOwner);
+    expect(history?.versions.map(version=>version.revision)).toEqual([4,3,2,1]);
+    expect(history?.versions[1]).toMatchObject({markdown:'Edited draft',status:'draft'});
+    expect(history?.versions[3].markdown).toContain('## Evidence');
+    expect(history?.versions[0]).not.toHaveProperty('source_snapshot');
+    expect((await readSkillVersions(skill.proposal_id,skillOwner,3))?.versions.map(version=>version.revision)).toEqual([2,1]);
+    expect(await readSkillVersions(skill.proposal_id,{username:'other-owner',keyId:null})).toBeNull();
+    expect(await readSkillVersions(skill.proposal_id,{...skillOwner,keyId:'other-key'})).toBeNull();
     const search=(username='experience-owner')=>searchExperiences({username,keyId:null,query:'diagnostic',limit:10});
     expect(await search()).toHaveLength(1);expect(await search('other-owner')).toHaveLength(0);
     const readCurrent=async(username='experience-owner')=>{
