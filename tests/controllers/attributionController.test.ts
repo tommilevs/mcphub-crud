@@ -1,9 +1,19 @@
 import type { Request, Response } from 'express';
 const mockQuery = jest.fn();
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => ({ query: mockQuery }) }));
-import { getAttributionEvents } from '../../src/controllers/attributionController.js';
+import { getAttributionEvents, getAttributionSummary } from '../../src/controllers/attributionController.js';
 
 const response = () => ({ status: jest.fn().mockReturnThis(), json: jest.fn().mockReturnThis() });
+test('summary returns bounded aggregate metrics without treating tool execution as task success', async () => {
+  mockQuery.mockClear();
+  mockQuery.mockResolvedValue([{ summary: { total: 3, known: 1, verified: 0, conflicted: 1, models: [] } }]);
+  const res = response();
+  await getAttributionSummary({ user: { isAdmin: true }, query: {} } as unknown as Request, res as unknown as Response);
+  expect(mockQuery.mock.calls[0][0]).toContain("status = 'error'");
+  expect(mockQuery.mock.calls[0][0]).not.toContain('task_success');
+  expect(mockQuery.mock.calls[0][1]).toEqual([30]);
+  expect(res.json).toHaveBeenCalledWith({ success: true, data: { total: 3, known: 1, verified: 0, conflicted: 1, models: [] }, meta: { days: 30 } });
+});
 test('requires admin and rejects invalid trace or unbounded limits', async () => {
   const res = response();
   await getAttributionEvents({ user: { isAdmin: false }, params: {}, query: {} } as unknown as Request, res as unknown as Response);

@@ -32,6 +32,16 @@ export interface AttributionEvent {
   claimed_model_id: string | null;
   identity_source: 'unknown' | 'self_reported';
 }
+export interface AttributionSummary {
+  total: number;
+  known: number;
+  verified: number;
+  conflicted: number;
+  executionErrors: number;
+  models: Array<{ model_id: string | null; source: string; calls: number; execution_errors: number }>;
+}
+export const getAttributionSummary = (days = 30) =>
+  apiGet<ApiResponse<AttributionSummary>>(`/attribution/summary?days=${days}`);
 export const getAttributionEvents = (traceId: string, cursor?: string) =>
   apiGet<ApiResponse<AttributionEvent[]> & { meta?: { hasMore: boolean; nextCursor?: string } }>(`/attribution/traces/${encodeURIComponent(traceId)}/events?${query({ limit: 100, cursor })}`);
 

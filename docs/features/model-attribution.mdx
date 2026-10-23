@@ -67,3 +67,10 @@ Trusted host/gateway adapters,
 identity analytics, training export gates and the settings UI are still pending.
 Clients must be able to read MCP result metadata to retain the issued key.
 An interrupted response can lose its newly issued key; start a new context to recover.
+
+The Tool Results page includes an on-demand attribution summary of retained calls
+from the last 30 days: known and verified coverage, conflicts, and up to 50
+model/source observation groups with sample counts and execution-error counts.
+Legacy results without attribution count as unknown. The admin endpoint
+`GET /api/attribution/summary?days=30` accepts 1–3650 days. These observations
+do not establish task success, tool-selection quality or a ranking of models.

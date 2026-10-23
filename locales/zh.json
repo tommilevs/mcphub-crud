@@ -1,5 +1,12 @@
 {
   "attribution": {
+    "summaryHelp": "最近 30 天保留的调用。执行错误不代表工具选择错误或任务结果。",
+    "totalCalls": "保留的调用",
+    "knownCoverage": "已知模型覆盖率",
+    "verifiedCoverage": "已验证覆盖率",
+    "conflicts": "冲突调用",
+    "modelSummary": "模型观测，最多 50 组",
+    "executionErrors": "执行错误",
     "loadMore": "加载更多事件",
     "events": "身份时间线",
     "noEvents": "没有身份事件",

@@ -1,5 +1,12 @@
 {
   "attribution": {
+    "summaryHelp": "Retained calls from the last 30 days. Execution errors do not establish tool-selection errors or task outcomes.",
+    "totalCalls": "Retained calls",
+    "knownCoverage": "Known model coverage",
+    "verifiedCoverage": "Verified coverage",
+    "conflicts": "Conflicted calls",
+    "modelSummary": "Model observations, up to 50 groups",
+    "executionErrors": "Execution errors",
     "loadMore": "Load more events",
     "events": "Identity timeline",
     "noEvents": "No identity events",

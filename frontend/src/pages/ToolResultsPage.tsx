@@ -3,6 +3,7 @@ import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-r
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
+import AttributionSummaryPanel from '@/components/AttributionSummaryPanel';
 import type { PaginationInfo, ToolResultChunk, ToolResultChunkHit, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultSearchDiagnostics, ToolResultStats, ToolResultSummary } from '@/types';
 import {
   getToolResult,
@@ -245,6 +246,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
 };
 
 const ToolResultsPage: React.FC = () => {
+  const [showAttributionSummary, setShowAttributionSummary] = useState(false);
   const { resultId } = useParams<{ resultId?: string }>();
   const [searchParams] = useSearchParams();
   const { t } = useTranslation();
@@ -355,6 +357,10 @@ const ToolResultsPage: React.FC = () => {
 
   return <div className="p-5 space-y-4">
     <div><h1 className="text-lg font-semibold text-[var(--hub-ink)]">{t('toolResults.title')}</h1><p className="mt-1 text-sm text-[var(--hub-ink-3)]">{t('toolResults.subtitle')}</p></div>
+    <section className="hub-card">
+      <button type="button" className="hub-btn m-3" aria-expanded={showAttributionSummary} onClick={() => setShowAttributionSummary(!showAttributionSummary)}>{t('attribution.title', 'Model attribution')}</button>
+      {showAttributionSummary && <AttributionSummaryPanel />}
+    </section>
     {stats && <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       {[[t('toolResults.total'), stats.total], [t('toolResults.pinned'), stats.pinned], [t('toolResults.payloads'), stats.payloadAvailable], [t('toolResults.storage'), bytes(stats.totalRawBytes)]].map(([label, value]) => <div key={label} className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{label}</div><div className="hub-num mt-1 text-xl">{value}</div></div>)}
     </div>}

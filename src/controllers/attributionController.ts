@@ -3,6 +3,36 @@ import { requireAdmin } from '../utils/requireAdmin.js';
 import { getAppDataSource } from '../db/connection.js';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+export async function getAttributionSummary(req: Request, res: Response): Promise<void> {
+  if (!await requireAdmin(req, res)) return;
+  const days = Number(req.query.days ?? 30);
+  if (!Number.isInteger(days) || days < 1 || days > 3650) {
+    res.status(400).json({ success: false, message: 'Invalid summary period' });
+    return;
+  }
+  try {
+    const rows = await getAppDataSource().query(`WITH recent AS (
+      SELECT attribution, status FROM tool_results
+      WHERE timestamp >= NOW() - ($1::integer * INTERVAL '1 day')
+    ), models AS (
+      SELECT attribution->'identity'->>'modelId' AS model_id,
+        COALESCE(attribution->'identity'->>'source', 'unknown') AS source,
+        COUNT(*) AS calls, COUNT(*) FILTER (WHERE status = 'error') AS execution_errors
+      FROM recent GROUP BY 1, 2 ORDER BY calls DESC, model_id NULLS LAST LIMIT 50
+    ) SELECT json_build_object(
+      'total', COUNT(*),
+      'known', COUNT(*) FILTER (WHERE NULLIF(attribution->'identity'->>'modelId', '') IS NOT NULL AND attribution->>'conflictReason' IS NULL),
+      'verified', COUNT(*) FILTER (WHERE attribution->'identity'->>'verified' = 'true' AND attribution->'identity'->>'source' IN ('gateway_observed', 'host_reported') AND attribution->>'conflictReason' IS NULL),
+      'conflicted', COUNT(*) FILTER (WHERE attribution->>'conflictReason' IS NOT NULL),
+      'executionErrors', COUNT(*) FILTER (WHERE status = 'error'),
+      'models', COALESCE((SELECT json_agg(models) FROM models), '[]'::json)
+    ) AS summary FROM recent`, [days]);
+    res.json({ success: true, data: rows[0].summary, meta: { days } });
+  } catch {
+    res.status(503).json({ success: false, message: 'Attribution summary is unavailable' });
+  }
+}
+
 export async function getAttributionEvents(req: Request, res: Response): Promise<void> {
   if (!await requireAdmin(req, res)) return;
   const traceId = String(req.params.traceId ?? '');
