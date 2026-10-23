@@ -14,5 +14,7 @@ describe('ensureToolResultHistorySchema', () => {
     expect(sql).toContain('CREATE TRIGGER tool_results_immutable');
     expect(sql).toContain('BEFORE UPDATE ON tool_results');
     expect(sql).toContain('tool_results_search_idx');
+    expect(sql).toContain('tool_results_session_idx');
+    expect(sql).toContain('tool_results_conversation_idx');
   });
 });
