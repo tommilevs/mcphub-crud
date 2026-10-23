@@ -1,6 +1,17 @@
 import type { AttributionContextService } from './attributionContextService.js';
 import { runWithCallAttribution } from './callAttribution.js';
 
+export function stripAttributionInput(request: any) {
+  const params = request.params ?? {};
+  const smart = ['search_tools', 'describe_tool', 'call_tool'].includes(params.name);
+  const { hub_context: _context, ...args } = params.arguments ?? {};
+  const { 'dev.mcphub/attribution': _attribution, ...remainingMeta } = params._meta ?? {};
+  return { ...request, params: { ...params,
+    ...(smart && params.arguments ? { arguments: args } : {}),
+    ...(params._meta ? { _meta: remainingMeta } : {}),
+  } };
+}
+
 /** The context belongs to the hub and must never become an upstream tool argument. */
 export async function withAttributionHandshake(
   request: any,
@@ -13,11 +24,7 @@ export async function withAttributionHandshake(
   if ((!hub && !meta) || !['search_tools', 'describe_tool', 'call_tool'].includes(request.params?.name)) {
     return handler(request);
   }
-  const { hub_context: _context, ...args } = request.params.arguments ?? {};
-  const { 'dev.mcphub/attribution': _attribution, ...remainingMeta } = request.params._meta ?? {};
-  const cleaned = { ...request, params: { ...request.params, arguments: args,
-    ...(request.params._meta ? { _meta: remainingMeta } : {}),
-  } };
+  const cleaned = stripAttributionInput(request);
   const validObject = (value: any) => value && typeof value === 'object' && !Array.isArray(value);
   const keyConflict = validObject(hub) && validObject(meta) && hub.trace_key && meta.trace_key && hub.trace_key !== meta.trace_key;
   const modelConflict = validObject(hub) && validObject(meta) && hub.model_claim && meta.model_id && hub.model_claim !== meta.model_id;

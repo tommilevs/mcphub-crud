@@ -1,18 +1,23 @@
 import { AttributionContextService } from './attributionContextService.js';
-import { withAttributionHandshake } from './attributionHandshake.js';
+import { withAttributionHandshake, stripAttributionInput } from './attributionHandshake.js';
 import { RequestContextService } from './requestContextService.js';
 import { runWithCallAttribution } from './callAttribution.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
 
 export async function runWithAttribution(request: any, handler: (request: any) => Promise<any>) {
-  const config = await getSmartRoutingConfig();
+  let config;
+  try {
+    config = await getSmartRoutingConfig();
+  } catch {
+    return runWithCallAttribution(null, () => handler(stripAttributionInput(request)));
+  }
   if (config.attributionMode !== 'compatible') {
     return handler(request);
   }
   const current = RequestContextService.getInstance().getRequestContext();
   // Anonymous requests lack a stable authenticated owner for correlation keys.
   if ((!request.params?.arguments?.hub_context && !request.params?._meta?.['dev.mcphub/attribution']) || (!current?.username && !current?.keyId)) {
-    return runWithCallAttribution(null, () => handler(request));
+    return runWithCallAttribution(null, () => handler(stripAttributionInput(request)));
   }
   const principal = JSON.stringify([current.username ?? null, current.keyId ?? null]);
   try {
@@ -23,6 +28,6 @@ export async function runWithAttribution(request: any, handler: (request: any) =
       undefined, (config.attributionTtlHours ?? 168) * 60 * 60 * 1000);
     return withAttributionHandshake(request, principal, service, handler);
   } catch {
-    return runWithCallAttribution(null, () => handler(request));
+    return runWithCallAttribution(null, () => handler(stripAttributionInput(request)));
   }
 }
