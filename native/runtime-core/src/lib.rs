@@ -164,6 +164,20 @@ impl RuntimeSupervisor {
         Ok(())
     }
 
+    /// Stop and immediately spawn the same managed command with a fresh
+    /// restart budget. This is the dashboard recovery path for unhealthy or
+    /// crash-looping processes.
+    pub fn restart(&mut self, id: &str) -> Result<ProcessStatus, SupervisorError> {
+        let mut process = self
+            .processes
+            .remove(id)
+            .ok_or_else(|| SupervisorError::NotFound(id.to_owned()))?;
+        let _ = process.child.kill();
+        let _ = process.child.wait();
+        self.stopped.remove(id);
+        self.start(process.spec)
+    }
+
     pub fn poll(&mut self) -> Vec<ProcessStatus> {
         let mut statuses = Vec::new();
         let ids: Vec<String> = self.processes.keys().cloned().collect();

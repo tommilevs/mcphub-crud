@@ -160,6 +160,9 @@ fn handle_request(
             supervisor.stop(request["id"].as_str().unwrap_or_default())?;
             serde_json::json!({"ok": true})
         }
+        Some("restart") => serde_json::to_value(
+            supervisor.restart(request["id"].as_str().unwrap_or_default())?,
+        )?,
         Some("status") => serde_json::to_value(supervisor.statuses())?,
         Some("stdio") => {
             serde_json::json!({"responses": supervisor.send_stdio(request["id"].as_str().unwrap_or_default(), request["message"].as_str().unwrap_or_default())?})

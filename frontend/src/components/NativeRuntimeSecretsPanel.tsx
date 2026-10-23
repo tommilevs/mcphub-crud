@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { apiDelete, apiGet, apiPut } from '@/utils/fetchInterceptor';
+import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/fetchInterceptor';
 import { useToast } from '@/contexts/ToastContext';
 
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
@@ -72,6 +72,20 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
     }
   };
 
+  const restart = async (processId: string) => {
+    setBusy(true);
+    try {
+      const response = await apiPost(`/native-runtime/processes/${encodeURIComponent(processId)}/restart`, {});
+      if (response?.success === false) throw new Error(response.message || response.error);
+      showToast(`Restart requested for ${processId}.`, 'success');
+      await refreshStatus();
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : 'Native runtime unavailable', 'error');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="hub-card mb-6 p-5">
       <h2 className="font-medium text-[var(--hub-ink)]">Windows native runtime secrets</h2>
@@ -94,6 +108,7 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
               <span className={process.running ? 'text-green-600' : 'text-amber-600'}>
                 {process.state || (process.running ? 'RUNNING' : 'STOPPED')} · {process.restarts}/{process.restart_limit ?? '—'} restarts
               </span>
+              <button type="button" disabled={busy} onClick={() => void restart(process.id)} className="hub-btn secondary !py-1 !px-2">Restart</button>
             </div>
           ))}
         </div>

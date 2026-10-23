@@ -123,7 +123,7 @@ import {
 } from '../controllers/builtinResourceController.js';
 import { uploadMcpbFile, uploadMiddleware } from '../controllers/mcpbController.js';
 import { healthCheck } from '../controllers/healthController.js';
-import { deleteSecret, getStatus, putSecret } from '../controllers/nativeRuntimeController.js';
+import { deleteSecret, getStatus, putSecret, restartProcess } from '../controllers/nativeRuntimeController.js';
 import { getBetterAuthUser } from '../controllers/betterAuthController.js';
 import {
   getOpenAPISpec,
@@ -338,6 +338,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   );
   authenticatedRouter.put('/system-config', updateSystemConfig);
   authenticatedRouter.get('/native-runtime/status', requireAdminMiddleware, getStatus);
+  authenticatedRouter.post('/native-runtime/processes/:id/restart', requireAdminMiddleware, restartProcess);
   authenticatedRouter.put('/native-runtime/secrets/:id', requireAdminMiddleware, putSecret);
   authenticatedRouter.delete('/native-runtime/secrets/:id', requireAdminMiddleware, deleteSecret);
   authenticatedRouter.post('/cache/clear', clearCache);

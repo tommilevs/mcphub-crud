@@ -1,15 +1,17 @@
 const mockPut = jest.fn();
 const mockDelete = jest.fn();
 const mockStatus = jest.fn();
+const mockRestart = jest.fn();
 
 jest.mock('../../src/services/nativeRuntimeSecretService.js', () => ({
   putNativeRuntimeSecret: mockPut,
   deleteNativeRuntimeSecret: mockDelete,
   getNativeRuntimeStatus: mockStatus,
+  restartNativeRuntimeProcess: mockRestart,
 }));
 
 import type { Request, Response } from 'express';
-import { deleteSecret, getStatus, putSecret } from '../../src/controllers/nativeRuntimeController.js';
+import { deleteSecret, getStatus, putSecret, restartProcess } from '../../src/controllers/nativeRuntimeController.js';
 
 const response = () => {
   const res: Partial<Response> = {};
@@ -55,5 +57,18 @@ describe('nativeRuntimeController', () => {
     await getStatus({} as Request, failed);
     expect(failed.status).toHaveBeenCalledWith(503);
     expect(failed.json).toHaveBeenCalledWith({ error: 'offline' });
+  });
+
+  it('restarts a valid managed process and rejects invalid ids', async () => {
+    const invalid = response();
+    await restartProcess({ params: { id: 'bad/id' } } as unknown as Request, invalid);
+    expect(invalid.status).toHaveBeenCalledWith(400);
+    expect(mockRestart).not.toHaveBeenCalled();
+
+    mockRestart.mockResolvedValue({ id: 'desktop-commander', state: 'STARTING' });
+    const res = response();
+    await restartProcess({ params: { id: 'desktop-commander' } } as unknown as Request, res);
+    expect(mockRestart).toHaveBeenCalledWith('desktop-commander');
+    expect(res.json).toHaveBeenCalledWith({ data: { id: 'desktop-commander', state: 'STARTING' } });
   });
 });

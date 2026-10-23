@@ -46,3 +46,6 @@ export const deleteNativeRuntimeSecret = (id: string): Promise<RuntimeResponse> 
   callRuntime({ op: 'secret_delete', id });
 
 export const getNativeRuntimeStatus = (): Promise<RuntimeResponse> => callRuntime({ op: 'status' });
+
+export const restartNativeRuntimeProcess = (id: string): Promise<RuntimeResponse> =>
+  callRuntime({ op: 'restart', id });
