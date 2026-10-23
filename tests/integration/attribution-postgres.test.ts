@@ -16,6 +16,7 @@ import { getCallAttribution } from '../../src/services/callAttribution.js';
 import { RequestContextService } from '../../src/services/requestContextService.js';
 import { saveTrainingContext, getTrainingContext } from '../../src/controllers/trainingContextController.js';
 import { extractDiscoveryEvidence } from '../../src/services/discoveryEvidence.js';
+import { previewDataset,exportDataset } from '../../src/controllers/datasetController.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
@@ -349,5 +350,36 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect((await pool.query('SELECT count(*) FROM tool_result_training_contexts WHERE result_id=$1',[id])).rows[0].count).toBe('2');
     await pool.query('DELETE FROM tool_results WHERE result_id=$1',[id]);
     expect((await pool.query('SELECT count(*) FROM tool_result_training_contexts WHERE result_id=$1',[id])).rows[0].count).toBe('0');
+  });
+  test('dataset preview/export enforces tenant and latest consent without exporting RAW',async()=>{
+    const oldFlag=process.env.MCPHUB_DATASET_BUILDER_ENABLED;process.env.MCPHUB_DATASET_BUILDER_ENABLED='true';
+    const context=await service.start('dataset-owner'),id=randomUUID(),digest='d'.repeat(64);
+    const tools=[{name:'demo-read',inputSchema:{type:'object'}}];
+    await pool.query(`INSERT INTO tool_results(result_id,username,key_id,raw,raw_sha256,objective,arguments,attribution)
+      VALUES($1,'dataset-owner',NULL,'do not export RAW',$2,'read a record','{}',$3)`,[id,digest,JSON.stringify({
+      taskId:context.taskId,traceId:context.traceId,branchId:context.branchId,modelSegmentId:context.modelSegmentId,
+      invokedToolName:'demo-read',identity:{modelId:'observed',source:'gateway_observed',verified:true},provenance:{causalCorrelationVerified:true}})]);
+    await pool.query(`INSERT INTO attribution_task_reviews(task_id,revision,outcome,training_consent,reviewed_by) VALUES($1,1,'success',true,'reviewer')`,[context.taskId]);
+    await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,1,$2,'correct','approved','reviewer')`,[id,digest]);
+    await pool.query(`INSERT INTO tool_result_training_contexts(result_id,revision,discovery_call_id,objective,tool_catalogue,privacy_approved,reviewed_by)
+      VALUES($1,1,$2,'read a record',$3,true,'reviewer')`,[id,randomUUID(),JSON.stringify(tools)]);
+    const invoke=async(download:boolean,username='dataset-owner',split='train')=>{
+      let payload:any,body='';
+      const res={json:(value:any)=>{payload=value;},setHeader:()=>{},send:(value:string)=>{body=value;},status:()=>{throw new Error('Dataset request failed');}};
+      await (download?exportDataset:previewDataset)({user:{isAdmin:true,username},body:{resultIds:[id],split}} as unknown as Request,res as unknown as Response);
+      return {payload,body};
+    };
+    try{
+      const preview=(await invoke(false)).payload.data;
+      expect(preview.exported).toBe(1);
+      const split=Object.keys(preview.splits).find(key=>preview.splits[key]===1)!;
+      const downloaded=(await invoke(true,'dataset-owner',split)).body;
+      expect(JSON.parse(downloaded).metadata).toMatchObject({resultId:id,identityTrust:'trusted',split});
+      expect(downloaded).not.toContain('do not export RAW');
+      expect((await invoke(false,'other-owner')).payload.data.exported).toBe(0);
+      await pool.query(`INSERT INTO attribution_task_reviews(task_id,revision,outcome,training_consent,reviewed_by) VALUES($1,2,'success',false,'reviewer')`,[context.taskId]);
+      expect((await invoke(false)).payload.data.excluded.training_consent_missing).toBe(1);
+      expect((await invoke(true,'dataset-owner',split)).body).toBe('');
+    }finally{if(oldFlag===undefined)delete process.env.MCPHUB_DATASET_BUILDER_ENABLED;else process.env.MCPHUB_DATASET_BUILDER_ENABLED=oldFlag;}
   });
 });

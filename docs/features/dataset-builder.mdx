@@ -1,0 +1,49 @@
+---
+title: Dataset Builder
+description: Reviewed, tenant-scoped tool-selection SFT export
+---
+
+Enable `MCPHUB_DATASET_BUILDER_ENABLED=true` explicitly. The default is disabled.
+Admin `POST /api/datasets/preview` and `/api/datasets/export` accept:
+
+```json
+{"resultIds":["RESULT_UUID"],"keyId":null,"allowSelfReported":false,
+ "seed":"mcphub-v1","format":"tool-selection-sft","split":"train"}
+```
+
+Select 1–100 result IDs. Ownership always comes from the authenticated username;
+`keyId` selects one of that owner's call scopes. A missing or foreign result is
+reported identically as unavailable/out of scope. No cross-owner/key dataset is
+assembled. Every preview and export re-reads the latest reviews and consent.
+
+An example needs retained payload and digest, reviewed correct tool choice,
+digest-bound privacy approval, reviewed discovery/task context, explicit task
+consent and a user-confirmed positive/partial task outcome. Default attribution
+requires trusted call-bound gateway/host evidence without conflicts. Self-reports
+need separate explicit opt-in and remain labeled unverified. Unknown models,
+incorrect calls, conflicts and revoked reviews cannot become positive examples.
+Known credential patterns, sensitive argument values and email addresses are
+excluded even when approval was recorded. This is a conservative detection pass,
+not a complete PII detector; human privacy review remains required. Excluded
+material is not silently rewritten into a different supposedly correct call.
+
+Preview returns a versioned manifest with exclusion counts, deduplication count,
+split sizes, seed and content digest. Export requires one split (`train`,
+`validation`, `test`) and downloads JSONL, capped at 10 MiB. Responses are no-store.
+Connected components of shared task IDs, trace IDs and duplicate input examples
+are assigned together before the 80/10/10 split. Exact semantic input duplicates
+are emitted once. Keep the same frozen selection/seed when comparing splits;
+there is not yet a persistent cross-export leakage registry.
+
+Version 1 is explicitly **derived direct tool-selection SFT**: objective and
+discovered catalogue are the prompt, reviewed backend tool/arguments are the
+target. This normalizes the Smart facade into a direct tool-selection action;
+it does not claim to reconstruct the original client's entire conversation.
+Metadata preserves per-call model/segment, review revisions, task outcome and RAW
+digest/result ID. RAW contents, trace keys, fictional final answers and automatic
+training are excluded. DPO and full trajectories are not implemented by this
+format; execution success/failure alone never creates preference labels.
+
+Downloaded files cannot be recalled after consent withdrawal. Subsequent exports
+re-check current consent rather than serving an old cached artifact. A dedicated
+Dataset Builder dashboard and persisted dataset jobs remain subsequent work.
