@@ -26,6 +26,23 @@ try {
   $env:MCPHUB_NATIVE_TEST_SECRET_DIR=$secrets
   npm run -s test -- --runInBand tests/integration/native-service-windows.test.ts --silent
   if($LASTEXITCODE -ne 0){throw "SCM acceptance failed: $LASTEXITCODE"}
+  # Verify SCM recovery independently of the child-process watchdog.
+  sc.exe failure $name reset= 60 actions= restart/1000 | Out-Null
+  if($LASTEXITCODE -ne 0){throw 'Cannot configure isolated recovery actions.'}
+  sc.exe failureflag $name 1 | Out-Null
+  if($LASTEXITCODE -ne 0){throw 'Cannot configure isolated failure flag.'}
+  $before=Get-CimInstance Win32_Service -Filter "Name='$name'"
+  Stop-Process -Id $before.ProcessId -Force
+  $deadline=[DateTime]::UtcNow.AddSeconds(15)
+  do {
+    Start-Sleep -Milliseconds 250
+    $after=Get-CimInstance Win32_Service -Filter "Name='$name'"
+  } until(($after.State -eq 'Running' -and $after.ProcessId -ne $before.ProcessId) -or [DateTime]::UtcNow -ge $deadline)
+  if($after.State -ne 'Running' -or $after.ProcessId -eq $before.ProcessId){throw 'SCM did not recover the crashed service.'}
+  Stop-Service -Name $name
+  Start-Sleep -Seconds 3
+  $after=Get-CimInstance Win32_Service -Filter "Name='$name'"
+  if($after.State -ne 'Stopped'){throw 'Intentional stop triggered SCM recovery.'}
 }
 finally {
   $env:MCPHUB_NATIVE_TEST_PIPE=$oldPipe;$env:MCPHUB_NATIVE_TEST_SECRET_DIR=$oldSecrets

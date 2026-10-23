@@ -495,20 +495,11 @@ fn service_main(_arguments: Vec<OsString>) {
     let stopping = Arc::new(AtomicBool::new(false));
     let gateway_child: Arc<Mutex<Option<(Child, Instant)>>> = Arc::new(Mutex::new(None));
     let event_stopping = Arc::clone(&stopping);
-    let event_gateway = Arc::clone(&gateway_child);
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
         match control_event {
             ServiceControl::Stop | ServiceControl::Shutdown => {
                 event_stopping.store(true, Ordering::Release);
-                if let Ok(mut guard) = event_gateway.lock() {
-                    if let Some((mut process, _)) = guard.take() {
-                        let _ = process.kill();
-                        let _ = process.wait();
-                    }
-                }
-                // Dropping the supervisor closes each Job Object and takes
-                // managed descendants down with the service process.
-                std::process::exit(0);
+                ServiceControlHandlerResult::NoError
             }
             _ => ServiceControlHandlerResult::NotImplemented,
         }
@@ -521,6 +512,7 @@ fn service_main(_arguments: Vec<OsString>) {
                 return;
             }
         };
+
     let status = ServiceStatus {
         service_type: ServiceType::OWN_PROCESS,
         current_state: ServiceState::Running,
@@ -534,6 +526,31 @@ fn service_main(_arguments: Vec<OsString>) {
         eprintln!("failed to publish MCPHub service status: {error}");
         return;
     }
+    let shutdown_stopping = Arc::clone(&stopping);
+    let shutdown_gateway = Arc::clone(&gateway_child);
+    std::thread::spawn(move || {
+        while !shutdown_stopping.load(Ordering::Acquire) {
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if let Ok(mut guard) = shutdown_gateway.lock() {
+            if let Some((mut process, _)) = guard.take() {
+                let _ = process.kill();
+                let _ = process.wait();
+            }
+        }
+        // Finish outside the control callback so SCM receives its success reply.
+        let _ = status_handle.set_service_status(ServiceStatus {
+            service_type: ServiceType::OWN_PROCESS,
+            current_state: ServiceState::Stopped,
+            controls_accepted: ServiceControlAccept::empty(),
+            exit_code: ServiceExitCode::Win32(0),
+            checkpoint: 0,
+            wait_hint: Duration::default(),
+            process_id: None,
+        });
+        // OS teardown closes owned jobs; process::exit does not run Rust Drop.
+        std::process::exit(0);
+    });
     let _gateway_watchdog = (!options().no_gateway)
         .then(|| run_gateway_watchdog(Arc::clone(&gateway_child), Arc::clone(&stopping)));
     let supervisor = std::sync::Arc::new(std::sync::Mutex::new(RuntimeSupervisor::new()));
