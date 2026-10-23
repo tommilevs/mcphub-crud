@@ -18,5 +18,8 @@ describe('ensureToolResultHistorySchema', () => {
     expect(sql).toContain('tool_results_conversation_idx');
     expect(sql).toContain('ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS raw_text');
     expect(sql).toContain('ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS payload_available');
+    expect(sql).toContain('ALTER TABLE tool_result_state ADD COLUMN IF NOT EXISTS use_count');
+    expect(sql).toContain('ALTER TABLE tool_result_chunks ADD COLUMN IF NOT EXISTS content');
+    expect(sql).toContain('tool_result_chunks_search_idx');
   });
 });

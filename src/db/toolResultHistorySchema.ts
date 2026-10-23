@@ -46,8 +46,6 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
       embedding vector,
       PRIMARY KEY (result_id, chunk_index, chunk_version)
     );
-    CREATE INDEX IF NOT EXISTS tool_result_chunks_search_idx
-      ON tool_result_chunks USING gin (to_tsvector('simple', content));
   `);
 
   // The history tables are created outside TypeORM migrations so the feature
@@ -68,6 +66,13 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS raw_sha256 char(64);
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS payload_available boolean NOT NULL DEFAULT TRUE;
     ALTER TABLE tool_results ADD COLUMN IF NOT EXISTS payload_omission_reason text;
+    ALTER TABLE tool_result_state ADD COLUMN IF NOT EXISTS pinned boolean NOT NULL DEFAULT FALSE;
+    ALTER TABLE tool_result_state ADD COLUMN IF NOT EXISTS use_count integer NOT NULL DEFAULT 0;
+    ALTER TABLE tool_result_state ADD COLUMN IF NOT EXISTS last_referenced_at timestamptz;
+    ALTER TABLE tool_result_chunks ADD COLUMN IF NOT EXISTS chunk_index integer NOT NULL DEFAULT 0;
+    ALTER TABLE tool_result_chunks ADD COLUMN IF NOT EXISTS chunk_version integer NOT NULL DEFAULT 1;
+    ALTER TABLE tool_result_chunks ADD COLUMN IF NOT EXISTS content text NOT NULL DEFAULT '';
+    ALTER TABLE tool_result_chunks ADD COLUMN IF NOT EXISTS embedding vector;
   `);
 
   await dataSource.query(`
@@ -88,6 +93,8 @@ export const ensureToolResultHistorySchema = async (dataSource: Queryable): Prom
         to_tsvector('simple', coalesce(server, '') || ' ' || coalesce(tool, '') || ' ' ||
           coalesce(objective, '') || ' ' || coalesce(raw_text, ''))
       );
+    CREATE INDEX IF NOT EXISTS tool_result_chunks_search_idx
+      ON tool_result_chunks USING gin (to_tsvector('simple', content));
   `);
 
   await dataSource.query(`
