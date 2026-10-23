@@ -1,0 +1,41 @@
+---
+title: Experience Memory
+description: Reviewed strategies with scoped, current source evidence
+---
+
+Enable `MCPHUB_EXPERIENCE_MEMORY_ENABLED=true` explicitly; default off. PostgreSQL
+stores derived proposals separately from immutable tool results. No model weights,
+tools or skills are modified or executed.
+
+Admin `POST /api/experiences` accepts `title` (160 characters), `summary` (4000),
+`taskType`, one `keyId` scope, 1–20 `evidenceIds`, optional `scope` with server/tool
+lists, and `toolVersions` (operator-reported claims, not observed version proof).
+`approved` defaults to false; drafts are not retrieved. Explicit approval requires
+all source results to exist in the authenticated owner's/key scope, retain RAW,
+have digest-matching approved privacy/correct-call reviews and current reviewed
+successful task outcomes. Execution status alone is never an outcome label.
+
+`GET /api/experiences/search?q=diagnostic&limit=10` returns approved proposals in
+the caller's owner/key scope, with optional `taskType` and `keyId`. PostgreSQL
+full-text retrieval uses title, summary and task type; up to 100 candidates are
+rechecked against current source reviews before returning at most 20. Removed,
+revoked or no-longer-successful evidence hides a proposal until it is reviewed
+again with suitable evidence. Stored source IDs and the creation-time evidence
+snapshot remain auditable; they do not override current privacy decisions.
+
+One reviewed task supports only a **hypothesis**. Two distinct reviewed task IDs
+receive the **supported** label, meaning multiple user-confirmed examples—not
+statistical confidence, independent verification of the rule, or proof of
+generalization. Multiple calls in the same task do not multiply task evidence.
+Scope and version claims must be considered before using a strategy elsewhere.
+
+`PATCH /api/experiences/:id/status` accepts the current `revision`, `keyId` and
+`status` (`draft`, `approved`, `retired`). Every change is atomically audited;
+concurrent stale updates return 409. Approval rechecks evidence. Retirement works
+even if evidence expired. Local experience retrieval is a different purpose from
+training export; task training consent is not silently inferred or granted.
+
+This slice provides reviewed proposal storage, audit and lexical retrieval API.
+UI editing, automatic extraction, hybrid vector retrieval, optional Basic Memory
+adapter and opt-in injection into ToolPilot/Smart Routing remain subsequent work.
+These entries are advice, never new permissions or commands to execute.

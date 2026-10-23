@@ -5,6 +5,7 @@ import { submitLoopGuardFeedback, getLoopGuardSummary } from '../controllers/loo
 import { saveToolResultReview } from '../controllers/toolResultReviewController.js';
 import { saveTrainingContext, getTrainingContext } from '../controllers/trainingContextController.js';
 import { previewDataset,exportDataset,getDatasetAvailability } from '../controllers/datasetController.js';
+import {saveExperience,findExperiences,reviewExperience} from '../controllers/experienceController.js';
 import { managePersonalOAuth } from '../controllers/personalOAuthController.js';
 import { listMyCredentials, updateMyCredential } from '../controllers/credentialBindingController.js';
 import express from 'express';
@@ -441,6 +442,9 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.post('/datasets/preview',previewDataset);
   authenticatedRouter.get('/datasets/available',getDatasetAvailability);
   authenticatedRouter.post('/datasets/export',exportDataset);
+  authenticatedRouter.post('/experiences',saveExperience);
+  authenticatedRouter.get('/experiences/search',findExperiences);
+  authenticatedRouter.patch('/experiences/:id/status',reviewExperience);
 
   // Configuration template routes
   authenticatedRouter.post('/templates/export', templateRateLimiter, auth, exportConfigTemplate);
