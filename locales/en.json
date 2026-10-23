@@ -1492,7 +1492,10 @@
     "searches": "searches",
     "hybrid": "hybrid",
     "indexFailures": "index failures",
-    "timeline": "Session timeline",
-    "timelineEmpty": "No results found for this session"
+    "timeline": "Timeline",
+    "timelineEmpty": "No results found for this scope",
+    "lineage": "Result lineage",
+    "ancestors": "Ancestors",
+    "children": "Children"
   }
 }

@@ -986,6 +986,11 @@ export interface ToolResultCompare {
   totalBytes: number;
 }
 
+export interface ToolResultLineage {
+  ancestors: ToolResultSummary[];
+  children: ToolResultSummary[];
+}
+
 export interface PaginationInfo {
   page: number;
   limit: number;

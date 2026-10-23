@@ -102,6 +102,40 @@ export const getToolResultConversationTimeline = async (req: Request, res: Respo
   res.json({ success: true, data: result.data.map(publicRecord), pagination: { ...result, totalPages: 1 } });
 };
 
+export const getToolResultLineage = async (req: Request, res: Response): Promise<void> => {
+  if (!(await requireAdmin(req, res))) return;
+  const repository = requireRepository(res);
+  if (!repository) return;
+  const resultId = String(req.params.id || '').trim();
+  if (!resultId) {
+    res.status(400).json({ success: false, message: 'Invalid result id' });
+    return;
+  }
+  const record = await repository.findById(resultId);
+  if (!record) {
+    res.status(404).json({ success: false, message: 'Tool result not found' });
+    return;
+  }
+  const ancestors: ReturnType<typeof publicRecord>[] = [];
+  const seen = new Set([resultId]);
+  let parentId = record.parentResultId;
+  while (parentId && ancestors.length < 50 && !seen.has(parentId)) {
+    seen.add(parentId);
+    const parent = await repository.findById(parentId);
+    if (!parent) break;
+    ancestors.push(publicRecord(parent));
+    parentId = parent.parentResultId;
+  }
+  const children = await repository.findPaginated(1, 50, { parentResultId: resultId });
+  res.json({
+    success: true,
+    data: {
+      ancestors,
+      children: children.data.map(publicRecord),
+    },
+  });
+};
+
 export const getToolResultById = async (req: Request, res: Response): Promise<void> => {
   if (!(await requireAdmin(req, res))) return;
   const repository = requireRepository(res);

@@ -26,6 +26,7 @@ import {
   compareToolResults,
   getToolResultTimeline,
   getToolResultConversationTimeline,
+  getToolResultLineage,
 } from '../../src/controllers/toolResultController.js';
 
 const makeReq = (overrides: Record<string, unknown> = {}) =>
@@ -161,6 +162,20 @@ describe('toolResultController', () => {
     const res = makeRes();
     await getToolResultConversationTimeline(makeReq({ params: { conversationId: 'c-1' }, query: { limit: '40' } }), res);
     expect(repository.findPaginated).toHaveBeenCalledWith(1, 40, { conversationId: 'c-1' });
+  });
+
+  it('returns bounded parent and child lineage without RAW', async () => {
+    repository.findById
+      .mockResolvedValueOnce({ resultId: 'child', parentResultId: 'parent', raw: 'hidden' })
+      .mockResolvedValueOnce({ resultId: 'parent', raw: 'hidden' });
+    repository.findPaginated.mockResolvedValue({ data: [{ resultId: 'grandchild', raw: 'hidden' }], total: 1, page: 1, limit: 50, totalPages: 1 });
+    const res = makeRes();
+    await getToolResultLineage(makeReq({ params: { id: 'child' } }), res);
+    expect(repository.findPaginated).toHaveBeenCalledWith(1, 50, { parentResultId: 'child' });
+    const data = (res.json as jest.Mock).mock.calls[0][0].data;
+    expect(data.ancestors[0]).toEqual(expect.objectContaining({ resultId: 'parent' }));
+    expect(data.ancestors[0]).not.toHaveProperty('raw');
+    expect(data.children[0]).not.toHaveProperty('raw');
   });
 
   it('compares exactly two result records without exposing RAW', async () => {

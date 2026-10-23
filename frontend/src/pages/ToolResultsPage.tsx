@@ -3,7 +3,7 @@ import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-r
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import Pagination from '@/components/ui/Pagination';
-import type { PaginationInfo, ToolResultDetail, ToolResultFilter, ToolResultStats, ToolResultSummary } from '@/types';
+import type { PaginationInfo, ToolResultDetail, ToolResultFilter, ToolResultLineage, ToolResultStats, ToolResultSummary } from '@/types';
 import {
   getToolResult,
   getToolResultRaw,
@@ -13,6 +13,7 @@ import {
   compareToolResults,
   getToolResultTimeline,
   getToolResultConversationTimeline,
+  getToolResultLineage,
   setToolResultPinned,
 } from '@/services/toolResultHistoryService';
 
@@ -31,9 +32,10 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const [rangeEnd, setRangeEnd] = useState('1024');
   const [rangeOutput, setRangeOutput] = useState('');
   const [rangeError, setRangeError] = useState('');
+  const [lineage, setLineage] = useState<ToolResultLineage | null>(null);
 
   useEffect(() => {
-    Promise.allSettled([getToolResult(resultId), getToolResultRaw(resultId)]).then(([metadata, payload]) => {
+    Promise.allSettled([getToolResult(resultId), getToolResultRaw(resultId), getToolResultLineage(resultId)]).then(([metadata, payload, related]) => {
       if (metadata.status === 'fulfilled' && metadata.value.success && metadata.value.data) {
         setDetail(metadata.value.data);
       } else {
@@ -41,6 +43,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
       }
       if (payload.status === 'fulfilled') setRaw(payload.value);
       else setError(payload.reason instanceof Error ? payload.reason.message : t('toolResults.noPayload'));
+      if (related.status === 'fulfilled' && related.value.success && related.value.data) setLineage(related.value.data);
     });
   }, [resultId, t]);
 
@@ -94,6 +97,11 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
         {detail.rawSha256 && <div><div className="text-[var(--hub-ink-3)]">{t('toolResults.rawHash')}</div><div className="hub-mono mt-1 break-all">{detail.rawSha256}</div></div>}
       </div>}
       {detail.objective && <div className="hub-card p-3"><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.objective')}</div><div className="mt-1 text-sm">{detail.objective}</div></div>}
+      {lineage && (lineage.ancestors.length > 0 || lineage.children.length > 0) && <div className="hub-card p-3 space-y-3">
+        <div className="text-sm font-medium">{t('toolResults.lineage')}</div>
+        {lineage.ancestors.length > 0 && <div><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.ancestors')}</div><div className="mt-1 space-y-1">{lineage.ancestors.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 text-xs hover:bg-[var(--hub-surface-hover)]"><span className="font-medium">{item.server} / {item.tool}</span><span className="ml-2 text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()}</span></Link>)}</div></div>}
+        {lineage.children.length > 0 && <div><div className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.children')}</div><div className="mt-1 space-y-1">{lineage.children.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 text-xs hover:bg-[var(--hub-surface-hover)]"><span className="font-medium">{item.server} / {item.tool}</span><span className="ml-2 text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()}</span></Link>)}</div></div>}
+      </div>}
       <div className="hub-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--hub-line)] px-3 py-2">
           <span className="text-sm font-medium">RAW</span>

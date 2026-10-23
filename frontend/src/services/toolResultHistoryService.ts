@@ -6,6 +6,7 @@ import type {
   ToolResultStats,
   ToolResultSummary,
   ToolResultCompare,
+  ToolResultLineage,
 } from '@/types';
 import { apiGet, apiPatch, apiPost, fetchWithInterceptors } from '@/utils/fetchInterceptor';
 import { getApiUrl } from '@/utils/runtime';
@@ -46,6 +47,9 @@ export const getToolResultConversationTimeline = (
   limit = 100,
 ): Promise<ApiResponse<ToolResultSummary[]>> =>
   apiGet(`/tool-results/conversation-timeline/${encodeURIComponent(conversationId)}?limit=${limit}`);
+
+export const getToolResultLineage = (resultId: string): Promise<ApiResponse<ToolResultLineage>> =>
+  apiGet(`/tool-results/${encodeURIComponent(resultId)}/lineage`);
 
 export const getToolResult = (resultId: string): Promise<ApiResponse<ToolResultDetail>> =>
   apiGet(`/tool-results/${encodeURIComponent(resultId)}`);

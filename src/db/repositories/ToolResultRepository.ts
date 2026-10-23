@@ -285,6 +285,7 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     if (filter.username) add('result.username = ?', filter.username);
     if (filter.sessionId) add('result.session_id = ?', filter.sessionId);
     if (filter.conversationId) add('result.conversation_id = ?', filter.conversationId);
+    if (filter.parentResultId) add('result.parent_result_id = ?', filter.parentResultId);
     if (filter.pinned !== undefined) add('state.pinned = ?', filter.pinned);
     if (filter.startDate) add('result.timestamp >= ?', filter.startDate);
     if (filter.endDate) add('result.timestamp <= ?', filter.endDate);

@@ -51,6 +51,7 @@ export interface ToolResultFilter {
   username?: string;
   sessionId?: string;
   conversationId?: string;
+  parentResultId?: string;
   pinned?: boolean;
   query?: string;
   startDate?: Date;
