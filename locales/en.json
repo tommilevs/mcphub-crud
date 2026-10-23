@@ -1473,6 +1473,8 @@
     "noPayload": "RAW payload is unavailable",
     "session": "Session",
     "conversation": "Conversation",
+    "from": "From",
+    "to": "To",
     "parent": "Parent result",
     "rawHash": "RAW SHA-256",
     "query": "Search objective or result content",

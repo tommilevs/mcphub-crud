@@ -960,6 +960,8 @@ export interface ToolResultFilter {
   pinned?: boolean;
   sessionId?: string;
   conversationId?: string;
+  startDate?: string;
+  endDate?: string;
 }
 
 export interface ToolResultStats {
