@@ -7,6 +7,7 @@ import type { PaginationInfo, ToolResultDetail, ToolResultFilter, ToolResultStat
 import {
   getToolResult,
   getToolResultRaw,
+  getToolResultRawRange,
   getToolResults,
   getToolResultStats,
   compareToolResults,
@@ -25,6 +26,10 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const [detail, setDetail] = useState<ToolResultDetail | null>(null);
   const [raw, setRaw] = useState('');
   const [error, setError] = useState('');
+  const [rangeStart, setRangeStart] = useState('0');
+  const [rangeEnd, setRangeEnd] = useState('1024');
+  const [rangeOutput, setRangeOutput] = useState('');
+  const [rangeError, setRangeError] = useState('');
 
   useEffect(() => {
     Promise.allSettled([getToolResult(resultId), getToolResultRaw(resultId)]).then(([metadata, payload]) => {
@@ -42,6 +47,22 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
     if (!detail) return;
     const response = await setToolResultPinned(resultId, !detail.pinned);
     if (response.success && response.data) setDetail(response.data);
+  };
+
+  const loadRange = async () => {
+    const start = Number(rangeStart);
+    const end = Number(rangeEnd);
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 0 || end <= start) {
+      setRangeError(t('toolResults.rangeError'));
+      return;
+    }
+    try {
+      setRangeError('');
+      setRangeOutput(await getToolResultRawRange(resultId, start, end));
+    } catch (cause) {
+      setRangeOutput('');
+      setRangeError(cause instanceof Error ? cause.message : t('toolResults.rangeError'));
+    }
   };
 
   if (!detail) return <div className="p-6 text-sm text-[var(--hub-ink-3)]">{error || t('app.loading')}</div>;
@@ -79,6 +100,16 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
           </div>}
         </div>
         {raw ? <pre className="max-h-[60vh] overflow-auto p-4 text-xs hub-mono whitespace-pre-wrap break-words">{raw}</pre> : <div className="p-5 text-sm text-[var(--hub-ink-3)]">{detail.payloadOmissionReason || error || t('toolResults.noPayload')}</div>}
+      </div>
+      <div className="hub-card p-3">
+        <div className="text-sm font-medium">{t('toolResults.range')}</div>
+        <div className="mt-2 flex flex-wrap items-end gap-2">
+          <label className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.rangeStart')}<input className="hub-input mt-1 w-28" type="number" min="0" value={rangeStart} onChange={(event) => setRangeStart(event.target.value)} /></label>
+          <label className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.rangeEnd')}<input className="hub-input mt-1 w-28" type="number" min="1" value={rangeEnd} onChange={(event) => setRangeEnd(event.target.value)} /></label>
+          <button className="hub-btn" onClick={() => void loadRange()} disabled={!detail.payloadAvailable}>{t('toolResults.loadRange')}</button>
+        </div>
+        {rangeError && <div className="mt-2 text-sm text-red-500">{rangeError}</div>}
+        {rangeOutput && <pre className="mt-3 max-h-48 overflow-auto rounded border border-[var(--hub-line)] p-3 text-xs hub-mono whitespace-pre-wrap break-words">{rangeOutput}</pre>}
       </div>
     </div>
   );

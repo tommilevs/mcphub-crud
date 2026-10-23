@@ -64,3 +64,19 @@ export const getToolResultRaw = async (resultId: string): Promise<string> => {
   }
   return response.text();
 };
+
+export const getToolResultRawRange = async (
+  resultId: string,
+  start: number,
+  end: number,
+): Promise<string> => {
+  const response = await fetchWithInterceptors(
+    getApiUrl(`/tool-results/${encodeURIComponent(resultId)}/range?start=${start}&end=${end}`),
+    { method: 'GET' },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.message || `HTTP ${response.status}`);
+  }
+  return new TextDecoder().decode(await response.arrayBuffer());
+};
