@@ -1,0 +1,67 @@
+import { randomUUID } from 'node:crypto';
+import { Client, Pool } from 'pg';
+import { ensureAttributionContextSchema } from '../../src/db/attributionContextSchema.js';
+import { AttributionContextRepository } from '../../src/db/repositories/AttributionContextRepository.js';
+import { AttributionContextService } from '../../src/services/attributionContextService.js';
+
+const suite = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
+suite('attribution PostgreSQL isolated schema', () => {
+  const schema = `attribution_test_${randomUUID().replaceAll('-', '')}`;
+  const config = {
+    host: process.env.MCPHUB_ATTRIBUTION_TEST_HOST ?? '127.0.0.1',
+    port: Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT ?? 5432),
+    user: process.env.MCPHUB_ATTRIBUTION_TEST_USER,
+    password: process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,
+    database: process.env.MCPHUB_ATTRIBUTION_TEST_DB ?? 'postgres',
+    connectionTimeoutMillis: 5000,
+  };
+  let admin: Client;
+  let pool: Pool;
+  let service: AttributionContextService;
+  beforeAll(async () => {
+    admin = new Client(config);
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    pool = new Pool({ ...config, options: `-c search_path=${schema}`, max: 4 });
+    await ensureAttributionContextSchema(pool);
+    await ensureAttributionContextSchema(pool);
+    service = new AttributionContextService(new AttributionContextRepository({
+      query: async (sql, parameters) => (await pool.query(sql, parameters)).rows,
+    }));
+  });
+  afterAll(async () => {
+    if (pool) await pool.end();
+    if (admin) {
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1', [schema])).rowCount).toBe(0);
+      await admin.end();
+    }
+  });
+  test('persists contexts and emits exactly one successor on concurrent rotation', async () => {
+    const first = await service.start('alice', { modelClaim: 'one' });
+    expect((await service.resolve('alice', first.traceKey))?.identity.modelId).toBe('one');
+    expect(await service.resolve('bob', first.traceKey)).toBeNull();
+    const child = await service.fork('alice', first.traceKey);
+    expect(child?.traceId).toBe(first.traceId);
+    const rotations = await Promise.all([
+      service.rotate('alice', first.traceKey, 'two'), service.rotate('alice', first.traceKey, 'three'),
+    ]);
+    expect(rotations.filter(Boolean)).toHaveLength(1);
+    expect(await service.resolve('alice', first.traceKey)).toBeNull();
+    const events = (await pool.query('SELECT event_type FROM attribution_identity_events ORDER BY event_type')).rows;
+    expect(events.map((row) => row.event_type)).toEqual(['branch_forked', 'context_started', 'model_rotated']);
+  });
+  test('rolls back context issuance when its identity event cannot be saved', async () => {
+    const before = (await pool.query('SELECT count(*) FROM attribution_contexts')).rows[0].count;
+    await pool.query(`CREATE FUNCTION reject_test_event() RETURNS trigger LANGUAGE plpgsql AS $$
+      BEGIN RAISE EXCEPTION 'simulated event failure'; END; $$;
+      CREATE TRIGGER reject_test_event BEFORE INSERT ON attribution_identity_events
+      FOR EACH ROW EXECUTE FUNCTION reject_test_event()`);
+    try {
+      await expect(service.start('rollback-user')).rejects.toThrow('simulated event failure');
+      expect((await pool.query('SELECT count(*) FROM attribution_contexts')).rows[0].count).toBe(before);
+    } finally {
+      await pool.query('DROP TRIGGER reject_test_event ON attribution_identity_events');
+    }
+  });
+});
