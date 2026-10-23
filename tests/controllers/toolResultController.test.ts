@@ -29,6 +29,7 @@ import {
   getToolResultConversationTimeline,
   getToolResultLineage,
   searchToolResultChunks,
+  reindexToolResults,
 } from '../../src/controllers/toolResultController.js';
 
 const makeReq = (overrides: Record<string, unknown> = {}) =>
@@ -195,6 +196,13 @@ describe('toolResultController', () => {
     expect(repository.searchChunks).toHaveBeenCalledWith('result-id', 'Xid 79', null, 5);
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: [expect.objectContaining({ chunkIndex: 2 })] }));
     expect((res.json as jest.Mock).mock.calls[0][0].data[0]).not.toHaveProperty('raw');
+  });
+
+  it('rejects malformed reindex options before touching derived indexes', async () => {
+    const res = makeRes();
+    await reindexToolResults(makeReq({ body: { limit: 25, onlyMissing: 'false' } }), res);
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: false }));
   });
 
   it('compares exactly two result records without exposing RAW', async () => {

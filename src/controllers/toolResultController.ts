@@ -279,7 +279,8 @@ export const reindexToolResults = async (req: Request, res: Response): Promise<v
     return;
   }
   const limit = req.body?.limit === undefined ? 25 : Number(req.body.limit);
-  const onlyMissing = req.body?.onlyMissing !== false;
+  const rawOnlyMissing = req.body?.onlyMissing;
+  const onlyMissing = rawOnlyMissing === undefined ? true : rawOnlyMissing;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100 || typeof onlyMissing !== 'boolean') {
     res.status(400).json({ success: false, message: 'limit must be between 1 and 100' });
     return;
