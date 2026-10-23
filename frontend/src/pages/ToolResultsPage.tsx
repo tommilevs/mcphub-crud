@@ -203,6 +203,7 @@ const ToolResultsPage: React.FC = () => {
       <input className="hub-input min-w-44" placeholder={t('toolResults.server')} value={draft.server || ''} onChange={(e) => setDraft({ ...draft, server: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.tool')} value={draft.tool || ''} onChange={(e) => setDraft({ ...draft, tool: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.session')} value={draft.sessionId || ''} onChange={(e) => setDraft({ ...draft, sessionId: e.target.value })} />
+      <input className="hub-input min-w-44" placeholder={t('toolResults.conversation')} value={draft.conversationId || ''} onChange={(e) => setDraft({ ...draft, conversationId: e.target.value })} />
       <label className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.from')}<input className="hub-input mt-1" type="datetime-local" value={draft.startDate || ''} onChange={(e) => setDraft({ ...draft, startDate: e.target.value })} /></label>
       <label className="text-xs text-[var(--hub-ink-3)]">{t('toolResults.to')}<input className="hub-input mt-1" type="datetime-local" value={draft.endDate || ''} onChange={(e) => setDraft({ ...draft, endDate: e.target.value })} /></label>
       <select className="hub-input" value={draft.status || ''} onChange={(e) => setDraft({ ...draft, status: (e.target.value || undefined) as ToolResultFilter['status'] })}><option value="">{t('toolResults.allStatuses')}</option><option value="success">success</option><option value="error">error</option></select>
