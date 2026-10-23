@@ -1,0 +1,42 @@
+---
+title: Model attribution
+description: Optional task correlation and self-reported model identity
+---
+
+Enable the initial compatible implementation with `MCPHUB_ATTRIBUTION_MODE=compatible`.
+The default is off. Existing calls remain valid without `hub_context`.
+
+An authenticated caller can start correlation on any Smart Routing tool:
+
+```json
+{"query":"diagnose service","hub_context":{"action":"start","model_claim":"exact-model-id"}}
+```
+
+Omit `model_claim` when the exact identifier is unknown. The result keeps its
+original content and adds `_meta["dev.mcphub/context"]` with server-generated
+context, task, trace and model segment IDs. A newly issued context also includes
+`trace_key`. Pass that key in later calls:
+
+```json
+{"toolName":"server-tool","arguments":{},"hub_context":{"trace_key":"k_RETURNED_KEY"}}
+```
+
+For an explicit model change, pass `action: "rotate"`, the current `trace_key`,
+and the new `model_claim` (or omit it for an unknown model). Rotation preserves
+task and trace, creates a fresh context/segment and key, and revokes the old key
+in one PostgreSQL statement. Concurrent rotation allows only one successor.
+Calls already running retain their original per-call snapshot.
+
+Keys contain 192 random bits; PostgreSQL stores only SHA-256 digests. They expire
+after seven days and are scoped to the authenticated username/API-key pair.
+Keys correlate calls and grant no tool permissions. Missing, expired or foreign
+keys do not block ordinary tool execution in compatible mode. They yield unknown
+attribution. RAW tool results remain unchanged; history stores attribution in an
+additional immutable JSON column with a unique call ID.
+
+Model claims are always `self_reported` and `verified: false`. This implementation
+does not detect models from IP addresses, model inventories or request timing.
+Trusted host/gateway adapters, namespaced input metadata, branch identities,
+identity analytics, training export gates and the settings UI are still pending.
+Clients must be able to read MCP result metadata to retain the issued key.
+An interrupted response can lose its newly issued key; start a new context to recover.

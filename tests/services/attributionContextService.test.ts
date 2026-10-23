@@ -1,6 +1,28 @@
 import { AttributionContextService } from '../../src/services/attributionContextService.js';
 
 describe('attribution contexts', () => {
+  it('rotates a model segment while preserving task and trace and revoking the old key', async () => {
+    const records = new Map<string, any>();
+    const service = new AttributionContextService({
+      insert: async (r) => { records.set(r.keyDigest, r); },
+      findByDigest: async (d) => records.get(d) ?? null,
+      rotate: async (old, next) => {
+        if (records.get(old)?.revokedAt) return false;
+        records.get(old).revokedAt = next.createdAt;
+        records.set(next.keyDigest, next);
+        return true;
+      },
+    });
+    const first = await service.start('alice', { modelClaim: 'one' });
+    expect(await service.rotate('bob', first.traceKey, 'two')).toBeNull();
+    const next = await service.rotate('alice', first.traceKey, 'two');
+    expect(next?.traceId).toBe(first.traceId);
+    expect(next?.taskId).toBe(first.taskId);
+    expect(next?.modelSegmentId).not.toBe(first.modelSegmentId);
+    expect(next?.identity.modelId).toBe('two');
+    expect(await service.resolve('alice', first.traceKey)).toBeNull();
+    expect(await service.resolve('alice', next!.traceKey)).not.toBeNull();
+  });
   it('issues independent contexts and stores only a key digest', async () => {
     const records = new Map<string, any>();
     const service = new AttributionContextService({

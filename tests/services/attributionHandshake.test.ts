@@ -19,3 +19,33 @@ test('handshake preserves nested content and continues the same context without 
   expect(next._meta['dev.mcphub/context'].context_id).toBe(context.context_id);
   expect(next._meta['dev.mcphub/context'].trace_key).toBeUndefined();
 });
+
+test('database failure does not replay a side-effecting tool', async () => {
+  const service = new AttributionContextService({
+    insert: async () => { throw new Error('database unavailable'); },
+    findByDigest: async () => null,
+  });
+  let executions = 0;
+  const result = await withAttributionHandshake({ params: { name: 'call_tool', arguments: {
+    toolName: 'change', hub_context: { action: 'start' },
+  } } }, 'alice', service, async (request) => {
+    executions += 1;
+    expect(request.params.arguments.hub_context).toBeUndefined();
+    return { content: [{ type: 'text', text: 'changed' }] };
+  });
+  expect(executions).toBe(1);
+  expect(result.content[0].text).toBe('changed');
+});
+
+test('a foreign key degrades to unknown and preserves execution', async () => {
+  const records = new Map<string, any>();
+  const service = new AttributionContextService({
+    insert: async (record) => { records.set(record.keyDigest, record); },
+    findByDigest: async (digest) => records.get(digest) ?? null,
+  });
+  const issued = await service.start('alice', { modelClaim: 'alice-model' });
+  const result = await withAttributionHandshake({ params: { name: 'describe_tool', arguments: {
+    toolName: 'demo', hub_context: { trace_key: issued.traceKey },
+  } } }, 'bob', service, async () => ({ content: [] }));
+  expect(result._meta).toBeUndefined();
+});

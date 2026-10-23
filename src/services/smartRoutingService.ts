@@ -368,7 +368,7 @@ Available servers: ${serversList}`,
       tool.inputSchema = { ...tool.inputSchema, properties: {
         ...tool.inputSchema.properties,
         hub_context: { type: 'object', additionalProperties: false, properties: {
-          action: { type: 'string', enum: ['start'] },
+          action: { type: 'string', enum: ['start', 'rotate'] },
           model_claim: { type: ['string', 'null'], maxLength: 255 },
           trace_key: { type: 'string', maxLength: 64 },
         } },

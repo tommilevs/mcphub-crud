@@ -14,6 +14,21 @@ export class AttributionContextRepository implements AttributionContextStore {
     ]);
   }
 
+  async rotate(oldDigest: string, next: AttributionContextRecord): Promise<boolean> {
+    const rows = await this.db.query(`WITH revoked AS (
+      UPDATE attribution_contexts SET revoked_at = $1
+      WHERE key_digest = $2 AND principal = $3 AND revoked_at IS NULL AND expires_at > $1
+      RETURNING task_id, trace_id
+    ) INSERT INTO attribution_contexts
+      (context_id, task_id, trace_id, model_segment_id, principal, key_digest,
+       created_at, expires_at, claimed_model_id, identity_source)
+      SELECT $4, task_id, trace_id, $5, $3, $6, $1, $7, $8, $9 FROM revoked
+      RETURNING context_id`, [next.createdAt, oldDigest, next.principal,
+      next.contextId, next.modelSegmentId, next.keyDigest, next.expiresAt,
+      next.identity.modelId, next.identity.source]);
+    return rows.length === 1;
+  }
+
   async findByDigest(digest: string): Promise<AttributionContextRecord | null> {
     const rows = await this.db.query('SELECT * FROM attribution_contexts WHERE key_digest = $1', [digest]);
     const row = rows[0];

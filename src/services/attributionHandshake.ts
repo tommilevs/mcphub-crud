@@ -24,7 +24,12 @@ export async function withAttributionHandshake(
       const issued = await service.start(principal, { modelClaim: input.model_claim });
       context = issued;
       issuedKey = issued.traceKey;
-    } else if (typeof input.trace_key === 'string') {
+    } else if (input.action === 'rotate' && typeof input.trace_key === 'string' &&
+      (input.model_claim == null || typeof input.model_claim === 'string')) {
+      const issued = await service.rotate(principal, input.trace_key, input.model_claim);
+      context = issued;
+      issuedKey = issued?.traceKey;
+    } else if (!input.action && typeof input.trace_key === 'string') {
       context = await service.resolve(principal, input.trace_key);
     }
   } catch {
