@@ -36,6 +36,28 @@ even if evidence expired. Local experience retrieval is a different purpose from
 training export; task training consent is not silently inferred or granted.
 
 This slice provides reviewed proposal storage, audit and lexical retrieval API.
-UI editing, automatic extraction, hybrid vector retrieval, optional Basic Memory
-adapter and opt-in injection into ToolPilot/Smart Routing remain subsequent work.
+UI editing, automatic extraction, hybrid vector retrieval and optional Basic Memory
+adapter remain subsequent work.
 These entries are advice, never new permissions or commands to execute.
+
+## Scoped LoopGuard advice
+
+Additionally enable `MCPHUB_EXPERIENCE_ADVICE_ENABLED=true` to retrieve at most three
+current experiences after a deterministic LoopGuard warning. Both experience
+flags are required. Owner/key isolation and current source privacy/outcome checks
+still apply. Explicit `scope.servers` and `scope.tools` constraints must match;
+tool scope uses the exact `server/tool` name. Malformed scope never broadens it.
+Manual search also accepts paired `server` and `tool` filters.
+
+Runtime does not independently know historical/current tool versions, so entries
+with version constraints are not automatically suggested. Without an explicit
+task classification, only `general` entries qualify. A source's successful task
+does not prove that its strategy generalizes to a different category.
+
+The current call receives reviewed titles/summaries and evidence references in
+LoopGuard metadata. Persistent warning state stores only experience ID/revision,
+confidence and result references, not copied strategy text that could outlive a
+source privacy withdrawal. Existing client responses cannot be recalled. Retrieval
+failure leaves deterministic advice intact; no execution permission is added.
+Internal ToolPilot still receives metadata-only input and does not send these
+strategy texts to its model provider.

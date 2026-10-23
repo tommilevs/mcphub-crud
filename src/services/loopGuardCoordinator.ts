@@ -3,6 +3,7 @@ import { getAppDataSource } from '../db/connection.js';
 import { detectRepeatedFailure, type LoopGuardAdvice } from './loopGuard.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
 import { escalateLoopGuard } from './toolPilot.js';
+import {getExperienceAdvice} from './experienceAdvice.js';
 
 export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGuardAdvice | null> {
   const context = record.attribution;
@@ -32,10 +33,14 @@ export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGu
     if (advice && rows.some((row: any) => advice.resultIds.includes(row.result_id) &&
       config.loopGuardIgnoredTools?.includes(`${row.server}/${row.tool}`))) return null;
     if (advice) {
+      const experiences=await getExperienceAdvice({username:record.username,keyId:record.keyId,server:record.server,tool:record.tool});
+      if(experiences.length)advice.experiences=experiences;
       const suggestion = await escalateLoopGuard(advice, { server: record.server, tool: record.tool },
         { traceId: context.traceId, branchId: context.branchId });
       if (suggestion) advice.toolPilot = suggestion;
-      await db.query('UPDATE tool_result_state SET loop_guard_advice=$2::jsonb WHERE result_id=$1', [record.resultId, JSON.stringify(advice)]);
+      // Store references only: later retirement/privacy revocation must not leave cached strategy text.
+      const persisted={...advice,...(advice.experiences?{experiences:advice.experiences.map(({title:_title,summary:_summary,...reference})=>reference)}:{})};
+      await db.query('UPDATE tool_result_state SET loop_guard_advice=$2::jsonb WHERE result_id=$1', [record.resultId, JSON.stringify(persisted)]);
     }
     return advice;
   } catch { return null; }

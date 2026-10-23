@@ -32,12 +32,13 @@ export async function saveExperience(req:Request,res:Response):Promise<void>{
 }
 export async function findExperiences(req:Request,res:Response):Promise<void>{
   if(!await enabled(req,res))return;
-  const q=req.query.q??'',keyId=req.query.keyId??null,taskType=req.query.taskType,limit=Number(req.query.limit??10);
-  if(typeof q!=='string'||q.length>1000||!key(keyId)||(taskType!==undefined&&!text(taskType,255))||!Number.isInteger(limit)||limit<1||limit>20){
+  const q=req.query.q??'',keyId=req.query.keyId??null,taskType=req.query.taskType,limit=Number(req.query.limit??10),server=req.query.server,tool=req.query.tool;
+  if(typeof q!=='string'||q.length>1000||!key(keyId)||(taskType!==undefined&&!text(taskType,255))||!Number.isInteger(limit)||limit<1||limit>20||
+    ((server!==undefined||tool!==undefined)&&(!text(server,255)||!text(tool,255)))){
     res.status(400).json({success:false,message:'Invalid experience search'});return;
   }
   try{res.json({success:true,data:await searchExperiences({username:(req as any).user.username,keyId:keyId as string|null,query:q,
-    taskType:taskType as string|undefined,limit})});}catch{res.status(503).json({success:false,message:'Experience Memory is unavailable'});}
+    taskType:taskType as string|undefined,limit,server:server as string|undefined,tool:tool as string|undefined})});}catch{res.status(503).json({success:false,message:'Experience Memory is unavailable'});}
 }
 export async function reviewExperience(req:Request,res:Response):Promise<void>{
   if(!await enabled(req,res))return;

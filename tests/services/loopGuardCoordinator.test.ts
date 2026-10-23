@@ -1,11 +1,13 @@
 const query = jest.fn();
+const getAdvice=jest.fn();
+jest.mock('../../src/services/experienceAdvice.js',()=>({getExperienceAdvice:(...args:any[])=>getAdvice(...args)}));
 const config = { loopGuardEnabled: true, loopGuardRepetitions: 4, loopGuardToolBudgets: {} as Record<string, number> };
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => ({ query }) }));
 jest.mock('../../src/utils/smartRouting.js', () => ({ getSmartRoutingConfig: async () => config }));
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import type { ToolResultRecord } from '../../src/types/toolResult.js';
 
-beforeEach(() => { query.mockReset(); config.loopGuardToolBudgets = {}; });
+beforeEach(() => { query.mockReset();getAdvice.mockReset().mockResolvedValue([]); config.loopGuardToolBudgets = {}; });
 
 test('honors the larger tool budget in an alternating cycle regardless of current tool', async () => {
   config.loopGuardToolBudgets = { 'demo/b': 5 };
@@ -22,14 +24,18 @@ test('honors the larger tool budget in an alternating cycle regardless of curren
 });
 
 test('fetches enough isolated history to honor the configured repetition budget', async () => {
+  getAdvice.mockResolvedValueOnce([{experienceId:'experience',revision:1,evidenceResultIds:['evidence'],confidence:'supported',title:'Strategy',summary:'Consider another diagnostic'}]);
   const record = { resultId: 'current', timestamp: new Date(4000), server: 'demo', tool: 'inspect',
     status: 'error', arguments: '{}', rawSha256: 'digest', username: 'owner', keyId: 'key',
     attribution: { traceId: 'trace', branchId: 'branch' } } as ToolResultRecord;
   const rows = [3, 2, 1].map((index) => ({ result_id: `r${index}`, timestamp: new Date(index * 1000),
     server: 'demo', tool: 'inspect', status: 'error', arguments: '{}', raw_sha256: 'digest' }));
   query.mockResolvedValueOnce(rows).mockResolvedValueOnce([]);
-  expect((await observeLoopGuard(record))?.resultIds).toHaveLength(4);
+  const advice=await observeLoopGuard(record);
+  expect(advice?.resultIds).toHaveLength(4);
+  expect(advice?.experiences?.[0].summary).toBe('Consider another diagnostic');
   expect(query.mock.calls[0][0]).toContain('LIMIT $7');
   expect(query.mock.calls[0][1]).toEqual(['owner', 'key', 'trace', 'branch', record.timestamp, 'current', 7]);
   expect(query.mock.calls[1][0]).toContain('UPDATE tool_result_state');
+  expect(JSON.parse(query.mock.calls[1][1][1]).experiences).toEqual([{experienceId:'experience',revision:1,evidenceResultIds:['evidence'],confidence:'supported'}]);
 });

@@ -20,6 +20,7 @@ import { previewDataset,exportDataset } from '../../src/controllers/datasetContr
 import {ensureExperienceSchema} from '../../src/db/experienceSchema.js';
 import {createExperience,searchExperiences} from '../../src/services/experienceMemory.js';
 import {reviewExperience} from '../../src/controllers/experienceController.js';
+import {getExperienceAdvice} from '../../src/services/experienceAdvice.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import { ensureLoopGuardFeedbackSchema } from '../../src/db/loopGuardFeedbackSchema.js';
@@ -400,6 +401,18 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect(entry?.assessment).toMatchObject({usable:true,confidence:'supported',independentTasks:2});
     const search=(username='experience-owner')=>searchExperiences({username,keyId:null,query:'diagnostic',limit:10});
     expect(await search()).toHaveLength(1);expect(await search('other-owner')).toHaveLength(0);
+    expect(await searchExperiences({username:'experience-owner',keyId:null,query:'diagnostic',server:'other-server',tool:'inspect',limit:10})).toHaveLength(0);
+    const memoryFlag=process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED,adviceFlag=process.env.MCPHUB_EXPERIENCE_ADVICE_ENABLED;
+    process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED='true';process.env.MCPHUB_EXPERIENCE_ADVICE_ENABLED='true';
+    try{
+      const target={username:'experience-owner',server:'demo',tool:'inspect',taskType:'diagnostic'};
+      expect(await getExperienceAdvice(target)).toHaveLength(1);
+      expect(await getExperienceAdvice({...target,taskType:undefined})).toHaveLength(0);
+      expect(await getExperienceAdvice({...target,server:'other-server'})).toHaveLength(0);
+    }finally{
+      if(memoryFlag===undefined)delete process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED;else process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED=memoryFlag;
+      if(adviceFlag===undefined)delete process.env.MCPHUB_EXPERIENCE_ADVICE_ENABLED;else process.env.MCPHUB_EXPERIENCE_ADVICE_ENABLED=adviceFlag;
+    }
     await pool.query(`INSERT INTO tool_result_reviews(result_id,revision,raw_sha256,quality,privacy,reviewed_by) VALUES($1,2,$2,'correct','rejected','reviewer')`,[ids[0],digest]);
     expect(await search()).toHaveLength(0);
     const old=process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED;process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED='true';
