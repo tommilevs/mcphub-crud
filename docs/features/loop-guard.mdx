@@ -7,6 +7,14 @@ The initial deterministic LoopGuard is opt-in with
 `MCPHUB_LOOP_GUARD_ENABLED=true`. It requires enabled attribution, a known trace
 and branch, and saved Tool Result History. It never blocks, replays or executes
 tools. There is no internal LLM call in this first implementation.
+
+An agent may declare an intentional repeat on a particular Smart call:
+`hub_context: { trace_key: "k_RETURNED_KEY", repeat_intent: "retry" }`.
+Allowed intentions are `poll`, `pagination`, `wait` and `retry`. The intention is
+recorded only in that call's attribution, never inherited by later calls or sent
+to the upstream tool. Such a call suppresses LoopGuard signals that would use it
+as evidence. This declaration grants no permissions and does not establish success.
+
 You can also enable it in Smart Routing settings and exclude exact tools using
 one `server/tool` per line (up to 100 entries). An excluded tool suppresses
 both a direct repeat warning and a cycle containing that tool. Environment

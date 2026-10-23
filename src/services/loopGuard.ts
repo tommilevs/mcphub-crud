@@ -11,10 +11,12 @@ export interface LoopGuardObservation {
   status: string;
   arguments: string | null;
   resultDigest: string | null;
+  repeatIntent?: string;
 }
 
 /** Conservative advisory only. Never authorizes, suppresses or replays a tool. */
 const eligible = (call: LoopGuardObservation): boolean => {
+  if (call.repeatIntent && ['poll', 'pagination', 'wait', 'retry'].includes(call.repeatIntent)) return false;
   if (call.status !== 'error' || !call.resultDigest || !call.arguments ||
     !Number.isFinite(call.timestamp.getTime()) || /(?:poll|wait|read_process_output|status)/i.test(call.tool)) return false;
   try {

@@ -9,6 +9,12 @@ test('advises after three identical rapid failures without suppressing execution
     trigger: 'repeated_identical_failure', resultIds: ['result-3', 'result-2', 'result-1'],
   });
 });
+
+test('explicit repeat intent suppresses advice even for identical rapid errors', () => {
+  for (const repeatIntent of ['poll', 'pagination', 'wait', 'retry']) {
+    expect(detectRepeatedFailure([observation(3, { repeatIntent }), observation(2), observation(1)])).toBeNull();
+  }
+});
 test('does not flag success, changed output, pagination, polling or backoff retries', () => {
   for (const entries of [
     [observation(3, { status: 'success' }), observation(2), observation(1)],

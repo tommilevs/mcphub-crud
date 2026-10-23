@@ -90,3 +90,20 @@ test('a discovery telemetry failure leaves the original search response intact',
   expect(attempted).toBe(true);
   expect(result.content).toEqual(content);
 });
+
+test('repeat intent is call-local during parallel requests and is stripped upstream', async () => {
+  const records = new Map<string, any>();
+  const service = new AttributionContextService({ insert: async (r) => { records.set(r.keyDigest, r); },
+    findByDigest: async (d) => records.get(d) ?? null });
+  const context = await service.start('alice');
+  const invoke = (intent?: string) => withAttributionHandshake({ params: { name: 'call_tool', arguments: {
+    toolName: 'demo', hub_context: { trace_key: context.traceKey, ...(intent ? { repeat_intent: intent } : {}) },
+  } } }, 'alice', service, async (cleaned) => {
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(cleaned.params.arguments.hub_context).toBeUndefined();
+    return { intent: getCallAttribution()?.repeatIntent };
+  });
+  const [intentional, ordinary] = await Promise.all([invoke('retry'), invoke()]);
+  expect(intentional.intent).toBe('retry');
+  expect(ordinary.intent).toBeUndefined();
+});

@@ -12,6 +12,7 @@ export interface CallAttribution {
   branchId?: string | null;
   clientClaims?: AttributionClientClaims;
   conflictReason?: string;
+  repeatIntent?: 'poll' | 'pagination' | 'wait' | 'retry';
 }
 
 const storage = new AsyncLocalStorage<CallAttribution>();
@@ -25,5 +26,6 @@ export const runWithCallAttribution = <T>(
   modelSegmentId: context?.modelSegmentId ?? null,
   branchId: context?.branchId ?? null, clientClaims: context?.clientClaims ?? {},
   ...(context?.conflictReason ? { conflictReason: context.conflictReason } : {}),
+  ...(context?.repeatIntent ? { repeatIntent: context.repeatIntent } : {}),
   identity: context?.identity ?? { modelId: null, source: 'unknown', verified: false },
 }, callback);

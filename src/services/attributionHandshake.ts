@@ -73,7 +73,13 @@ export async function withAttributionHandshake(
   } catch {
     // Attribution persistence must not prevent ordinary execution in compatible mode.
   }
-  const result = await runWithCallAttribution(context ?? null, async () => {
+  const repeatIntent = ['poll', 'pagination', 'wait', 'retry'].includes(input?.repeat_intent)
+    ? input.repeat_intent as 'poll' | 'pagination' | 'wait' | 'retry' : undefined;
+  const callContext = context ? { ...context, repeatIntent } : {
+    contextId: null, taskId: null, traceId: null, modelSegmentId: null,
+    identity: { modelId: null, source: 'unknown' as const, verified: false as const }, repeatIntent,
+  };
+  const result = await runWithCallAttribution(callContext, async () => {
     const result = await handler(cleaned);
     const callId = getCallAttribution()?.callId;
     const evidence = extractDiscoveryEvidence(request.params.name, result);
