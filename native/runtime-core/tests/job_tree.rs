@@ -47,6 +47,7 @@ fn fixture_with_exit(exit: bool) -> (RuntimeSupervisor, ObservedProcess, Observe
             env: HashMap::new(),
             restart_limit: 0,
             restart_delay_ms: 0,
+            request_timeout_ms: 60_000,
         })
         .unwrap();
     let parent_handle = ObservedProcess::open(parent.pid.unwrap());
@@ -116,6 +117,7 @@ fn failed_respawn_attempts_exhaust_the_restart_budget() {
             env: HashMap::new(),
             restart_limit: 2,
             restart_delay_ms: 0,
+            request_timeout_ms: 60_000,
         })
         .unwrap();
     let parent = ObservedProcess::open(process.pid.unwrap());

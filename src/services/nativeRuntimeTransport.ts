@@ -9,9 +9,15 @@ type ManagedProcessSpec = {
   secret_env?: Record<string, string>;
   restart_limit?: number;
   restart_delay_ms?: number;
+  request_timeout_ms?: number;
+  initialize_timeout_ms?: number;
 };
 
 type ControlResponse = { responses?: string[]; error?: string } & Record<string, unknown>;
+const boundedTimeout=(value:unknown):number=>{
+  const parsed=Number(value);
+  return Math.trunc(Math.min(3_600_000,Math.max(100,Number.isFinite(parsed)?parsed:60_000)));
+};
 
 /**
  * Optional Windows transport backed by the MCPHub service named pipe.
@@ -22,6 +28,8 @@ export class NativeRuntimeTransport implements Transport {
   private buffer = '';
   private pending: Promise<unknown> = Promise.resolve();
   private closed = false;
+  private consume?: () => void;
+  private abort?: (error: Error) => void;
   onclose?: () => void;
   onerror?: (error: Error) => void;
   onmessage?: (message: JSONRPCMessage) => void;
@@ -45,23 +53,25 @@ export class NativeRuntimeTransport implements Transport {
       socket.once('connect', () => {
         socket.off('error', onError);
         socket.on('data', (chunk) => this.onData(chunk));
-        socket.on('error', (error) => this.onerror?.(error));
-        socket.on('close', () => {
-          this.closed = true;
-          this.onclose?.();
-        });
+        socket.on('error', (error) => {this.onerror?.(error);this.disconnect();});
+        socket.on('close', () => this.disconnect());
         resolve(socket);
       });
     });
-    const { secret_env, ...spec } = this.spec;
-    await this.control({ op: 'start', spec, ...(secret_env ? { secret_env } : {}) });
+    const { secret_env, initialize_timeout_ms: _initializeTimeout, ...spec } = this.spec;
+    spec.request_timeout_ms=boundedTimeout(spec.request_timeout_ms??60_000);
+    try{await this.control({ op: 'start', spec, ...(secret_env ? { secret_env } : {}) });}
+    catch(error){this.disconnect();throw error;}
   }
 
   async send(message: JSONRPCMessage): Promise<void> {
+    const initialize='method' in message&&message.method==='initialize';
+    const timeout=boundedTimeout((initialize?this.spec.initialize_timeout_ms:undefined)??this.spec.request_timeout_ms??60_000);
     const result = await this.control({
       op: 'stdio',
       id: this.spec.id,
       message: JSON.stringify(message),
+      timeout_ms: timeout,
     });
     for (const response of (result as ControlResponse).responses ?? []) {
       try {
@@ -80,15 +90,20 @@ export class NativeRuntimeTransport implements Transport {
       // request, leaving the managed child behind in the native service.
       await this.control({ op: 'stop', id: this.spec.id });
     } finally {
-      this.closed = true;
-      this.socket?.destroy();
-      this.socket = undefined;
-      this.onclose?.();
+      this.disconnect();
     }
   }
 
   private onData(chunk: Buffer): void {
+    if(this.closed)return;
     this.buffer += chunk.toString('utf8');
+    this.consume?.();
+  }
+
+  private disconnect():void{
+    if(this.closed)return;
+    this.closed=true;this.buffer='';this.socket?.destroy();this.socket=undefined;
+    this.abort?.(new Error('MCPHub native runtime connection closed'));this.onclose?.();
   }
 
   private control(request: Record<string, unknown>): Promise<ControlResponse> {
@@ -105,11 +120,12 @@ export class NativeRuntimeTransport implements Transport {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
+            this.consume=undefined;this.abort=undefined;
             callback();
           };
           timer = setTimeout(
-            () => finish(() => reject(new Error('MCPHub runtime request timed out'))),
-            30_000,
+            () => finish(() => {this.disconnect();reject(new Error('MCPHub runtime request timed out'));}),
+            request.op==='stdio'?Number(request.timeout_ms)+5_000:10_000,
           );
           const poll = () => {
             if (settled) return;
@@ -119,7 +135,6 @@ export class NativeRuntimeTransport implements Transport {
             }
             const newline = this.buffer.indexOf('\n');
             if (newline < 0) {
-              setImmediate(poll);
               return;
             }
             const line = this.buffer.slice(0, newline).trim();
@@ -129,12 +144,13 @@ export class NativeRuntimeTransport implements Transport {
               if (parsed.error) finish(() => reject(new Error(parsed.error)));
               else finish(() => resolve(parsed));
             } catch (error) {
-              finish(() => reject(error));
+              finish(() => {this.disconnect();reject(error);});
             }
           };
+          this.consume=poll;this.abort=(error)=>finish(()=>reject(error));
           this.socket.write(`${JSON.stringify(request)}\n`, (error) => {
             if (error) {
-              finish(() => reject(error));
+              finish(() => {this.disconnect();reject(error);});
               return;
             }
             poll();

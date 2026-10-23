@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashMap, HashSet},
-    io::{BufRead, BufReader, Read, Write},
+    io::{BufReader, Read},
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     time::{Duration, Instant},
 };
@@ -17,6 +17,8 @@ use thiserror::Error;
 pub mod dpapi;
 #[cfg(windows)]
 pub mod secret_store;
+mod stdio;
+pub use stdio::StdioSession;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagedProcessSpec {
@@ -30,6 +32,12 @@ pub struct ManagedProcessSpec {
     pub restart_limit: u32,
     #[serde(default = "default_restart_delay_ms")]
     pub restart_delay_ms: u64,
+    #[serde(default = "default_request_timeout_ms")]
+    pub request_timeout_ms: u64,
+}
+
+fn default_request_timeout_ms() -> u64 {
+    60_000
 }
 
 fn default_restart_limit() -> u32 {
@@ -54,13 +62,10 @@ pub enum SupervisorError {
 struct ManagedProcess {
     spec: ManagedProcessSpec,
     child: Child,
-    stdin: ChildStdin,
-    stdout: BufReader<ChildStdout>,
+    io: StdioSession,
     restarts: u32,
     last_start: Instant,
-    unhealthy: bool,
-    protocol_ready: bool,
-    last_error: Option<String>,
+
     #[cfg(windows)]
     job: windows::JobHandle,
 }
@@ -154,16 +159,28 @@ fn spawn_managed(spec: ManagedProcessSpec) -> Result<ManagedProcess, SupervisorE
         }
     };
     drain_stderr(child.stderr.take());
+    let session = match StdioSession::new(
+        io.stdin,
+        io.stdout,
+        Duration::from_millis(spec.request_timeout_ms.clamp(100, 3_600_000)),
+    ) {
+        Ok(session) => session,
+        Err(source) => {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(SupervisorError::Spawn {
+                id: spec.id.clone(),
+                source,
+            });
+        }
+    };
     Ok(ManagedProcess {
         spec,
         child,
-        stdin: io.stdin,
-        stdout: io.stdout,
+        io: session,
         restarts: 0,
         last_start: Instant::now(),
-        unhealthy: false,
-        protocol_ready: false,
-        last_error: None,
+
         #[cfg(windows)]
         job: io.job,
     })
@@ -246,6 +263,12 @@ impl RuntimeSupervisor {
             let Some(process) = self.processes.get_mut(&id) else {
                 continue;
             };
+            if process.io.health().0 {
+                #[cfg(windows)]
+                process.job.terminate();
+                let _ = process.child.kill();
+                let _ = process.child.wait();
+            }
             let exited = process.child.try_wait().ok().flatten().is_some();
             #[cfg(windows)]
             if exited {
@@ -264,12 +287,11 @@ impl RuntimeSupervisor {
                         *process = replacement;
                     }
                     Err(error) => {
-                        process.unhealthy = true;
-                        process.protocol_ready = false;
-                        process.last_error = Some(error.to_string().chars().take(1000).collect());
+                        process.io.record_failure(&error.to_string());
                     }
                 }
             }
+            let (unhealthy, protocol_ready, last_error) = process.io.health();
             let running = process.child.try_wait().ok().flatten().is_none();
             statuses.push(ProcessStatus {
                 id: id.clone(),
@@ -279,9 +301,9 @@ impl RuntimeSupervisor {
                     } else {
                         "RESTARTING"
                     }
-                } else if process.unhealthy {
+                } else if unhealthy {
                     "UNHEALTHY"
-                } else if !process.protocol_ready {
+                } else if !protocol_ready {
                     "STARTING"
                 } else {
                     "RUNNING"
@@ -290,8 +312,8 @@ impl RuntimeSupervisor {
                 pid: Some(process.child.id()),
                 restarts: process.restarts,
                 restart_limit: process.spec.restart_limit,
-                protocol_ready: process.protocol_ready,
-                last_error: process.last_error.clone(),
+                protocol_ready,
+                last_error,
             });
         }
         for id in self.stopped.iter() {
@@ -321,73 +343,19 @@ impl RuntimeSupervisor {
     /// the upstream before that response are preserved in order.
     /// The service layer uses this only for managed stdio sessions; ordinary
     /// MCPHub transports remain unchanged until native mode is explicitly enabled.
+    pub fn stdio_session(&self, id: &str) -> Result<StdioSession, SupervisorError> {
+        self.processes
+            .get(id)
+            .map(|process| process.io.clone())
+            .ok_or_else(|| SupervisorError::NotFound(id.into()))
+    }
     pub fn send_stdio(&mut self, id: &str, message: &str) -> Result<Vec<String>, SupervisorError> {
-        let process = self
-            .processes
-            .get_mut(id)
-            .ok_or_else(|| SupervisorError::NotFound(id.to_owned()))?;
-        if let Err(source) = process
-            .stdin
-            .write_all(message.as_bytes())
-            .and_then(|_| process.stdin.write_all(b"\n"))
-            .and_then(|_| process.stdin.flush())
-        {
-            process.unhealthy = true;
-            process.protocol_ready = false;
-            process.last_error = Some(source.to_string());
-            return Err(SupervisorError::Spawn {
-                id: id.to_owned(),
+        self.stdio_session(id)?
+            .exchange(message)
+            .map_err(|source| SupervisorError::Spawn {
+                id: id.into(),
                 source,
-            });
-        }
-        process.unhealthy = false;
-        process.protocol_ready = true;
-        process.last_error = None;
-        // JSON-RPC notifications do not have a response. Waiting on stdout
-        // for them would deadlock the named-pipe request/response loop.
-        if serde_json::from_str::<serde_json::Value>(message)
-            .ok()
-            .and_then(|value| value.get("id").cloned())
-            .is_none()
-        {
-            return Ok(Vec::new());
-        }
-        let expected_id = serde_json::from_str::<serde_json::Value>(message)
-            .ok()
-            .and_then(|value| value.get("id").cloned());
-        let mut frames = Vec::new();
-        loop {
-            let mut response = String::new();
-            let bytes = match process.stdout.read_line(&mut response) {
-                Ok(bytes) => bytes,
-                Err(source) => {
-                    process.unhealthy = true;
-                    process.protocol_ready = false;
-                    process.last_error = Some(source.to_string());
-                    return Err(SupervisorError::Spawn {
-                        id: id.to_owned(),
-                        source,
-                    });
-                }
-            };
-            if bytes == 0 {
-                process.unhealthy = true;
-                process.protocol_ready = false;
-                process.last_error = Some("managed process closed stdout".to_string());
-                break;
-            }
-            let trimmed = response.trim_end().to_owned();
-            let is_expected_response = serde_json::from_str::<serde_json::Value>(&trimmed)
-                .ok()
-                .and_then(|value| value.get("id").cloned())
-                .zip(expected_id.clone())
-                .is_some_and(|(actual, expected)| actual == expected);
-            frames.push(trimmed);
-            if is_expected_response {
-                break;
-            }
-        }
-        Ok(frames)
+            })
     }
 }
 

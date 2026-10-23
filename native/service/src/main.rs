@@ -160,9 +160,9 @@ fn handle_request(
             supervisor.stop(request["id"].as_str().unwrap_or_default())?;
             serde_json::json!({"ok": true})
         }
-        Some("restart") => serde_json::to_value(
-            supervisor.restart(request["id"].as_str().unwrap_or_default())?,
-        )?,
+        Some("restart") => {
+            serde_json::to_value(supervisor.restart(request["id"].as_str().unwrap_or_default())?)?
+        }
         Some("status") => {
             let processes = supervisor.statuses();
             #[cfg(windows)]
@@ -250,7 +250,31 @@ fn serve_named_pipe_client(
         if read == 0 {
             break;
         }
-        let response = {
+        // A blocked child must not hold the shared lifecycle/watchdog mutex.
+        let request = serde_json::from_str::<serde_json::Value>(line.trim());
+        let stdio = request.as_ref().ok().filter(|value| value["op"] == "stdio");
+        let response = if let Some(request) = stdio {
+            let session = supervisor.lock().ok().and_then(|guard| {
+                guard
+                    .stdio_session(request["id"].as_str().unwrap_or_default())
+                    .ok()
+            });
+            match session
+                .ok_or_else(|| io::Error::other("managed stdio process not found"))
+                .and_then(|session| {
+                    let message = request["message"].as_str().unwrap_or_default();
+                    match request["timeout_ms"].as_u64() {
+                        Some(ms) => session.exchange_timeout(
+                            message,
+                            Duration::from_millis(ms.clamp(100, 3_600_000)),
+                        ),
+                        None => session.exchange(message),
+                    }
+                }) {
+                Ok(responses) => serde_json::json!({"responses":responses}).to_string(),
+                Err(error) => serde_json::json!({"error":error.to_string()}).to_string(),
+            }
+        } else {
             let mut guard = match supervisor.lock() {
                 Ok(guard) => guard,
                 Err(_) => break,

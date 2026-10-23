@@ -22,6 +22,24 @@ DPAPI round-trip. Test fixtures clean their temporary executable and processes.
 This is not a substitute for installed SCM service, tray, installer and full
 gateway acceptance testing.
 
+Each managed process has a bounded stdio exchange queue and its own I/O worker.
+The Windows pipe handler releases the shared supervisor mutex before waiting, so
+status, stop, restart and watchdog work can continue while another tool is silent.
+The default exchange deadline is 60 seconds, configurable through the existing
+server request/max-total timeout; initialization uses the configured init timeout.
+Deadlines are clamped to 100 ms–1 hour. Expiry poisons that process session and the
+watchdog terminates/restarts it within the existing attempt budget; the timed-out
+request is never replayed. State from an old session cannot mark a replacement
+healthy or unhealthy. A write-only notification/client response does not establish
+protocol readiness; a matching successful JSON-RPC response does.
+
+The Node transport consumes pipe data through events and closes a timed-out
+control connection, preventing a delayed reply from satisfying a later request.
+The current batch exchange protocol still buffers server requests/notifications
+until the matching response. Fully interactive server-to-client requests and
+mid-call cancellation therefore require a streaming IPC follow-up before claiming
+general-purpose MCP duplex hosting acceptance.
+
 The Node gateway uses the native service only when
 `MCPHUB_NATIVE_RUNTIME_ENABLED=true` is set on Windows. The default SDK stdio
 transport remains unchanged. Install the service after building with:
