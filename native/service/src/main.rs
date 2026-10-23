@@ -68,6 +68,10 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
         .unwrap_or_else(|| install_dir.to_path_buf())
         .join("MCPHub");
     std::fs::create_dir_all(&data_dir).ok()?;
+    let settings = data_dir.join("mcp_settings.json");
+    if !settings.exists() {
+        std::fs::write(&settings, b"{\"mcpServers\":{}}\n").ok()?;
+    }
     let child = Command::new(node)
         .arg(backend)
         .current_dir(resource_dir)
@@ -77,7 +81,7 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
         .env("PORT", "3000")
         .env("DISABLE_WEB", "false")
         .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
-        .env("MCPHUB_SETTING_PATH", data_dir.join("mcp_settings.json"))
+        .env("MCPHUB_SETTING_PATH", settings)
         .spawn()
         .ok()?;
     Some((child, Instant::now()))

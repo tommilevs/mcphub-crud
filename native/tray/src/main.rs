@@ -49,6 +49,9 @@ fn start_gateway(app: &AppHandle) {
         return;
     }
     let settings = data_dir.join("mcp_settings.json");
+    if !settings.exists() && std::fs::write(&settings, b"{\"mcpServers\":{}}\n").is_err() {
+        return;
+    }
     let _ = Command::new(node)
         .arg(backend)
         .current_dir(resource_dir.join("runtime"))
