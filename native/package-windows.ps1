@@ -4,7 +4,19 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repo = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
-$staging = Join-Path $PSScriptRoot 'staging'
+$nativeRoot = (Resolve-Path -LiteralPath $PSScriptRoot).Path
+$staging = [IO.Path]::GetFullPath((Join-Path $nativeRoot 'staging'))
+if (-not $staging.StartsWith($nativeRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+  throw 'Staging must remain inside the native workspace.'
+}
+if (Test-Path -LiteralPath $staging) {
+  $resolvedStaging = (Resolve-Path -LiteralPath $staging).Path
+  $stagingItem = Get-Item -LiteralPath $staging -Force
+  if ($resolvedStaging -ne $staging -or -not $stagingItem.PSIsContainer -or
+      ($stagingItem.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+    throw 'Refusing to replace a staging path that is redirected or not a directory.'
+  }
+}
 
 if (-not (Test-Path -LiteralPath $NodeExecutable)) {
   throw "Node executable not found: $NodeExecutable. Pass -NodeExecutable with a portable node.exe."
@@ -16,7 +28,15 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Backend build failed with exit code $LASTEXITCODE" }
   npm run -s frontend:build
   if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE" }
-  if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+  if (Test-Path -LiteralPath $staging) {
+    # Recheck immediately before recursive removal; builds above may take time.
+    $target = Get-Item -LiteralPath $staging -Force
+    if ((Resolve-Path -LiteralPath $staging).Path -ne $staging -or
+        -not $target.PSIsContainer -or ($target.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+      throw 'Staging cleanup target changed; refusing recursive removal.'
+    }
+    Remove-Item -LiteralPath $staging -Recurse -Force
+  }
   New-Item -ItemType Directory -Path $staging | Out-Null
   Copy-Item -LiteralPath (Join-Path $repo 'package.json') -Destination (Join-Path $staging 'package.json')
   Copy-Item -LiteralPath (Join-Path $repo 'pnpm-lock.yaml') -Destination (Join-Path $staging 'pnpm-lock.yaml')
