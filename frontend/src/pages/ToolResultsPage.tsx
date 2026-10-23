@@ -134,6 +134,9 @@ const ToolResultsPage: React.FC = () => {
   const [error, setError] = useState('');
   const [selected, setSelected] = useState<string[]>([]);
   const [comparison, setComparison] = useState<{ sameRaw: boolean; results: ToolResultSummary[] } | null>(null);
+  const [comparisonRaw, setComparisonRaw] = useState<Record<string, string>>({});
+  const [comparisonRawLoading, setComparisonRawLoading] = useState(false);
+  const [comparisonRawError, setComparisonRawError] = useState('');
   const [timeline, setTimeline] = useState<ToolResultSummary[] | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelineError, setTimelineError] = useState('');
@@ -149,7 +152,25 @@ const ToolResultsPage: React.FC = () => {
 
   const runCompare = async () => {
     const response = await compareToolResults(selected);
-    if (response.success && response.data) setComparison(response.data);
+    if (response.success && response.data) {
+      setComparison(response.data);
+      setComparisonRaw({});
+      setComparisonRawError('');
+    }
+  };
+
+  const loadComparisonRaw = async () => {
+    if (!comparison) return;
+    setComparisonRawLoading(true);
+    setComparisonRawError('');
+    const results = await Promise.allSettled(comparison.results.map((item) => getToolResultRaw(item.resultId)));
+    const loaded: Record<string, string> = {};
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') loaded[comparison.results[index].resultId] = result.value;
+    });
+    if (Object.keys(loaded).length !== comparison.results.length) setComparisonRawError(t('toolResults.compareRawError'));
+    setComparisonRaw(loaded);
+    setComparisonRawLoading(false);
   };
 
   const runTimeline = async () => {
@@ -196,7 +217,7 @@ const ToolResultsPage: React.FC = () => {
       <div className="mt-3 space-y-2">{timeline.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 hover:bg-[var(--hub-surface-hover)]"><div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{item.server} / {item.tool}</span><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span></div><div className="mt-1 text-xs text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()} · {item.durationMs} ms · {bytes(item.rawBytes)}</div></Link>)}</div>
     </div>}
     {selected.length >= 2 && <button className="hub-btn hub-btn-primary" onClick={() => void runCompare()}>{t('toolResults.compare')} ({selected.length})</button>}
-    {comparison && <div className="hub-card p-3"><div className="flex items-center justify-between"><span className="text-sm font-medium">{t('toolResults.compare')}</span><button className="hub-btn" onClick={() => setComparison(null)}>{t('common.close')}</button></div><div className="mt-2 grid gap-2 md:grid-cols-2">{comparison.results.map((item) => <div key={item.resultId} className="rounded border border-[var(--hub-line)] p-2 text-xs"><div className="font-medium">{item.server} / {item.tool}</div><div className="hub-mono text-[var(--hub-ink-3)]">{item.resultId}</div><div>{new Date(item.timestamp).toLocaleString()} · {bytes(item.rawBytes)}</div></div>)}</div><div className="mt-2 text-xs text-[var(--hub-ink-3)]">{comparison.sameRaw ? t('toolResults.sameRaw') : t('toolResults.differentRaw')}</div></div>}
+    {comparison && <div className="hub-card p-3"><div className="flex items-center justify-between"><span className="text-sm font-medium">{t('toolResults.compare')}</span><div className="flex gap-2"><button className="hub-btn" onClick={() => void loadComparisonRaw()} disabled={comparisonRawLoading}>{comparisonRawLoading ? t('app.loading') : t('toolResults.loadRaw')}</button><button className="hub-btn" onClick={() => { setComparison(null); setComparisonRaw({}); }}>{t('common.close')}</button></div></div><div className="mt-2 grid gap-2 md:grid-cols-2">{comparison.results.map((item) => <div key={item.resultId} className="rounded border border-[var(--hub-line)] p-2 text-xs"><div className="font-medium">{item.server} / {item.tool}</div><div className="hub-mono text-[var(--hub-ink-3)]">{item.resultId}</div><div>{new Date(item.timestamp).toLocaleString()} · {bytes(item.rawBytes)}</div>{comparisonRaw[item.resultId] !== undefined && <pre className="mt-2 max-h-48 overflow-auto rounded bg-[var(--hub-surface)] p-2 hub-mono whitespace-pre-wrap break-words">{comparisonRaw[item.resultId]}</pre>}</div>)}</div><div className="mt-2 text-xs text-[var(--hub-ink-3)]">{comparison.sameRaw ? t('toolResults.sameRaw') : t('toolResults.differentRaw')}</div>{comparisonRawError && <div className="mt-2 text-sm text-red-500">{comparisonRawError}</div>}</div>}
     <div className="hub-card overflow-x-auto">
       <table className="w-full text-sm"><thead className="border-b border-[var(--hub-line)] text-left text-xs text-[var(--hub-ink-3)]"><tr><th className="px-3 py-2" /><>{['timestamp','server','tool','status','duration','size'].map((key) => <th key={key} className="px-3 py-2 font-medium">{t(`toolResults.${key}`)}</th>)}</></tr></thead>
       <tbody>{items.map((item) => <tr key={item.resultId} className="border-b border-[var(--hub-line)] last:border-0 hover:bg-[var(--hub-surface-hover)]"><td className="px-3 py-2"><input type="checkbox" checked={selected.includes(item.resultId)} onChange={(e) => setSelected(e.target.checked ? [...selected, item.resultId] : selected.filter((id) => id !== item.resultId))} /></td><td className="px-3 py-2 whitespace-nowrap"><Link className="text-[var(--hub-accent)]" to={`/tool-results/${item.resultId}`}>{new Date(item.timestamp).toLocaleString()}</Link></td><td className="px-3 py-2">{item.server}</td><td className="px-3 py-2">{item.tool}</td><td className="px-3 py-2"><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span>{item.pinned && <Pin size={12} className="inline ml-1" />}</td><td className="px-3 py-2 hub-num">{item.durationMs} ms</td><td className="px-3 py-2 hub-num">{bytes(item.rawBytes)}</td></tr>)}</tbody></table>

@@ -1477,6 +1477,8 @@
     "rawHash": "RAW SHA-256",
     "query": "Search objective or result content",
     "compare": "Compare",
+    "loadRaw": "Load RAW payloads",
+    "compareRawError": "Some RAW payloads could not be loaded",
     "sameRaw": "RAW payloads are identical",
     "differentRaw": "RAW payloads differ",
     "range": "RAW byte range",
