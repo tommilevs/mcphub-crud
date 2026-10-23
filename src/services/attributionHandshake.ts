@@ -1,5 +1,6 @@
-import type { AttributionContextService } from './attributionContextService.js';
-import { runWithCallAttribution } from './callAttribution.js';
+import type { AttributionContextService, AttributionContextReference } from './attributionContextService.js';
+import { runWithCallAttribution, getCallAttribution } from './callAttribution.js';
+import { extractDiscoveryEvidence } from './discoveryEvidence.js';
 
 export function stripAttributionInput(request: any) {
   const params = request.params ?? {};
@@ -37,7 +38,7 @@ export async function withAttributionHandshake(
   const input = validObject(hub)
     ? { ...hub, trace_key: hub.trace_key ?? (validObject(meta) ? meta.trace_key : undefined) }
     : hub ?? (validObject(meta) ? { trace_key: meta.trace_key } : meta);
-  let context;
+  let context: AttributionContextReference | null | undefined;
   let issuedKey: string | undefined;
   try {
     if (typeof input !== 'object' || Array.isArray(input) || JSON.stringify(input).length > 4096) {
@@ -72,7 +73,16 @@ export async function withAttributionHandshake(
   } catch {
     // Attribution persistence must not prevent ordinary execution in compatible mode.
   }
-  const result = await runWithCallAttribution(context ?? null, () => handler(cleaned));
+  const result = await runWithCallAttribution(context ?? null, async () => {
+    const result = await handler(cleaned);
+    const callId = getCallAttribution()?.callId;
+    const evidence = extractDiscoveryEvidence(request.params.name, result);
+    if (context && callId && evidence) {
+      try { await service.recordDiscovery(context, callId, evidence); }
+      catch { /* Discovery telemetry must never change the returned tool result. */ }
+    }
+    return result;
+  });
   if (!context || !result || typeof result !== 'object') return result;
   return { ...result, _meta: { ...result._meta, 'dev.mcphub/context': {
     context_id: context.contextId, task_id: context.taskId, trace_id: context.traceId,

@@ -1,4 +1,5 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import type { DiscoveryEvidence } from './discoveryEvidence.js';
 
 export interface AttributionIdentity {
   modelId: string | null;
@@ -32,12 +33,19 @@ export interface AttributionContextStore {
   insert(record: AttributionContextRecord, event?: 'context_started' | 'branch_forked', parentContextId?: string): Promise<void>;
   findByDigest(digest: string): Promise<AttributionContextRecord | null>;
   rotate?(oldDigest: string, next: AttributionContextRecord): Promise<boolean>;
+  recordDiscovery?(context: AttributionContextReference, callId: string, evidence: DiscoveryEvidence): Promise<void>;
 }
+
+export type AttributionContextReference = Pick<AttributionContextRecord,
+  'contextId' | 'taskId' | 'traceId' | 'branchId' | 'modelSegmentId' | 'identity' | 'clientClaims'>;
 
 const digestKey = (key: string): string => createHash('sha256').update(key).digest('hex');
 
 /** Correlation only: callers must supply their authenticated, tenant-scoped principal. */
 export class AttributionContextService {
+  async recordDiscovery(context: AttributionContextReference, callId: string, evidence: DiscoveryEvidence) {
+    await this.store.recordDiscovery?.(context, callId, evidence);
+  }
   constructor(
     private readonly store: AttributionContextStore,
     private readonly now: () => Date = () => new Date(),

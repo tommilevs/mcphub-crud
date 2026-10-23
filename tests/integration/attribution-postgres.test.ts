@@ -8,6 +8,7 @@ let mockSummaryDb: { query: (sql: string, parameters?: unknown[]) => Promise<any
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => mockSummaryDb }));
 import { getAttributionSummary } from '../../src/controllers/attributionController.js';
 import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
+import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 
 const suite = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 suite('attribution PostgreSQL isolated schema', () => {
@@ -110,5 +111,35 @@ suite('attribution PostgreSQL isolated schema', () => {
     expect((await save(1, false)).status).toBe(200);
     const reviews = (await pool.query('SELECT revision, training_consent FROM attribution_task_reviews WHERE task_id=$1 ORDER BY revision', [task.taskId])).rows;
     expect(reviews).toEqual([{ revision: 1, training_consent: true }, { revision: 2, training_consent: false }]);
+  });
+  test('history reads the latest review without modifying stored RAW', async () => {
+    const task = await service.start('history-review-user');
+    const resultId = randomUUID();
+    const raw = '{"content":[{"type":"text","text":"immutable evidence"}]}';
+    await pool.query(`ALTER TABLE tool_results ADD COLUMN result_id uuid;
+      ALTER TABLE tool_results ADD COLUMN raw text;
+      CREATE TABLE tool_result_state (result_id uuid PRIMARY KEY, pinned boolean DEFAULT false,
+        use_count integer DEFAULT 0, last_referenced_at timestamptz)`);
+    await pool.query('INSERT INTO tool_results (result_id, status, attribution, raw) VALUES ($1,$2,$3,$4)',
+      [resultId, 'success', JSON.stringify({ taskId: task.taskId }), raw]);
+    await pool.query('INSERT INTO tool_result_state (result_id) VALUES ($1)', [resultId]);
+    await pool.query(`INSERT INTO attribution_task_reviews (task_id, revision, outcome, training_consent, reviewed_by)
+      VALUES ($1,1,'success',true,'reviewer'),($1,2,'partial',false,'reviewer')`, [task.taskId]);
+    const repository = new ToolResultRepositoryDb(mockSummaryDb as never);
+    const result = await repository.findById(resultId);
+    expect(result?.taskReview).toMatchObject({ revision: 2, outcome: 'partial', trainingConsent: false });
+    expect(result?.raw).toBe(raw);
+    expect((await pool.query('SELECT raw FROM tool_results WHERE result_id=$1', [resultId])).rows[0].raw).toBe(raw);
+  });
+  test('discovery evidence persists once per call and contains no query payload', async () => {
+    const task = await service.start('discovery-user');
+    const context = (await service.resolve('discovery-user', task.traceKey))!;
+    const callId = randomUUID();
+    const evidence = { operation: 'search_tools' as const, candidates: [{ name: 'demo-tool', schemaSha256: null }], truncated: false };
+    await service.recordDiscovery(context, callId, evidence);
+    await service.recordDiscovery(context, callId, evidence);
+    const rows = (await pool.query('SELECT evidence FROM attribution_discovery_events WHERE call_id=$1', [callId])).rows;
+    expect(rows).toHaveLength(1);
+    expect(rows[0].evidence).toEqual(evidence);
   });
 });

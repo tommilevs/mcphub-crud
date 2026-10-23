@@ -78,3 +78,15 @@ test('conflicting input keys yield unknown attribution instead of selecting eith
     return { content: [] };
   });
 });
+
+test('a discovery telemetry failure leaves the original search response intact', async () => {
+  let attempted = false;
+  const service = new AttributionContextService({ insert: async () => {}, findByDigest: async () => null,
+    recordDiscovery: async () => { attempted = true; throw new Error('offline'); },
+  });
+  const content = [{ type: 'text', text: JSON.stringify({ tools: [{ name: 'demo-tool' }] }) }];
+  const result = await withAttributionHandshake({ params: { name: 'search_tools', arguments: { query: 'private objective', hub_context: { action: 'start' } } } },
+    'alice', service, async () => ({ content }));
+  expect(attempted).toBe(true);
+  expect(result.content).toEqual(content);
+});

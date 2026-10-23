@@ -46,5 +46,15 @@ export const ensureAttributionContextSchema = async (db: {
     );
     CREATE INDEX IF NOT EXISTS attribution_task_reviews_text_task_idx
       ON attribution_task_reviews ((task_id::text), revision DESC);
+    CREATE TABLE IF NOT EXISTS attribution_discovery_events (
+      call_id uuid PRIMARY KEY,
+      context_id uuid NOT NULL REFERENCES attribution_contexts(context_id) ON DELETE CASCADE,
+      trace_id uuid NOT NULL,
+      branch_id uuid,
+      occurred_at timestamptz NOT NULL DEFAULT NOW(),
+      evidence jsonb NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS attribution_discovery_events_trace_idx
+      ON attribution_discovery_events (trace_id, branch_id, occurred_at DESC);
   `);
 };

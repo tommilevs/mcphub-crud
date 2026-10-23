@@ -1,8 +1,15 @@
-import type { AttributionContextRecord, AttributionContextStore } from '../../services/attributionContextService.js';
+import type { AttributionContextRecord, AttributionContextStore, AttributionContextReference } from '../../services/attributionContextService.js';
 import { randomUUID } from 'node:crypto';
+import type { DiscoveryEvidence } from '../../services/discoveryEvidence.js';
 
 export class AttributionContextRepository implements AttributionContextStore {
   constructor(private readonly db: { query(sql: string, parameters?: unknown[]): Promise<any> }) {}
+
+  async recordDiscovery(context: AttributionContextReference, callId: string, evidence: DiscoveryEvidence): Promise<void> {
+    await this.db.query(`INSERT INTO attribution_discovery_events
+      (call_id, context_id, trace_id, branch_id, evidence) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (call_id) DO NOTHING`, [callId, context.contextId, context.traceId, context.branchId, JSON.stringify(evidence)]);
+  }
 
   async pruneExpired(cutoff: Date, limit = 500): Promise<number> {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000 || !Number.isFinite(cutoff.getTime())) {

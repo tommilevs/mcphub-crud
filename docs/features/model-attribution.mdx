@@ -93,3 +93,12 @@ Each change appends an auditable revision with reviewer and timestamp. Concurren
 or stale writes return 409. New tasks have no outcome assessment and no training
 permission. The latest review applies across the task's results, without changing
 RAW, attributing the whole outcome to a model, or marking each call as correct.
+
+Attributed `search_tools` and `describe_tool` calls now record bounded discovery
+evidence: visible candidate names and SHA-256 schema fingerprints (null when the
+schema was not disclosed), linked to the actual call/trace/branch. The record
+omits search text, tool descriptions and schema contents/defaults. At most 100
+candidates are recorded and truncation is explicit. A telemetry failure leaves
+the original response unchanged. Evidence follows context retention. Fingerprints
+alone do not satisfy the full discovery-context training gate; a complete,
+privacy-reviewed schema catalogue and task context are still required for SFT.
