@@ -4,7 +4,7 @@ import { useToast } from '@/contexts/ToastContext';
 
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 type NativeProcessStatus = { id: string; running: boolean; pid?: number; restarts: number };
-type NativeRuntimeStatusResponse = { data?: NativeProcessStatus[] };
+type NativeRuntimeStatusResponse = NativeProcessStatus[];
 
 /** Admin-only enrollment UI. The value is sent once and never rendered back. */
 const NativeRuntimeSecretsPanel: React.FC = () => {
@@ -19,7 +19,7 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
     const response = await apiGet<{ success?: boolean; data?: NativeRuntimeStatusResponse; message?: string }>(
       '/native-runtime/status',
     );
-    const processes = response?.data?.data;
+    const processes = response?.data;
     if (response?.success === false || !Array.isArray(processes)) {
       setRuntimeStatus(null);
       setStatusError(response?.message || 'Native runtime unavailable');
