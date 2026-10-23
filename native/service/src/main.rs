@@ -11,6 +11,8 @@ use std::{thread, time::Duration};
 #[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(windows)]
+use std::io::{Read, Write};
+#[cfg(windows)]
 use std::net::{SocketAddr, TcpStream};
 #[cfg(windows)]
 use std::process::{Child, Command, Stdio};
@@ -25,17 +27,30 @@ use std::time::Duration;
 use windows_service::{define_windows_service, service_dispatcher};
 
 #[cfg(windows)]
-fn gateway_port_in_use() -> bool {
-    TcpStream::connect_timeout(
+fn gateway_healthy() -> bool {
+    let Ok(mut stream) = TcpStream::connect_timeout(
         &SocketAddr::from(([127, 0, 0, 1], 3000)),
         Duration::from_millis(250),
-    )
-    .is_ok()
+    ) else {
+        return false;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    if stream
+        .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+        .is_err()
+    {
+        return false;
+    }
+    let mut response = [0u8; 256];
+    let Ok(size) = stream.read(&mut response) else {
+        return false;
+    };
+    String::from_utf8_lossy(&response[..size]).starts_with("HTTP/1.1 200")
 }
 
 #[cfg(windows)]
 fn spawn_gateway() -> Option<Child> {
-    if gateway_port_in_use() {
+    if gateway_healthy() {
         return None;
     }
     let executable = std::env::current_exe().ok()?;
@@ -85,7 +100,7 @@ fn run_gateway_watchdog(
                                 *guard = None;
                                 true
                             }
-                            Ok(None) => false,
+                            Ok(None) => !gateway_healthy(),
                             Err(_) => {
                                 *guard = None;
                                 true
@@ -94,7 +109,13 @@ fn run_gateway_watchdog(
                         None => true,
                     }
                 };
-                if needs_start && !gateway_port_in_use() {
+                if needs_start {
+                    if let Ok(mut guard) = child.lock() {
+                        if let Some(mut process) = guard.take() {
+                            let _ = process.kill();
+                            let _ = process.wait();
+                        }
+                    }
                     if let Some(process) = spawn_gateway() {
                         if let Ok(mut guard) = child.lock() {
                             *guard = Some(process);

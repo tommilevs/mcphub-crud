@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::{
+    io::{Read, Write},
     net::{SocketAddr, TcpStream},
     process::{Command, Stdio},
     time::Duration,
@@ -16,7 +17,19 @@ fn start_gateway(app: &AppHandle) {
     // gateway instead of creating a second process that will lose the port
     // race and leave the tray pointing at an unhealthy instance.
     let gateway_addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    if TcpStream::connect_timeout(&gateway_addr, Duration::from_millis(250)).is_ok() {
+    let gateway_healthy = TcpStream::connect_timeout(&gateway_addr, Duration::from_millis(250))
+        .ok()
+        .and_then(|mut stream| {
+            let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+            stream
+                .write_all(b"GET /health HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+                .ok()?;
+            let mut response = [0u8; 256];
+            let size = stream.read(&mut response).ok()?;
+            Some(String::from_utf8_lossy(&response[..size]).starts_with("HTTP/1.1 200"))
+        })
+        .unwrap_or(false);
+    if gateway_healthy {
         return;
     }
     let Ok(resource_dir) = app.path().resource_dir() else {
@@ -138,12 +151,9 @@ fn main() {
             let dashboard = MenuItemBuilder::with_id("dashboard", "Open Dashboard").build(app)?;
             let restart =
                 MenuItemBuilder::with_id("restart", "Restart MCPHub service").build(app)?;
-            let autostart = CheckMenuItemBuilder::with_id(
-                "autostart",
-                "Start MCPHub with Windows",
-            )
-            .checked(tray_autostart_enabled())
-            .build(app)?;
+            let autostart = CheckMenuItemBuilder::with_id("autostart", "Start MCPHub with Windows")
+                .checked(tray_autostart_enabled())
+                .build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Exit tray").build(app)?;
             let menu = MenuBuilder::new(app)
                 .items(&[&dashboard, &restart, &autostart, &quit])
