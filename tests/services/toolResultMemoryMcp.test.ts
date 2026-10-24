@@ -65,3 +65,28 @@ it('does not search a foreign result or accept owner filters from arguments',asy
  expect((await searchStoredToolResults(db as never,scope,'search_tool_results',{query:'needle',filters:{username:'bob'}},async()=>[1])).isError).toBe(true);
  expect(db.searchChunks).not.toHaveBeenCalled();expect(db.hybridSearch).not.toHaveBeenCalled();
 });
+
+it.each([{query:''},{query:'x'.repeat(2001)},{query:'needle',limit:21},{query:'needle',limit:0},{query:'needle',limit:1.5}])('rejects invalid search bounds before accessing providers',async args=>{
+ const db=repository();const embed=jest.fn();
+ const response=await searchStoredToolResults(db as never,scope,'search_tool_results',args,embed);
+ expect(response.isError).toBe(true);expect(embed).not.toHaveBeenCalled();expect(db.hybridSearch).not.toHaveBeenCalled();expect(db.search).not.toHaveBeenCalled();
+});
+it('does not contact providers for an empty server scope',async()=>{
+ const db=repository();const embed=jest.fn();
+ const response=await searchStoredToolResults(db as never,{...scope,servers:[]},'search_tool_results',{query:'needle'},embed);
+ expect(JSON.parse(response.content[0].text).results).toEqual([]);expect(embed).not.toHaveBeenCalled();expect(db.hybridSearch).not.toHaveBeenCalled();
+});
+it('bounds chunk responses without modifying stored evidence',async()=>{
+ const db=repository();db.findById.mockResolvedValue(record);
+ db.searchChunks.mockResolvedValue([{chunkIndex:0,content:'small'},{chunkIndex:1,content:'😀'.repeat(20000)}]);
+ const response=await searchStoredToolResults(db as never,scope,'search_tool_result',{result_id:'id',query:'needle'},async()=>null);
+ expect(Buffer.byteLength(response.content[0].text)).toBeLessThanOrEqual(65536);
+ expect(JSON.parse(response.content[0].text)).toEqual(expect.objectContaining({partial:true,results:[expect.objectContaining({content:'small'})]}));
+ expect(record.raw).toBe(raw);
+});
+it('falls back to scoped lexical history if hybrid retrieval fails',async()=>{
+ const db=repository();db.hybridSearch.mockRejectedValue(Error('unavailable'));db.search.mockResolvedValue([record]);
+ const response=await searchStoredToolResults(db as never,scope,'search_tool_results',{query:'needle'},async()=>[1]);
+ expect(db.search).toHaveBeenCalledWith('needle',10,{username:'alice',keyId:'key-a'});
+ expect(JSON.parse(response.content[0].text).mode).toBe('lexical');
+});

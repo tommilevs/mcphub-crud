@@ -3,7 +3,26 @@ title: "Tool Result History"
 description: "Inspect immutable MCP tool execution results and retrieval metrics."
 ---
 
-Tool Result History is available in database mode and is restricted to administrators. Each successfully persisted eligible tool execution receives a `result_id`. A storage failure does not fail or repeat the upstream tool call. Retention maintenance failure preserves an already saved result ID and is retried on the next capture. The original MCP response is stored as immutable RAW before optional legacy compression; pin and usage counters are stored separately.
+Tool Result History is available in database mode. Dashboard history endpoints are restricted to administrators; the agent-facing MCP operations below are restricted to the authenticated owner's currently accessible results. Each successfully persisted eligible tool execution receives a `result_id`. A storage failure does not fail or repeat the upstream tool call. Retention maintenance failure preserves an already saved result ID and is retried on the next capture. The original MCP response is stored as immutable RAW before optional legacy compression; pin and usage counters are stored separately.
+
+## Agent-facing MCP memory
+
+When database history is available, `$smart` routes expose these additional tools:
+
+| Tool | Arguments | Result |
+| --- | --- | --- |
+| `get_tool_result` | `result_id` | Exact stored RAW, up to 65,536 UTF-8 bytes |
+| `get_tool_result_range` | `result_id`, `start`, `end` | End-exclusive byte range, base64 encoded, with offsets, total bytes and RAW digest |
+| `search_tool_result` | `result_id`, `query`, optional `limit` | Matching indexed chunks within one result |
+| `search_tool_results` | `query`, optional `filters`, optional `limit` | Matching history metadata, without RAW |
+| `pin_tool_result` | `result_id` | Protect the result from automatic retention |
+| `unpin_tool_result` | `result_id` | Remove retention protection |
+
+These operations read existing evidence; they do not rerun the source tool. The caller's authenticated username and key, when present, must match the stored result. Current group, server and tool visibility also applies. Missing identity is rejected, and tool arguments cannot supply another owner or key. Dashboard administrator access does not bypass these MCP ownership checks.
+
+Search queries contain 1–2,000 characters and `limit` is an integer from 1 to 20 (default 10). History filters accept `server`, `tool`, `status`, `sessionId`, `conversationId`, `modelId`, `taskId`, `traceId` and `branchId`. Search responses are bounded to 65,536 bytes; `partial: true` means additional hits were omitted to meet that bound. Embedding failures use lexical retrieval. Search chunks are derived text, not a replacement for exact RAW.
+
+Oversized full reads return an error containing `raw_bytes`, `max_read_bytes` and `next_tool: "get_tool_result_range"`. Request consecutive ranges of at most 65,536 bytes. Decode and concatenate the base64 bytes before decoding UTF-8: a range may cut through a multibyte character. Metadata-only capture policies do not expose RAW through these operations. Pinning changes retention state, not the immutable payload.
 
 All endpoints below are under `/api` and use the normal dashboard authentication.
 
