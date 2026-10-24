@@ -123,6 +123,11 @@ Unicode pairs. Concatenating the chunks reconstructs the indexed text exactly.
 Malformed JSON falls back to line-aware text windows. Version 1 records remain
 readable; a full reindex (`onlyMissing: false`) optionally upgrades old indexes
 without modifying RAW.
+The History page offers **Missing indexes only** (default) and **Rebuild existing
+indexes too**. A click processes at most 25 records; **Continue next 25** resumes
+using the returned cursor. Changing the mode starts a new pass and clears the old
+cursor. Full rebuilds may request embeddings again, so the UI keeps them explicit
+and does not start the next batch automatically.
 The result detail page provides **Open RAW here** on indexed chunks and search
 hits. It scrolls to and highlights the corresponding serialized RAW text,
 including JSON escapes. A chunk spanning several content blocks opens its first

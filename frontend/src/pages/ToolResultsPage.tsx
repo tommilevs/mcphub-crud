@@ -350,6 +350,7 @@ const ToolResultsPage: React.FC = () => {
   const [reindexing, setReindexing] = useState(false);
   const [reindexMessage, setReindexMessage] = useState('');
   const [reindexCursor, setReindexCursor] = useState<string | undefined>();
+  const [reindexOnlyMissing,setReindexOnlyMissing]=useState(true);
 
   const load = useCallback(async () => {
     const requestId = ++historyRequestRef.current;
@@ -384,7 +385,7 @@ const ToolResultsPage: React.FC = () => {
     setReindexing(true);
     setReindexMessage('');
     try {
-      const response = await reindexToolResults(25, true, reindexCursor);
+      const response = await reindexToolResults(25, reindexOnlyMissing, reindexCursor);
       if (response.success && response.data) {
         setReindexCursor(response.data.nextCursor);
         setReindexMessage(`${response.data.indexed} indexed · ${response.data.remaining} remaining · ${response.data.skipped} skipped · ${response.data.embeddingFailures} embedding failures`);
@@ -460,7 +461,18 @@ const ToolResultsPage: React.FC = () => {
     </div>}
     {stats?.retrieval && <div className="hub-card px-3 py-2 text-xs text-[var(--hub-ink-3)]">{t('toolResults.retrievalMetrics')}: {stats.retrieval.searches} {t('toolResults.searches')} · {stats.retrieval.hybridSearches} {t('toolResults.hybrid')} · {stats.retrieval.indexFailures} {t('toolResults.indexFailures')}</div>}
     {retrievalDiagnostics && <div className="hub-card px-3 py-2 text-xs text-[var(--hub-ink-3)]">{t('toolResults.searchDiagnostics')}: {retrievalDiagnostics.mode} · {retrievalDiagnostics.resultCount} {t('toolResults.hits')} · {retrievalDiagnostics.lexicalMatches} {t('toolResults.lexical')} · {retrievalDiagnostics.vectorMatches} {t('toolResults.vector')} · {retrievalDiagnostics.fusedMatches} {t('toolResults.fused')}</div>}
-    <div className="hub-card flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-xs text-[var(--hub-ink-3)]"><span>{reindexMessage || t('toolResults.reindexDescription')}</span><button className="hub-btn" type="button" onClick={() => void runReindex()} disabled={reindexing}>{reindexing ? t('app.loading') : t('toolResults.reindex')}</button></div>
+    <div className="hub-card space-y-2 px-3 py-2 text-xs text-[var(--hub-ink-3)]">
+      <div className="flex flex-wrap items-center justify-between gap-2"><span>{reindexMessage || t('toolResults.reindexDescription')}</span>
+        <div className="flex flex-wrap gap-2">
+          <select className="hub-input" aria-label={t('toolResults.reindexMode','Index rebuild mode')} disabled={reindexing} value={reindexOnlyMissing?'missing':'all'} onChange={event=>{setReindexOnlyMissing(event.target.value==='missing');setReindexCursor(undefined);setReindexMessage('');}}>
+            <option value="missing">{t('toolResults.reindexMissing','Missing indexes only')}</option>
+            <option value="all">{t('toolResults.reindexAll','Rebuild existing indexes too')}</option>
+          </select>
+          <button className="hub-btn" type="button" onClick={() => void runReindex()} disabled={reindexing}>{reindexing?t('app.loading'):reindexCursor?t('toolResults.reindexContinue','Continue next 25'):t('toolResults.reindexBatch','Rebuild batch of 25')}</button>
+        </div>
+      </div>
+      {!reindexOnlyMissing&&<p>{t('toolResults.reindexAllHelp','A full rebuild upgrades old chunk versions and may request embeddings again. RAW stays unchanged. Each click processes at most 25 results.')}</p>}
+    </div>
     <form className="hub-card p-3 flex flex-wrap gap-2" onSubmit={(e) => { e.preventDefault(); setPage(1); setFilter({ ...draft, startDate: draft.startDate ? new Date(draft.startDate).toISOString() : undefined, endDate: draft.endDate ? new Date(draft.endDate).toISOString() : undefined }); }}>
       <input className="hub-input min-w-56 flex-1" placeholder={t('toolResults.query')} value={draft.query || ''} onChange={(e) => setDraft({ ...draft, query: e.target.value })} />
       <input className="hub-input min-w-44" placeholder={t('toolResults.server')} value={draft.server || ''} onChange={(e) => setDraft({ ...draft, server: e.target.value })} />
