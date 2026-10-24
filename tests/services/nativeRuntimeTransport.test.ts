@@ -18,6 +18,12 @@ suite('native transport over a real isolated Windows named pipe',()=>{
   });
   afterEach(async()=>{for(const socket of sockets)socket.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));});
   const transport=()=>new NativeRuntimeTransport({id:'fixture',command:'unused.exe',args:[],env:{},request_timeout_ms:100},pipe);
+  test('explicit working directory refuses an old runtime before starting a process',async()=>{
+    const client=new NativeRuntimeTransport({id:'cwd-fixture',command:'unused.exe',args:[],env:{},streaming:true,cwd:'C:\\tools'},pipe);
+    try{await expect(client.start()).rejects.toThrow('does not support explicit working directories');}
+    finally{await client.close();}
+    expect(requests.map(request=>request.op)).toEqual(['status']);
+  });
   test('interactive execution refuses a legacy service before any process is started',async()=>{
     const client=new NativeRuntimeTransport({id:'interactive',command:'unused.exe',args:[],env:{},streaming:true,
       execution_context:{kind:'interactive',session_id:7}},pipe);

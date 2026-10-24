@@ -478,6 +478,7 @@ export interface ServerConfig {
     Pick<RequestOptions, 'timeout' | 'resetTimeoutOnProgress' | 'maxTotalTimeout'>
   > & {
     nativeExecution?: NativeExecution;
+    nativeWorkingDirectory?: string;
     maxBufferSize?: number; // Stdio read buffer limit in bytes; omitted uses the SDK default (10 MiB).
     // Internal persistence carriers for startOnDemand/idleTimeoutMs (see below). The
     // database-backed ServerDao has no dedicated columns for those two fields, so

@@ -4,7 +4,9 @@ import { ServerConfig, ServerInfo } from '../../src/types/index.js';
 describe('normalizeServerConfigForPersistence', () => {
   it('persists explicit interactive execution inside the existing options column', () => {
     const nativeExecution={kind:'interactive' as const,sessionId:7};
-    expect(normalizeServerConfigForPersistence({type:'stdio',command:'node',options:{nativeExecution}}).options?.nativeExecution).toEqual(nativeExecution);
+    const normalized=normalizeServerConfigForPersistence({type:'stdio',command:'node',options:{nativeExecution,nativeWorkingDirectory:'C:\\tools\\server'}});
+    expect(normalized.options?.nativeExecution).toEqual(nativeExecution);
+    expect(normalized.options?.nativeWorkingDirectory).toBe('C:\\tools\\server');
     expect(()=>normalizeServerConfigForPersistence({type:'stdio',command:'node',options:{nativeExecution:{kind:'interactive',sessionId:0}}})).toThrow();
     expect(()=>normalizeServerConfigForPersistence({type:'sse',url:'https://example.com',options:{nativeExecution}})).toThrow('requires a stdio server');
   });

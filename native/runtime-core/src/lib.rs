@@ -65,6 +65,8 @@ pub struct ManagedProcessSpec {
     pub id: String,
     pub command: String,
     #[serde(default)]
+    pub cwd: Option<std::path::PathBuf>,
+    #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
     pub env: HashMap<String, String>,
@@ -159,6 +161,18 @@ struct ProcessIo {
 
 fn spawn_managed(spec: ManagedProcessSpec) -> Result<ManagedProcess, SupervisorError> {
     let mut command = Command::new(&spec.command);
+    if let Some(cwd) = &spec.cwd {
+        if !cwd.is_absolute() {
+            return Err(SupervisorError::Spawn {
+                id: spec.id.clone(),
+                source: std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "managed working directory must be absolute",
+                ),
+            });
+        }
+        command.current_dir(cwd);
+    }
     command
         .args(&spec.args)
         .envs(&spec.env)

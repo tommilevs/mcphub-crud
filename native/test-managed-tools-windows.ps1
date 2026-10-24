@@ -1,15 +1,21 @@
 param(
   [Parameter(Mandatory=$true)][string]$ComputerUseExecutable,
-  [Parameter(Mandatory=$true)][string]$DesktopCommanderEntry
+  [Parameter(Mandatory=$true)][string]$DesktopCommanderEntry,
+  [string]$PlaywrightEntry,
+  [string]$PlaywrightWorkingDirectory
 )
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $runtime=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot 'target\release\mcphub-runtime-service.exe')).Path
 $ComputerUseExecutable=(Resolve-Path -LiteralPath $ComputerUseExecutable).Path
 $DesktopCommanderEntry=(Resolve-Path -LiteralPath $DesktopCommanderEntry).Path
+if($PlaywrightEntry){
+  $PlaywrightEntry=(Resolve-Path -LiteralPath $PlaywrightEntry).Path
+  $PlaywrightWorkingDirectory=(Resolve-Path -LiteralPath $PlaywrightWorkingDirectory).Path
+}
 $pipe='mcphub-user-managed-acceptance-'+[Guid]::NewGuid().ToString('N')
 $previous=@{}
-foreach($key in @('MCPHUB_MANAGED_ACCEPTANCE_PIPE','MCPHUB_MANAGED_ACCEPTANCE_COMPUTER','MCPHUB_MANAGED_ACCEPTANCE_COMMANDER')){
+foreach($key in @('MCPHUB_MANAGED_ACCEPTANCE_PIPE','MCPHUB_MANAGED_ACCEPTANCE_COMPUTER','MCPHUB_MANAGED_ACCEPTANCE_COMMANDER','MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT','MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT_CWD')){
   $previous[$key]=[Environment]::GetEnvironmentVariable($key,'Process')
 }
 $agent=$null
@@ -21,6 +27,8 @@ try {
   $env:MCPHUB_MANAGED_ACCEPTANCE_PIPE="\\.\pipe\$pipe"
   $env:MCPHUB_MANAGED_ACCEPTANCE_COMPUTER=$ComputerUseExecutable
   $env:MCPHUB_MANAGED_ACCEPTANCE_COMMANDER=$DesktopCommanderEntry
+  $env:MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT=$PlaywrightEntry
+  $env:MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT_CWD=$PlaywrightWorkingDirectory
   $javascript=@'
 import {NativeRuntimeTransport} from './dist/services/nativeRuntimeTransport.js';
 import {LegacyMcpClient} from './dist/clients/legacyMcpClient.js';
@@ -28,6 +36,9 @@ const definitions=[
   {id:'actual-windows-computer-use',command:process.env.MCPHUB_MANAGED_ACCEPTANCE_COMPUTER,args:['stdio','--toolsets','default,testing']},
   {id:'actual-desktop-commander',command:process.execPath,args:[process.env.MCPHUB_MANAGED_ACCEPTANCE_COMMANDER]},
 ];
+if(process.env.MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT){
+  definitions.push({id:'actual-playwright-extension',command:process.execPath,args:[process.env.MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT,'--extension','--profile-dir-name','Default','--allowed-hosts','*','--shared-browser-context'],cwd:process.env.MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT_CWD});
+}
 for(const definition of definitions){
   const transport=new NativeRuntimeTransport({...definition,env:{},streaming:true,initialize_timeout_ms:60000},process.env.MCPHUB_MANAGED_ACCEPTANCE_PIPE);
   const client=new LegacyMcpClient({name:'managed-tool-acceptance',version:'1'});
@@ -37,6 +48,11 @@ for(const definition of definitions){
     const listed=await client.listTools();
     if(!Array.isArray(listed.tools)||!listed.tools.length)throw new Error(definition.id+' did not expose any tools');
     console.log(JSON.stringify({server:definition.id,toolCount:listed.tools.length,toolNames:listed.tools.map(t=>t.name)}));
+    if(definition.id==='actual-playwright-extension'){
+      if(!listed.tools.some(t=>t.name==='browser_tabs'))throw new Error('Playwright browser_tabs tool unavailable');
+      console.log(JSON.stringify({server:definition.id,stdioDiscoverySucceeded:true,browserConnectionVerified:false}));
+      continue;
+    }
     const metadataTool=definition.id==='actual-windows-computer-use'?'GuardrailStatus':'get_config';
     if(!listed.tools.some(t=>t.name===metadataTool))throw new Error('Expected metadata tool is unavailable: '+metadataTool);
     const metadata=await client.callTool({name:metadataTool,arguments:{}});

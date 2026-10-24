@@ -210,6 +210,7 @@ fn handle_request(
                     "gatewayHealthy": !options().no_gateway && gateway_healthy(),
                     "executionContext": if options().user_agent { "interactive" } else { "service" },
                     "interactiveDelegation": !options().user_agent,
+                    "workingDirectory": true,
                     "sessionId": pipe_access::current_session_id()?,
                 })
             }

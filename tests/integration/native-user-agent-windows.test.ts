@@ -46,6 +46,19 @@ suite('interactive Windows runtime agent',()=>{
       .toHaveProperty('error','credentials unavailable in user agent');
     expect((await control({op:'status'})).processes).toHaveLength(0);
   });
+  test('managed stdio starts in its explicit working directory',async()=>{
+    const cwd=path.resolve('native');
+    const transport=new NativeRuntimeTransport({id:'working-directory-fixture',command:process.execPath,
+      args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{},streaming:true,cwd},pipe);
+    const client=new LegacyMcpClient({name:'working-directory-acceptance',version:'1'});
+    try{
+      await client.connect(transport);
+      expect((await client.callTool({name:'working_directory',arguments:{expected:cwd}})).content)
+        .toEqual([{type:'text',text:'{"cwdMatches":true}'}]);
+    }finally{await client.close();}
+    expect(await control({op:'start',spec:{id:'relative-cwd-denied',command:process.execPath,args:[],env:{},cwd:'relative'}}))
+      .toMatchObject({error:expect.stringContaining('working directory must be absolute')});
+  });
   test('the user agent supervises crashes without service or dashboard polling',async()=>{
     const id='user-agent-crash';
     try{

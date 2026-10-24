@@ -143,6 +143,7 @@ const ServerForm = ({
     sharedWithUsers: initialData?.config?.sharedWithUsers || [],
     options: {
       nativeExecution: initialData?.config?.options?.nativeExecution,
+      nativeWorkingDirectory: initialData?.config?.options?.nativeWorkingDirectory,
       maxBufferSize: initialData?.config?.options?.maxBufferSize,
       timeout:
         (initialData &&
@@ -1864,7 +1865,17 @@ const ServerForm = ({
 
               {serverType === 'stdio' && (
                 <fieldset className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-                  <legend className="px-1 font-medium">Native runtime secret references</legend>
+                  <legend className="px-1 font-medium">Windows hosting</legend>
+                  <label htmlFor="nativeWorkingDirectory" className="block text-sm font-medium">Working directory (optional)</label>
+                  <input id="nativeWorkingDirectory" type="text"
+                    className="w-full py-2 px-3 form-input"
+                    value={formData.options?.nativeWorkingDirectory || ''}
+                    onChange={(event) => setFormData({ ...formData, options: {
+                      ...formData.options, nativeWorkingDirectory:event.target.value,
+                    } })}
+                    placeholder={'C:\\tools\\my-server'}
+                  />
+                  <p className="text-sm text-gray-500">An absolute Windows folder. Requires the Windows native runtime.</p>
                   <label htmlFor="nativeExecutionKind" className="block text-sm font-medium">
                     Run in
                   </label>

@@ -4,9 +4,10 @@ import { buildServerPayload } from '../../frontend/src/utils/serverFormPayload';
 describe('buildServerPayload', () => {
   it('round-trips the selected Windows session and custom agent pipe', () => {
     const nativeExecution={kind:'interactive' as const,sessionId:7,pipeName:'mcphub-user-specific'};
-    const payload=buildServerPayload({formData:{name:'desktop',url:'',command:'node',arguments:'',args:[],env:[],headers:[],options:{nativeExecution}},
+    const payload=buildServerPayload({formData:{name:'desktop',url:'',command:'node',arguments:'',args:[],env:[],headers:[],options:{nativeExecution,nativeWorkingDirectory:'C:\\tools\\server'}},
       serverType:'stdio',envVars:[],headerVars:[]});
     expect(payload.config.options?.nativeExecution).toEqual(nativeExecution);
+    expect(payload.config.options?.nativeWorkingDirectory).toBe('C:\\tools\\server');
   });
   it('serializes native runtime secret refs without secret values', () => {
     const payload = buildServerPayload({

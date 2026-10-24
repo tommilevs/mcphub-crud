@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {StringDecoder} from 'node:string_decoder';
 import type {JSONRPCMessage,Transport} from '@modelcontextprotocol/server';
 type ManagedProcessSpec={id:string;command:string;args:string[];env:Record<string,string>;secret_env?:Record<string,string>;
+  cwd?:string;
   execution_context?:{kind:'interactive';session_id:number;pipe_name?:string};
   restart_limit?:number;restart_delay_ms?:number;request_timeout_ms?:number;initialize_timeout_ms?:number;streaming?:boolean};
 type ControlResponse={responses?:string[];error?:string;streaming?:boolean}&Record<string,unknown>;
@@ -38,9 +39,10 @@ export class NativeRuntimeTransport implements Transport {
     });
     const {secret_env,execution_context,initialize_timeout_ms:_init,streaming,...spec}=this.spec;
     try{
-      if(execution_context){
+      if(execution_context||spec.cwd){
         const status=await this.control({op:'status'});
-        if(status.interactiveDelegation!==true)throw new Error('Native runtime service does not support interactive delegation');
+        if(execution_context&&status.interactiveDelegation!==true)throw new Error('Native runtime service does not support interactive delegation');
+        if(spec.cwd&&status.workingDirectory!==true)throw new Error('Native runtime does not support explicit working directories');
       }
       await this.control({op:'start',spec:{...spec,id:this.processId,server_name:this.spec.id,request_timeout_ms:boundedTimeout(spec.request_timeout_ms??60_000)},
       ...(execution_context?{execution_context}:{}),...(secret_env?{secret_env}:{}),...(streaming?{stream:true}:{})});}

@@ -97,9 +97,11 @@ try {
     $headers=@{'x-auth-token'=$login.token}
     $desktopServer="broker-http-$guid";$desktopSecret="broker-http-$guid"
     $synthetic="synthetic-broker-$guid"
+    $toolWorkingDirectory=Join-Path $testRoot 'server working directory'
+    New-Item -ItemType Directory -Path $toolWorkingDirectory | Out-Null
     Invoke-RestMethod "$base/api/native-runtime/secrets/$desktopSecret" -Method Put -Headers $headers -ContentType 'application/json' -Body (@{value=$synthetic}|ConvertTo-Json -Compress) | Out-Null
     try {
-      $definition=@{name=$desktopServer;config=@{type='stdio';command=(Join-Path $runtime 'node.exe');args=@((Join-Path $repo 'native\tests\stdio-fixture.mjs'));env=@{};nativeSecretRefs=@{MCPHUB_NATIVE_TEST_SECRET=$desktopSecret};options=@{nativeExecution=@{kind='interactive';sessionId=[int]$env:MCPHUB_NATIVE_TEST_AGENT_SESSION;pipeName=$env:MCPHUB_NATIVE_TEST_AGENT_PIPE}}}}
+      $definition=@{name=$desktopServer;config=@{type='stdio';command=(Join-Path $runtime 'node.exe');args=@((Join-Path $repo 'native\tests\stdio-fixture.mjs'));env=@{};nativeSecretRefs=@{MCPHUB_NATIVE_TEST_SECRET=$desktopSecret};options=@{nativeWorkingDirectory=$toolWorkingDirectory;nativeExecution=@{kind='interactive';sessionId=[int]$env:MCPHUB_NATIVE_TEST_AGENT_SESSION;pipeName=$env:MCPHUB_NATIVE_TEST_AGENT_PIPE}}}}
       $added=Invoke-RestMethod "$base/api/servers" -Method Post -Headers $headers -ContentType 'application/json' -Body ($definition|ConvertTo-Json -Depth 8 -Compress)
       if(-not $added.success){throw 'Gateway rejected the interactive server configuration.'}
       $readyDeadline=[DateTime]::UtcNow.AddSeconds(20)
@@ -116,8 +118,11 @@ try {
       $sessionEnvironment=Invoke-RestMethod "$base/api/tools/$desktopServer/session_environment" -Method Post -Headers $headers -ContentType 'application/json' -Body (@{expectedProfile=$env:USERPROFILE}|ConvertTo-Json -Compress)
       $environmentResult=$sessionEnvironment.content[0].text|ConvertFrom-Json
       if($sessionEnvironment.isError -or -not $environmentResult.profileMatches -or $environmentResult.gatewayMarkerPresent){throw 'Interactive child inherited the gateway profile or private gateway environment.'}
+      $workingDirectory=Invoke-RestMethod "$base/api/tools/$desktopServer/working_directory" -Method Post -Headers $headers -ContentType 'application/json' -Body (@{expected=$toolWorkingDirectory}|ConvertTo-Json -Compress)
+      if($workingDirectory.isError -or -not ($workingDirectory.content[0].text|ConvertFrom-Json).cwdMatches){throw 'Gateway did not preserve the explicit working directory.'}
       $stored=Get-Content -LiteralPath (Join-Path $testRoot 'mcp_settings.json') -Raw | ConvertFrom-Json
       if($stored.mcpServers.$desktopServer.options.nativeExecution.sessionId -ne [int]$env:MCPHUB_NATIVE_TEST_AGENT_SESSION){throw 'Interactive execution configuration did not persist.'}
+      if($stored.mcpServers.$desktopServer.options.nativeWorkingDirectory -ne $toolWorkingDirectory){throw 'Working directory configuration did not persist.'}
       Write-Output 'Bundled gateway HTTP create/config persistence/user-session tool call passed.'
     } finally {
       Invoke-RestMethod "$base/api/servers/$desktopServer" -Method Delete -Headers $headers | Out-Null

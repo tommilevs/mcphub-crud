@@ -39,6 +39,7 @@ fn fixture_with_exit(exit: bool) -> (RuntimeSupervisor, ObservedProcess, Observe
         .start(ManagedProcessSpec {
             server_name: None,
             id: "tree".into(),
+            cwd: None,
             command: "powershell.exe".into(),
             args: vec![
                 "-NoLogo".into(),
@@ -182,6 +183,7 @@ fn failed_respawn_attempts_exhaust_the_restart_budget() {
         .start(ManagedProcessSpec {
             server_name: None,
             id: "respawn".into(),
+            cwd: None,
             command: exe.0.to_string_lossy().to_string(),
             args: vec!["/d".into(), "/c".into(), "exit 0".into()],
             env: HashMap::new(),

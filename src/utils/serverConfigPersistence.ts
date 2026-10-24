@@ -2,7 +2,7 @@ import { validateCredentialTemplate } from './credentialTemplate.js';
 import { validateMaxBufferSize } from './stdioOptions.js';
 import { ServerConfigValidationError } from './serverConfigValidation.js';
 import { ServerConfig } from '../types/index.js';
-import { normalizeNativeExecution } from './nativeExecution.js';
+import { normalizeNativeExecution, normalizeNativeWorkingDirectory } from './nativeExecution.js';
 
 const trimToUndefined = (value?: string): string | undefined => {
   if (typeof value !== 'string') {
@@ -144,6 +144,8 @@ const normalizeOptions = (
     try {
       const execution=normalizeNativeExecution(options.nativeExecution);
       if(execution)normalized.nativeExecution=execution;
+      const cwd=normalizeNativeWorkingDirectory(options.nativeWorkingDirectory);
+      if(cwd)normalized.nativeWorkingDirectory=cwd;
     }
     catch (error) { throw new ServerConfigValidationError((error as Error).message); }
     const maxBufferSize = validateMaxBufferSize(options.maxBufferSize);
@@ -314,7 +316,7 @@ const inferServerType = (config: ServerConfig): NonNullable<ServerConfig['type']
 
 export const normalizeServerConfigForPersistence = (config: ServerConfig): ServerConfig => {
   const normalizedType = inferServerType(config);
-  if(config.options?.nativeExecution && normalizedType!=='stdio')
+  if((config.options?.nativeExecution||config.options?.nativeWorkingDirectory) && normalizedType!=='stdio')
     throw new ServerConfigValidationError('Native execution policy requires a stdio server');
   const description = trimToUndefined(config.description);
   const owner = trimToUndefined(config.owner) ?? config.owner;

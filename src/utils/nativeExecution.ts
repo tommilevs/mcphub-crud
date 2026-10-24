@@ -1,5 +1,15 @@
 import type { NativeExecution } from '../types/index.js';
 
+export function normalizeNativeWorkingDirectory(value:unknown): string | undefined {
+  if(value===undefined||value==='')return undefined;
+  if(typeof value!=='string')throw new Error('Invalid native working directory');
+  const path=value.trim();
+  if(!path)return undefined;
+  if(path.includes('\0')||!(/^[A-Za-z]:[\\/]/.test(path)||/^\\\\[^\\/]+[\\/][^\\/]+(?:[\\/]|$)/.test(path)))
+    throw new Error('Native working directory must be an absolute Windows path');
+  return path;
+}
+
 /** The agent supplies the Windows user's inherited environment, not the service gateway. */
 export function interactiveNativeEnvironment(
   configured: Record<string,string> | undefined,

@@ -18,8 +18,11 @@ lines.on('line',line=>{
     case 'initialize':result={protocolVersion:request.params.protocolVersion,capabilities:{tools:{}},serverInfo:{name:'native-acceptance-fixture',version:'1'}};break;
     case 'ping':result={};break;
     case 'tools/list':result={tools:[{name:'check_secret',inputSchema:{type:'object',properties:{expected:{type:'string'}},required:['expected']}},
-      ...['duplex','hang','counts','session_environment'].map(name=>({name,inputSchema:{type:'object'}}))]};break;
+      ...['duplex','hang','counts','session_environment','working_directory'].map(name=>({name,inputSchema:{type:'object'}}))]};break;
     case 'tools/call':
+      if(request.params.name==='working_directory'){
+        result={content:[{type:'text',text:JSON.stringify({cwdMatches:process.cwd()===request.params.arguments.expected})}]};break;
+      }
       if(request.params.name==='session_environment'){
         result={content:[{type:'text',text:JSON.stringify({profileMatches:process.env.USERPROFILE===request.params.arguments.expectedProfile,
           gatewayMarkerPresent:process.env.MCPHUB_ACCEPTANCE_GATEWAY_ONLY!==undefined})}]};break;

@@ -11,6 +11,7 @@ fn collects_notifications_and_server_requests_before_matching_response() {
         .start(ManagedProcessSpec {
             server_name: None,
             id: "fixture".into(),
+            cwd: None,
             command: "powershell.exe".into(),
             args: vec![
                 "-NoLogo".into(),
@@ -53,6 +54,7 @@ fn replaces_a_stale_crashed_child_on_new_start() {
     let spec = ManagedProcessSpec {
         server_name: None,
         id: "crashed".into(),
+        cwd: None,
         command: "powershell.exe".into(),
         args: vec![
             "-NoLogo".into(),
@@ -81,6 +83,7 @@ fn an_initial_notification_does_not_claim_protocol_readiness() {
         .start(ManagedProcessSpec {
             server_name: None,
             id: "silent".into(),
+            cwd: None,
             command: "powershell.exe".into(),
             args: vec![
                 "-NoLogo".into(),
@@ -117,6 +120,7 @@ fn a_hung_exchange_does_not_hold_the_lifecycle_lock_and_expires_without_replay()
         .start(ManagedProcessSpec {
             server_name: None,
             id: "hung".into(),
+            cwd: None,
             command: "powershell.exe".into(),
             args: vec![
                 "-NoLogo".into(),
@@ -154,6 +158,7 @@ fn restart_during_a_pending_exchange_does_not_poison_the_new_process() {
         .start(ManagedProcessSpec {
             server_name: None,
             id: "pending".into(),
+            cwd: None,
             command: "powershell.exe".into(),
             args: vec![
                 "-NoLogo".into(),

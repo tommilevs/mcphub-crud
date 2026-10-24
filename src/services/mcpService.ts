@@ -48,7 +48,7 @@ import treeKill from 'tree-kill';
 import { isProcessTreeKillAvailable } from '../utils/processTree.js';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { NativeRuntimeTransport } from './nativeRuntimeTransport.js';
-import { interactiveExecutionRequest, interactiveNativeEnvironment } from '../utils/nativeExecution.js';
+import { interactiveExecutionRequest, interactiveNativeEnvironment, normalizeNativeWorkingDirectory } from '../utils/nativeExecution.js';
 import {
   type Client,
   SSEClientTransport,
@@ -1801,6 +1801,8 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
       !hasCredentialTemplate(conf) &&
       !hasPersonalAuthentication(conf);
     const executionContext = interactiveExecutionRequest(conf.options?.nativeExecution, nativeRuntimeEligible);
+    const nativeCwd=normalizeNativeWorkingDirectory(conf.options?.nativeWorkingDirectory);
+    if(nativeCwd&&!nativeRuntimeEligible)throw new Error('Explicit native working directory requires Windows native runtime');
     if (nativeRuntimeEligible) {
       const nativeSecretRefs = conf.nativeSecretRefs;
       const nativeEnv = executionContext
@@ -1813,6 +1815,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
         args: resolveCredentialArguments(conf, finalArgs),
         env: nativeEnv,
         streaming: true,
+        ...(nativeCwd?{cwd:nativeCwd}:{}),
         ...(executionContext ? { execution_context: executionContext } : {}),
         request_timeout_ms: Math.trunc(Math.min(3_600_000,Math.max(100,Number(conf.options?.maxTotalTimeout || conf.options?.timeout || process.env.DEFAULT_REQUEST_TIMEOUT) || 60_000))),
         initialize_timeout_ms: Math.trunc(Math.min(3_600_000,Math.max(100,Number(config.initTimeout)||60_000))),

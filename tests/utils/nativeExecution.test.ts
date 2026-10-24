@@ -1,5 +1,11 @@
-import { normalizeNativeExecution, interactiveExecutionRequest, interactiveNativeEnvironment } from '../../src/utils/nativeExecution.js';
+import { normalizeNativeExecution, interactiveExecutionRequest, interactiveNativeEnvironment, normalizeNativeWorkingDirectory } from '../../src/utils/nativeExecution.js';
 describe('native execution policy', () => {
+  test('working directories are explicit Windows paths, never relative to the service account', () => {
+    expect(normalizeNativeWorkingDirectory(undefined)).toBeUndefined();
+    expect(normalizeNativeWorkingDirectory(' C:\\tools\\server ')).toBe('C:\\tools\\server');
+    expect(normalizeNativeWorkingDirectory('\\\\host\\share\\server')).toBe('\\\\host\\share\\server');
+    for(const value of ['relative','C:relative','\\relative','/tmp',5,'C:\\bad\0'])expect(()=>normalizeNativeWorkingDirectory(value)).toThrow();
+  });
   test('interactive children inherit their user agent profile, with only configured overrides crossing the gateway boundary', () => {
     const source={USERPROFILE:'system-profile',APPDATA:'system-appdata',ADMIN_PASSWORD:'gateway-only',PATH:'configured-path',API_URL:'configured-url',npm_config_registry:'configured-registry'};
     expect(interactiveNativeEnvironment({PATH:'configured-path',API_URL:'configured-url'},source,['npm_config_registry']))

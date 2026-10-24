@@ -216,6 +216,12 @@ Interactive children inherit the user agent's environment. The gateway forwards
 only explicit server environment entries and configured installation registry
 overrides, rather than its complete SYSTEM environment. An explicit per-server
 PATH is preserved. Existing service hosting keeps its previous environment behavior.
+Optional `options.nativeWorkingDirectory` sets an absolute Windows working
+directory for either hosting context. Omission preserves the host's inherited
+directory. Relative paths are rejected by the API and runtime; older runtimes
+must advertise working-directory support before the transport sends start,
+so a configured directory is never silently ignored. The UI preserves this
+option inside the existing options JSON storage, without a schema migration.
 Disconnect closes the remote process lease. Service status lists service processes;
 agent processes remain in the agent's own status, without a merged management view yet.
 

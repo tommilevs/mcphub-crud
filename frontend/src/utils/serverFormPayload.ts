@@ -46,6 +46,7 @@ const normalizeSharedUsers = (usernames?: string[]): string[] => {
 const buildOptions = (options?: ServerFormData['options']) => {
   const nextOptions: NonNullable<ServerFormData['options']> = {};
   if(options?.nativeExecution)nextOptions.nativeExecution=options.nativeExecution;
+  if(options?.nativeWorkingDirectory?.trim())nextOptions.nativeWorkingDirectory=options.nativeWorkingDirectory.trim();
 
   // Always echo the timeout, even when it equals the 60000 default: dropping it
   // makes the payload differ from a stored explicit `timeout: 60000` and trips
