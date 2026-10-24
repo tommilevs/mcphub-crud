@@ -18,6 +18,7 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog';
 import SmartRoutingIndexPanel from '@/components/SmartRoutingIndexPanel';
 import NativeRuntimeSecretsPanel from '@/components/NativeRuntimeSecretsPanel';
 import LoopGuardToolBudgets from '@/components/LoopGuardToolBudgets';
+import ResultRetrievalPolicies from '@/components/ResultRetrievalPolicies';
 import { useAuth } from '@/contexts/AuthContext';
 import { apiGet, apiPost } from '@/utils/fetchInterceptor';
 import {
@@ -3060,6 +3061,8 @@ const SettingsPage: React.FC = () => {
                   </label>
                   <LoopGuardToolBudgets disabled={loading} value={smartRoutingConfig.loopGuardToolBudgets ?? {}}
                     onChange={(value) => updateSmartRoutingConfig('loopGuardToolBudgets', value)} />
+                  <ResultRetrievalPolicies disabled={loading} value={smartRoutingConfig.resultRetrieval??{}}
+                    onChange={value=>{void updateSmartRoutingConfig('resultRetrieval',value);}} />
                   <label className="block text-xs">{t('attribution.loopIgnoredTools', 'Tools excluded from LoopGuard, one server/tool per line')}
                     <textarea className="hub-input mt-1 block w-full" rows={3} disabled={loading}
                       value={(smartRoutingConfig.loopGuardIgnoredTools ?? []).join('\n')}

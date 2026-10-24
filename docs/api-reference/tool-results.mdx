@@ -51,7 +51,9 @@ and `maxOutputTokens` (512–4,096). A configured budget caps the caller's budge
 `passthrough` overrides caller opt-in. Unknown or unreadable policies preserve
 the full response. Policies do not automatically enable retrieval: the call
 must still opt in. Sending an empty object clears configured defaults and rules.
-The policy editor in the dashboard remains pending.
+The Smart Routing settings panel includes an editor for defaults and overrides.
+Add or replace rules, then use **Save result policies** to persist the draft.
+Removing a rule restores inherited behavior after saving.
 
 When database history is available, `$smart` routes expose these additional tools:
 

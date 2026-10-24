@@ -53,6 +53,7 @@ interface SmartRoutingConfig {
   loopGuardEnabled?: boolean;
   loopGuardRepetitions?: number;
   loopGuardToolBudgets?: Record<string, number>;
+  resultRetrieval?:import('../types/resultRetrieval').ResultRetrievalConfig;
   loopGuardIgnoredTools?: string[];
   embeddingMaxTokens?: number;
   embeddingQueryPrefix?: string;
@@ -504,6 +505,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
           attributionMode: data.data.systemConfig.smartRouting.attributionMode ?? 'off',
           attributionTtlHours: data.data.systemConfig.smartRouting.attributionTtlHours ?? 168,
           loopGuardEnabled: data.data.systemConfig.smartRouting.loopGuardEnabled ?? false,
+          resultRetrieval:data.data.systemConfig.smartRouting.resultRetrieval??{},
           loopGuardRepetitions: data.data.systemConfig.smartRouting.loopGuardRepetitions ?? 3,
           loopGuardToolBudgets: data.data.systemConfig.smartRouting.loopGuardToolBudgets ?? {},
           loopGuardIgnoredTools: data.data.systemConfig.smartRouting.loopGuardIgnoredTools ?? [],
