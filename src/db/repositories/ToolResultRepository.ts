@@ -442,6 +442,8 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
       conditions.push(condition.replace('?', `$${params.length}`));
     };
     if (filter.server) add('result.server = ?', filter.server);
+    if (filter.servers) add('result.server = ANY(?::varchar[])', filter.servers);
+    if (filter.keyId) add('result.key_id = ?', filter.keyId);
     if (filter.modelId) add("result.attribution->'identity'->>'modelId' = ?", filter.modelId);
     if (filter.taskId) add("result.attribution->>'taskId' = ?", filter.taskId);
     if (filter.traceId) add("result.attribution->>'traceId' = ?", filter.traceId);

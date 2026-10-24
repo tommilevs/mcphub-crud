@@ -508,4 +508,20 @@ describe('MCP Service - Smart Routing with Group Support', () => {
     expect(mockHistoryRepository.incrementUseCount).toHaveBeenCalledWith('id');
   });
 
+  it('searches locally with trusted scope and excludes foreign results and empty groups',async()=>{
+    const callTool=jest.fn();
+    mcpService.setServerInfosForTest([{name:'server1',status:'connected',enabled:true,tools:[{name:'server1::direct-tool',inputSchema:{type:'object'}}],client:{callTool},options:{}}] as any);
+    const owned={resultId:'owned',username:'alice',server:'server1',tool:'direct-tool',payloadAvailable:true};
+    mockHistoryRepository={hybridSearch:jest.fn().mockResolvedValue([owned,{...owned,resultId:'foreign',username:'bob'}]),search:jest.fn(),incrementUseCount:jest.fn()};
+    const request={params:{name:'search_tool_results',arguments:{query:'evidence'}}};
+    const result=await mcpService.handleCallToolRequest(request,{sessionId:'session-smart',username:'alice'});
+    expect(JSON.parse(result.content[0].text).results.map((r:any)=>r.result_id)).toEqual(['owned']);
+    expect(mockHistoryRepository.hybridSearch).toHaveBeenCalledWith('evidence',null,10,expect.objectContaining({username:'alice',servers:['server1']}));
+    mockHistoryRepository.hybridSearch.mockClear();
+    const empty=await mcpService.handleCallToolRequest(request,{sessionId:'session-smart-empty',username:'alice'});
+    expect(JSON.parse(empty.content[0].text).results).toEqual([]);
+    expect(mockHistoryRepository.hybridSearch).not.toHaveBeenCalled();
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
 });

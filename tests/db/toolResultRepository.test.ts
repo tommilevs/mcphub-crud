@@ -1,6 +1,17 @@
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 
 describe('ToolResultRepositoryDb', () => {
+  it('binds trusted owner, key and allowed servers in history search', async () => {
+    const query = jest.fn().mockResolvedValue([]);
+    const repository = new ToolResultRepositoryDb({ query } as never);
+    await repository.search('evidence', 10, { username: 'alice', keyId: 'key-1', servers: ['srv-1'] });
+    const [sql, params] = query.mock.calls[0];
+    expect(sql).toContain('result.server = ANY(');
+    expect(sql).toContain('result.key_id = $');
+    expect(sql).toContain('result.username = $');
+    expect(sql).not.toContain('alice');
+    expect(params).toEqual(expect.arrayContaining(['alice', 'key-1', ['srv-1'], 'evidence', 10]));
+  });
   it('filters attribution fields using parameters instead of interpolating claims', async () => {
     const query = jest.fn().mockResolvedValue([]);
     const repository = new ToolResultRepositoryDb({ query } as never);

@@ -1,4 +1,4 @@
-import { readStoredToolResult, RESULT_MEMORY_READ_NAMES, type ResultMemoryReadName } from './toolResultMemoryMcp.js';
+import { readStoredToolResult, searchStoredToolResults, RESULT_MEMORY_TOOL_NAMES, RESULT_MEMORY_SEARCH_NAMES, type ResultMemoryScope, type ResultMemoryReadName, type ResultMemorySearchName } from './toolResultMemoryMcp.js';
 import { getToolResultRepository } from './toolResultHistoryRegistry.js';
 import { isSafePassthroughHeader } from '../utils/passthroughHeaders.js';
 import { observeToolCall, setMetricsServer } from './metricsService.js';
@@ -86,6 +86,7 @@ import { validateServerName } from '../utils/serverNameValidation.js';
 import { getGroup } from './sseService.js';
 import { getServerConfigInGroup, normalizeGroupServers } from './groupService.js';
 import {
+  generateEmbedding,
   removeServerToolEmbeddings,
   removeToolEmbeddings,
   saveToolsAsVectorEmbeddings,
@@ -4024,7 +4025,7 @@ const listGroupTools = async (
 
 // Names the call handler always routes to a meta-tool on a Smart Routing session,
 // whichever of them the current mode lists (see handleCallToolRequestImpl)
-const SMART_ROUTING_META_TOOL_NAMES = new Set(['search_tools', 'describe_tool', 'call_tool', ...RESULT_MEMORY_READ_NAMES]);
+const SMART_ROUTING_META_TOOL_NAMES = new Set(['search_tools', 'describe_tool', 'call_tool', ...RESULT_MEMORY_TOOL_NAMES]);
 
 // Each member's pinnedTools, narrowed to its tools selection. Empty when the
 // route is not a $smart/<group> or the group pins nothing.
@@ -4226,12 +4227,14 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
   };
 
   try {
-    if (isSmartRoutingGroup(group) && RESULT_MEMORY_READ_NAMES.has(request.params.name)) {
+    if (isSmartRoutingGroup(group) && RESULT_MEMORY_TOOL_NAMES.has(request.params.name)) {
       const repository = getToolResultRepository();
       if (!repository) return {isError:true,content:[{type:'text',text:'Tool result history requires database mode'}]};
-      return readStoredToolResult(repository, {username,keyId,isAllowed:async record=>{
-        const lookupGroup=getGroupLookupName(group);
-        const {filteredServerInfos,serverConfigsByName}=await getFilteredServerInfosForGroup(lookupGroup);
+      const lookupGroup=getGroupLookupName(group);
+      let visibility:ReturnType<typeof getFilteredServerInfosForGroup>|undefined;
+      const visible=()=>visibility??=getFilteredServerInfosForGroup(lookupGroup);
+      const scope:ResultMemoryScope={username,keyId,isAllowed:async record=>{
+        const {filteredServerInfos,serverConfigsByName}=await visible();
         const info=filteredServerInfos.find(server=>server.name===record.server);
         if(!info)return false;
         const separator=getNameSeparator();
@@ -4239,7 +4242,12 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         const enabled=await filterToolsByConfig(info.name,candidates);
         const allowed=await filterToolsByGroup(lookupGroup,info.name,enabled,serverConfigsByName.get(info.name));
         return allowed.length>0;
-      }}, request.params.name as ResultMemoryReadName, request.params.arguments || {});
+      }};
+      if(RESULT_MEMORY_SEARCH_NAMES.has(request.params.name)){
+        if(username||keyId)scope.servers=(await visible()).filteredServerInfos.map(info=>info.name);
+        return searchStoredToolResults(repository,scope,request.params.name as ResultMemorySearchName,request.params.arguments||{},query=>generateEmbedding(query,'query'));
+      }
+      return readStoredToolResult(repository,scope,request.params.name as ResultMemoryReadName,request.params.arguments||{});
     }
     appsRouteContext = await getMcpAppsRouteContext(sessionId, group);
 
@@ -5433,7 +5441,7 @@ type McpHandler = (request: any, extra: any) => Promise<any>;
 const withPrincipalServers =
   (handler: McpHandler, operation: 'list' | 'tool' | 'prompt' | 'resource'): McpHandler =>
   async (request, extra) => {
-    if (operation === 'tool' && RESULT_MEMORY_READ_NAMES.has(request.params?.name) && isSmartRoutingGroup(getMcpRequestGroup(extra))) return handler(request, extra);
+    if (operation === 'tool' && RESULT_MEMORY_TOOL_NAMES.has(request.params?.name) && isSmartRoutingGroup(getMcpRequestGroup(extra))) return handler(request, extra);
     if (!serverInfos.some((info) => hasPersonalAuthentication(info.config)))
       return handler(request, extra);
     // Built-in content does not require an upstream credential.

@@ -1,4 +1,4 @@
-import { resultMemoryReadDefinitions } from './toolResultMemoryMcp.js';
+import { resultMemoryReadDefinitions, resultMemorySearchDefinitions } from './toolResultMemoryMcp.js';
 import { isToolResultHistoryAvailable } from './toolResultHistoryRegistry.js';
 /**
  * Smart Routing Service
@@ -389,7 +389,7 @@ Available servers: ${serversList}`,
       tool.description += '\nOptional attribution: start a task with hub_context.action=start; report model_claim only if known exactly. Retain the returned trace_key for subsequent calls. Never guess your model.';
     }
   }
-  if (resultMemoryAvailable) tools.push(...resultMemoryReadDefinitions());
+  if (resultMemoryAvailable) tools.push(...resultMemoryReadDefinitions(), ...resultMemorySearchDefinitions());
   return tools;
 };
 
