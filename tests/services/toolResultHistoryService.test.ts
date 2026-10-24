@@ -54,6 +54,22 @@ describe('ToolResultHistoryService', () => {
     expect(repository.enforceRetention).toHaveBeenCalledWith(10_000, 'tommi');
   });
 
+  it('returns an already persisted result when retention maintenance fails and retries on the next capture', async () => {
+    const repository = createRepository();
+    repository.create.mockImplementation(async record => record);
+    repository.enforceRetention.mockRejectedValueOnce(new Error('retention unavailable')).mockResolvedValueOnce(0);
+    const service = new ToolResultHistoryService(repository);
+    const input = {server:'fixture',tool:'read',durationMs:1,status:'success' as const,
+      result:{content:[{type:'text',text:'immutable evidence'}]}};
+    const first = await service.capture(input);
+    expect(first?.resultId).toBeTruthy();
+    expect(first?.raw).toBe(JSON.stringify(input.result));
+    const second = await service.capture(input);
+    expect(second?.resultId).not.toBe(first?.resultId);
+    expect(repository.create).toHaveBeenCalledTimes(2);
+    expect(repository.enforceRetention).toHaveBeenCalledTimes(2);
+  });
+
   it('stores metadata only when payload capture is prohibited', async () => {
     const repository = createRepository();
     repository.create.mockImplementation(async (record) => record as ToolResultRecord);

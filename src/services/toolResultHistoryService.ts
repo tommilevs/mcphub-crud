@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { getCallAttribution } from './callAttribution.js';
+import { logger } from '../utils/logger.js';
 import type {
   ToolResultCaptureInput,
   ToolResultFilter,
@@ -89,7 +90,13 @@ export class ToolResultHistoryService {
     };
 
     const saved = await this.repository.create(record);
-    await this.repository.enforceRetention(this.recentLimit, input.username);
+    try {
+      await this.repository.enforceRetention(this.recentLimit, input.username);
+    } catch {
+      // Persistence has already succeeded: maintenance must not hide its result_id.
+      // The next capture retries retention; do not log RAW or database parameters.
+      logger.warn('Tool result retention failed; saved result remains available:', saved.resultId);
+    }
     return saved;
   }
 
