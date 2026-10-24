@@ -100,14 +100,6 @@ fn open_dashboard(app: &AppHandle, port: u16) {
         .spawn();
 }
 
-fn restart_service() {
-    #[cfg(windows)]
-    {
-        let _ = background_command("sc").args(["stop", "MCPHub"]).status();
-        let _ = background_command("sc").args(["start", "MCPHub"]).status();
-    }
-}
-
 #[cfg(windows)]
 fn tray_autostart_enabled() -> bool {
     background_command("reg")
@@ -205,7 +197,23 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "dashboard" => open_dashboard(app, port),
-                    "restart" => restart_service(),
+                    "restart" => {
+                        #[cfg(windows)]
+                        {
+                            let item = restart.clone();
+                            let _ = item.set_enabled(false);
+                            let _ = item.set_text("Restarting MCPHub service...");
+                            std::thread::spawn(move || {
+                                let label = if gateway_start::restart_service("MCPHub").is_ok() {
+                                    "Restart MCPHub service"
+                                } else {
+                                    "Restart failed — try again"
+                                };
+                                let _ = item.set_text(label);
+                                let _ = item.set_enabled(true);
+                            });
+                        }
+                    }
                     "autostart" => {
                         let enabled = !autostart.is_checked().unwrap_or(false);
                         if set_tray_autostart(enabled) {

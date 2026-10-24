@@ -149,6 +149,9 @@ starting, stopped or inaccessible never causes a second user-profile gateway.
 The desktop window loads the service dashboard at `http://127.0.0.1:3000`, so
 runtime configuration and API requests share its origin. Closing that window
 hides it; Exit tray remains the explicit tray exit action.
+Service restart runs outside the UI thread, waits up to 30 seconds for Stopped
+before starting, and then waits for Running. The menu shows an in-progress or
+failure state; Windows service-control permissions still apply.
 `MCPHUB_DESKTOP_PORT` selects another loopback gateway port (default 3000);
 `--open-dashboard` opens the window immediately. The webview is created with
 that endpoint before navigation, so isolated tests do not contact port 3000.
@@ -157,6 +160,11 @@ desktop on the same temporary port, then waits for interactive checks of closing
 the window and Exit tray while verifying the gateway remains available.
 New service settings advertise their configured port; existing settings are
 preserved and can be edited in the dashboard.
+
+The service executes MCP children in its own Windows session (normally SYSTEM
+Session 0). This is suitable for background tools, but does not provide access to
+the signed-in user's desktop. Interactive tools such as Windows Computer Use
+still require a user-session host; that hosting path is not implemented yet.
 The installer requests service shutdown before replacing runtime files and
 aborts that upgrade if shutdown fails. Development and host-managed deployments can
 run the Node gateway separately (`pnpm backend:dev` or `pnpm backend:build`

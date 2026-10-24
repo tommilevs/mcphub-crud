@@ -18,6 +18,7 @@ $created=$false
 $desktop=$null
 $oldPipe=$env:MCPHUB_NATIVE_TEST_PIPE
 $oldSecrets=$env:MCPHUB_NATIVE_TEST_SECRET_DIR
+$oldRestartService=$env:MCPHUB_RESTART_TEST_SERVICE
 Push-Location $repo
 try {
   New-Item -ItemType Directory -Path $testRoot | Out-Null
@@ -44,6 +45,20 @@ try {
   $env:MCPHUB_NATIVE_TEST_SECRET_DIR=$secrets
   npm run -s test -- --runInBand tests/integration/native-service-windows.test.ts --silent
   if($LASTEXITCODE -ne 0){throw "SCM acceptance failed: $LASTEXITCODE"}
+  # Exercise the exact tray restart implementation against this service only.
+  $controlTest=Join-Path $testRoot 'tray-control-test.exe'
+  & (Join-Path $env:USERPROFILE '.cargo\bin\rustc.exe') --edition 2021 --test (Join-Path $PSScriptRoot 'tray\src\gateway_start.rs') -o $controlTest
+  if($LASTEXITCODE -ne 0){throw 'Cannot compile tray lifecycle acceptance.'}
+  $env:MCPHUB_RESTART_TEST_SERVICE=$name
+  $beforeRestart=Get-CimInstance Win32_Service -Filter "Name='$name'"
+  & $controlTest --exact tests::restarts_an_explicit_test_service_and_waits_for_running
+  if($LASTEXITCODE -ne 0){throw 'Tray restart from Running failed.'}
+  $afterRestart=Get-CimInstance Win32_Service -Filter "Name='$name'"
+  if($afterRestart.State -ne 'Running' -or $afterRestart.ProcessId -eq $beforeRestart.ProcessId){throw 'Tray restart did not create a new running service process.'}
+  Stop-Service -Name $name
+  & $controlTest --exact tests::restarts_an_explicit_test_service_and_waits_for_running
+  if($LASTEXITCODE -ne 0){throw 'Tray restart from Stopped failed.'}
+  $env:MCPHUB_RESTART_TEST_SERVICE=$oldRestartService
   if($WithGateway){
     $base="http://127.0.0.1:$port"
     $deadline=[DateTime]::UtcNow.AddSeconds(60)
@@ -122,6 +137,7 @@ try {
 finally {
   if($desktop){if(-not $desktop.HasExited){$desktop.Kill();$desktop.WaitForExit()};$desktop.Dispose()}
   $env:MCPHUB_NATIVE_TEST_PIPE=$oldPipe;$env:MCPHUB_NATIVE_TEST_SECRET_DIR=$oldSecrets
+  $env:MCPHUB_RESTART_TEST_SERVICE=$oldRestartService
   if($created){
     Stop-Service -Name $name -ErrorAction SilentlyContinue
     $service=Get-Service -Name $name -ErrorAction SilentlyContinue

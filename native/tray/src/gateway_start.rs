@@ -22,6 +22,33 @@ pub fn background_command(program: impl AsRef<std::ffi::OsStr>) -> std::process:
 }
 
 #[cfg(windows)]
+pub fn restart_service(name: &str) -> Result<(), String> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-_.".contains(&b))
+    {
+        return Err("Invalid service name".into());
+    }
+    let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
+    let script = format!(
+        r#"$ErrorActionPreference='Stop'; $s=Get-Service -Name '{name}'; if($s.Status -ne 'Stopped'){{$s.Stop(); $s.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))}}; $s.Start(); $s.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))"#
+    );
+    let output = background_command(
+        std::path::PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/powershell.exe"),
+    )
+    .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+    .output()
+    .map_err(|error| error.to_string())?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err("Windows could not restart MCPHub service".into())
+    }
+}
+
+#[cfg(windows)]
 pub fn service_absent(name: &str) -> bool {
     use std::os::windows::process::CommandExt;
     let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
@@ -36,6 +63,12 @@ pub fn service_absent(name: &str) -> bool {
 
 #[cfg(all(test, windows))]
 mod tests {
+    #[test]
+    fn restarts_an_explicit_test_service_and_waits_for_running() {
+        if let Ok(name) = std::env::var("MCPHUB_RESTART_TEST_SERVICE") {
+            super::restart_service(&name).unwrap();
+        }
+    }
     #[test]
     fn background_console_fixture() {
         if std::env::var_os("MCPHUB_CONSOLE_FIXTURE").is_some() {
