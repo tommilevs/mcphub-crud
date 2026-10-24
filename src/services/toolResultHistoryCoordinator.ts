@@ -88,8 +88,7 @@ export const reindexToolResultHistory = async (
       }
       const searchable = [record.server, record.tool, record.objective, record.rawText]
         .filter(Boolean)
-        .join('\n')
-        .slice(0, 64_000);
+        .join('\n');
       const chunks = chunkToolResultText(searchable);
       if (chunks.length === 0) {
         summary.skipped += 1;
@@ -97,11 +96,14 @@ export const reindexToolResultHistory = async (
       }
       if (repository.indexChunks) {
         const indexed = [];
+        let embeddingBudget = 64_000;
         for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
           recordToolResultIndexAttempt();
           let embedding: number[] | null = null;
           try {
-            embedding = await generateEmbedding(chunks[chunkIndex], 'document');
+            const embeddingText = chunks[chunkIndex].slice(0, embeddingBudget).replace(/[\uD800-\uDBFF]$/, '');
+                embeddingBudget -= embeddingText.length;
+                if (embeddingText) embedding = await generateEmbedding(embeddingText, 'document');
           } catch (error) {
             summary.embeddingFailures += 1;
             recordToolResultIndexFailure();
@@ -114,7 +116,7 @@ export const reindexToolResultHistory = async (
         recordToolResultIndexAttempt();
         let embedding: number[] | null = null;
         try {
-          embedding = await generateEmbedding(searchable, 'document');
+          embedding = await generateEmbedding(searchable.slice(0, 64_000).replace(/[\uD800-\uDBFF]$/, ''), 'document');
         } catch (error) {
           summary.embeddingFailures += 1;
           recordToolResultIndexFailure();
@@ -156,19 +158,21 @@ export class ToolResultHistoryCoordinator {
       if (saved.payloadAvailable && saved.rawText) {
         const searchable = [saved.server, saved.tool, saved.objective, saved.rawText]
           .filter(Boolean)
-          .join('\n')
-          .slice(0, 64_000);
+          .join('\n');
         void (async () => {
           const repository = getToolResultRepository();
           if (!repository) return;
           const chunks = chunkToolResultText(searchable);
           if (repository.indexChunks) {
             const indexed = [];
+            let embeddingBudget = 64_000;
             for (let chunkIndex = 0; chunkIndex < chunks.length; chunkIndex += 1) {
               recordToolResultIndexAttempt();
               let embedding: number[] | null = null;
               try {
-                embedding = await generateEmbedding(chunks[chunkIndex], 'document');
+                const embeddingText = chunks[chunkIndex].slice(0, embeddingBudget).replace(/[\uD800-\uDBFF]$/, '');
+                embeddingBudget -= embeddingText.length;
+                if (embeddingText) embedding = await generateEmbedding(embeddingText, 'document');
               } catch (error) {
                 recordToolResultIndexFailure();
                 logger.warn('Failed to generate tool result chunk embedding:', error);
@@ -180,7 +184,7 @@ export class ToolResultHistoryCoordinator {
           }
           if (!repository.indexContent) return;
           recordToolResultIndexAttempt();
-          const embedding = await generateEmbedding(searchable, 'document');
+          const embedding = await generateEmbedding(searchable.slice(0, 64_000).replace(/[\uD800-\uDBFF]$/, ''), 'document');
           await repository.indexContent(saved.resultId, searchable, embedding);
         })().catch((error) => {
           recordToolResultIndexFailure();
