@@ -51,3 +51,33 @@ it('continues a full rebuild after its last processed result instead of repeatin
   mockFindForReindex.mockImplementation(async()=>[mockRecord]);mockCountForReindex.mockImplementation(async()=>0);
  }
 });
+
+it('releases the rebuild lock after an index write fails and allows a retry',async()=>{
+ const before={...mockRecord};
+ mockIndexChunks.mockRejectedValueOnce(new Error('synthetic index write failure'));
+ await expect(reindexToolResultHistory()).rejects.toThrow('synthetic index write failure');
+ expect(mockRecord).toEqual(before);
+ await expect(reindexToolResultHistory()).resolves.toMatchObject({indexed:1});
+});
+it('keeps all lexical chunks when an embedding request fails',async()=>{
+ mockIndexChunks.mockClear();
+ mockEmbedding.mockRejectedValueOnce(new Error('synthetic embedding failure'));
+ const summary=await reindexToolResultHistory();
+ expect(summary).toMatchObject({indexed:1,embeddingFailures:1});
+ const chunks=mockIndexChunks.mock.calls[0][1];
+ expect(chunks[0].embedding).toBeNull();
+ expect(chunks.map((chunk:{content:string})=>chunk.content).join('').includes('UNIQUE_TAIL_EVIDENCE')).toBe(true);
+});
+it('releases the rebuild lock when candidate selection fails',async()=>{
+ mockFindForReindex.mockRejectedValueOnce(new Error('synthetic selection failure'));
+ await expect(reindexToolResultHistory()).rejects.toThrow('synthetic selection failure');
+ await expect(reindexToolResultHistory()).resolves.toMatchObject({indexed:1});
+});
+it('rejects an overlapping rebuild while keeping the original pass usable',async()=>{
+ let resolve!: (records:typeof mockRecord[])=>void;
+ mockFindForReindex.mockImplementationOnce(()=>new Promise(result=>{resolve=result;}));
+ const running=reindexToolResultHistory();
+ try {await expect(reindexToolResultHistory()).rejects.toThrow('already running');}
+ finally {resolve([mockRecord]);}
+ await expect(running).resolves.toMatchObject({indexed:1});
+});
