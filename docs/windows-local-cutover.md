@@ -8,6 +8,7 @@ Status: not migrated. Keep the current gateway and scheduled tasks running until
 - Retain the complete settings object, including users, groups, OAuth clients, routing flags and disabled servers. Do not rebuild settings from a server-only export.
 - The native service supports this existing directory through `runtime-install.ps1 -DataDirectory`; no plaintext credential copy is required.
 - The existing credentials sidecar is empty. Do not infer that other configuration fields contain no credentials.
+- The existing downstream group is `for-59`, ID `a34a43d9-75d8-4499-bb8f-78ae0fba8264`, exposing all tools/prompts/resources of the three enabled servers. Preserve both its ID and name so bridge clients keep their endpoint.
 - Port 3000 belongs to the old gateway. Do not install the default service over it before cutover.
 - Native user-agent acceptance passed with the actual configured Desktop Commander entry under `C:\aitools\DesktopCommander`, Windows Computer Use GuardrailStatus, and Playwright extension browser_tabs/list. Tests removed their temporary agent and did not stop the old gateway.
 

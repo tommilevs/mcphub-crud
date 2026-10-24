@@ -28,9 +28,18 @@
   Push $R8
   Push $R9
   ReadEnvStr $R8 "ProgramData"
+  ; Existing service registrations can select a custom data/secret directory.
+  ; An upgrade must never display the default store's initial password.
+  ReadRegStr $R9 HKLM "SYSTEM\CurrentControlSet\Services\MCPHub" "ImagePath"
+  StrCmp $R9 "" mcphub_check_initial_password mcphub_skip_initial_password
+  mcphub_check_initial_password:
   StrCpy $R9 "0"
   IfFileExists "$R8\MCPHub\secrets\bootstrap-admin.dpapi" +2 0
   StrCpy $R9 "1"
+  Goto mcphub_initial_password_decided
+  mcphub_skip_initial_password:
+  StrCpy $R9 "0"
+  mcphub_initial_password_decided:
   !insertmacro MCPHUB_RUNTIME_LIFECYCLE Install "$INSTDIR\runtime-install.ps1"
   IfSilent +3 0
   StrCmp $R9 "1" 0 +2
