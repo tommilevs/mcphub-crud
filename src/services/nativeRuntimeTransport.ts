@@ -3,6 +3,7 @@ import {randomUUID} from 'node:crypto';
 import {StringDecoder} from 'node:string_decoder';
 import type {JSONRPCMessage,Transport} from '@modelcontextprotocol/server';
 type ManagedProcessSpec={id:string;command:string;args:string[];env:Record<string,string>;secret_env?:Record<string,string>;
+  execution_context?:{kind:'interactive';session_id:number;pipe_name?:string};
   restart_limit?:number;restart_delay_ms?:number;request_timeout_ms?:number;initialize_timeout_ms?:number;streaming?:boolean};
 type ControlResponse={responses?:string[];error?:string;streaming?:boolean}&Record<string,unknown>;
 const boundedTimeout=(value:unknown):number=>{const parsed=Number(value);return Math.trunc(Math.min(3_600_000,Math.max(100,Number.isFinite(parsed)?parsed:60_000)));};
@@ -35,9 +36,14 @@ export class NativeRuntimeTransport implements Transport {
         socket.on('error',error=>{this.onerror?.(error);this.disconnect();});socket.on('close',()=>this.disconnect());resolve(socket);
       });
     });
-    const {secret_env,initialize_timeout_ms:_init,streaming,...spec}=this.spec;
-    try{await this.control({op:'start',spec:{...spec,id:this.processId,server_name:this.spec.id,request_timeout_ms:boundedTimeout(spec.request_timeout_ms??60_000)},
-      ...(secret_env?{secret_env}:{}),...(streaming?{stream:true}:{})});}
+    const {secret_env,execution_context,initialize_timeout_ms:_init,streaming,...spec}=this.spec;
+    try{
+      if(execution_context){
+        const status=await this.control({op:'status'});
+        if(status.interactiveDelegation!==true)throw new Error('Native runtime service does not support interactive delegation');
+      }
+      await this.control({op:'start',spec:{...spec,id:this.processId,server_name:this.spec.id,request_timeout_ms:boundedTimeout(spec.request_timeout_ms??60_000)},
+      ...(execution_context?{execution_context}:{}),...(secret_env?{secret_env}:{}),...(streaming?{stream:true}:{})});}
     catch(error){this.disconnect();throw error;}
   }
   async send(message:JSONRPCMessage):Promise<void>{

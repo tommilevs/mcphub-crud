@@ -20,6 +20,8 @@ $desktopAgentPipe="mcphub-user-desktop-$guid"
 $oldPipe=$env:MCPHUB_NATIVE_TEST_PIPE
 $oldSecrets=$env:MCPHUB_NATIVE_TEST_SECRET_DIR
 $oldRestartService=$env:MCPHUB_RESTART_TEST_SERVICE
+$oldAgentPipe=$env:MCPHUB_NATIVE_TEST_AGENT_PIPE;$oldAgentSession=$env:MCPHUB_NATIVE_TEST_AGENT_SESSION
+$acceptanceAgent=$null
 Push-Location $repo
 try {
   New-Item -ItemType Directory -Path $testRoot | Out-Null
@@ -44,6 +46,9 @@ try {
   try{$service.WaitForStatus('Running',[TimeSpan]::FromSeconds(15))}finally{$service.Dispose()}
   $env:MCPHUB_NATIVE_TEST_PIPE="\\.\pipe\$pipe"
   $env:MCPHUB_NATIVE_TEST_SECRET_DIR=$secrets
+  $acceptanceAgent=Start-Process -FilePath $binary -ArgumentList @('--user-agent','--pipe-name',"mcphub-user-broker-$guid") -WindowStyle Hidden -PassThru
+  $env:MCPHUB_NATIVE_TEST_AGENT_PIPE="mcphub-user-broker-$guid"
+  $env:MCPHUB_NATIVE_TEST_AGENT_SESSION="$([Diagnostics.Process]::GetCurrentProcess().SessionId)"
   npm run -s test -- --runInBand tests/integration/native-service-windows.test.ts --silent
   if($LASTEXITCODE -ne 0){throw "SCM acceptance failed: $LASTEXITCODE"}
   # Exercise the exact tray restart implementation against this service only.
@@ -87,6 +92,34 @@ try {
     $page=Invoke-WebRequest "$base/" -TimeoutSec 5
     if($page.Content -notmatch '<div id="root"'){throw 'Bundled dashboard was not served.'}
     Write-Output 'Bundled gateway HTTP health/login/native status passed.'
+    # Verify the real HTTP config path, not only a direct native transport.
+    $headers=@{'x-auth-token'=$login.token}
+    $desktopServer="broker-http-$guid";$desktopSecret="broker-http-$guid"
+    $synthetic="synthetic-broker-$guid"
+    Invoke-RestMethod "$base/api/native-runtime/secrets/$desktopSecret" -Method Put -Headers $headers -ContentType 'application/json' -Body (@{value=$synthetic}|ConvertTo-Json -Compress) | Out-Null
+    try {
+      $definition=@{name=$desktopServer;config=@{type='stdio';command=(Join-Path $runtime 'node.exe');args=@((Join-Path $repo 'native\tests\stdio-fixture.mjs'));env=@{};nativeSecretRefs=@{MCPHUB_NATIVE_TEST_SECRET=$desktopSecret};options=@{nativeExecution=@{kind='interactive';sessionId=[int]$env:MCPHUB_NATIVE_TEST_AGENT_SESSION;pipeName=$env:MCPHUB_NATIVE_TEST_AGENT_PIPE}}}}
+      $added=Invoke-RestMethod "$base/api/servers" -Method Post -Headers $headers -ContentType 'application/json' -Body ($definition|ConvertTo-Json -Depth 8 -Compress)
+      if(-not $added.success){throw 'Gateway rejected the interactive server configuration.'}
+      $readyDeadline=[DateTime]::UtcNow.AddSeconds(20)
+      do {
+        $connected=Invoke-RestMethod "$base/api/servers/$desktopServer" -Headers $headers
+        if($connected.data.status -eq 'connected'){break}
+        Start-Sleep -Milliseconds 100
+      } while([DateTime]::UtcNow -lt $readyDeadline)
+      if($connected.data.status -ne 'connected'){throw ('Interactive server did not connect: '+($connected.data|ConvertTo-Json -Depth 6 -Compress))}
+      $called=Invoke-RestMethod "$base/api/tools/$desktopServer/check_secret" -Method Post -Headers $headers -ContentType 'application/json' -Body (@{expected=$synthetic}|ConvertTo-Json -Compress)
+      if($called.isError -or $called.content[0].text -ne '{"secretMatches":true}'){
+        throw ('Gateway user-session fixture call failed: '+($called|ConvertTo-Json -Depth 8 -Compress))
+      }
+      $stored=Get-Content -LiteralPath (Join-Path $testRoot 'mcp_settings.json') -Raw | ConvertFrom-Json
+      if($stored.mcpServers.$desktopServer.options.nativeExecution.sessionId -ne [int]$env:MCPHUB_NATIVE_TEST_AGENT_SESSION){throw 'Interactive execution configuration did not persist.'}
+      Write-Output 'Bundled gateway HTTP create/config persistence/user-session tool call passed.'
+    } finally {
+      Invoke-RestMethod "$base/api/servers/$desktopServer" -Method Delete -Headers $headers | Out-Null
+      Invoke-RestMethod "$base/api/native-runtime/secrets/$desktopSecret" -Method Delete -Headers $headers | Out-Null
+      $synthetic=$null
+    }
     if($WithDesktop){
       $desktop=Start-Process -FilePath (Join-Path $PSScriptRoot 'target\release\mcphub-tray.exe') -ArgumentList '--open-dashboard' -Environment @{MCPHUB_DESKTOP_PORT="$port";MCPHUB_USER_AGENT_PIPE=$desktopAgentPipe} -WindowStyle Hidden -PassThru
       Write-Output "DESKTOP_ACCEPTANCE_READY port=$port pid=$($desktop.Id)"
@@ -136,6 +169,8 @@ try {
   if($after.State -ne 'Stopped'){throw 'Intentional stop triggered SCM recovery.'}
 }
 finally {
+  if($acceptanceAgent){if(-not $acceptanceAgent.HasExited){$acceptanceAgent.Kill();$acceptanceAgent.WaitForExit()};$acceptanceAgent.Dispose()}
+  $env:MCPHUB_NATIVE_TEST_AGENT_PIPE=$oldAgentPipe;$env:MCPHUB_NATIVE_TEST_AGENT_SESSION=$oldAgentSession
   if($desktop){if(-not $desktop.HasExited){$desktop.Kill();$desktop.WaitForExit()};$desktop.Dispose()}
   if($WithDesktop){Get-CimInstance Win32_Process -Filter "Name='mcphub-runtime-service.exe'" | Where-Object {$_.CommandLine -and $_.CommandLine.Contains($desktopAgentPipe)} | ForEach-Object {Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue}}
   $env:MCPHUB_NATIVE_TEST_PIPE=$oldPipe;$env:MCPHUB_NATIVE_TEST_SECRET_DIR=$oldSecrets

@@ -179,9 +179,21 @@ tray resumes monitoring. `MCPHUB_USER_AGENT_PIPE` can select a separate
 `mcphub-user-...` pipe for isolated testing.
 Run `native/test-user-agent-windows.ps1` to verify real SDK calls, child session
 identity, connection cleanup, crash supervision, agent reuse and survival after
-the tray watchdog stops. Per-server routing and privileged credential delegation
-are not connected yet; existing gateway servers still use their configured
-service transport.
+the tray watchdog stops.
+
+Per-server `options.nativeExecution` selects `{ "kind": "interactive", "sessionId": 1 }`
+for desktop tools. Set the actual Windows session ID explicitly; there is no
+automatic selection between signed-in users. Omit the option to preserve existing
+service hosting. Optional `pipeName` supports a separate `mcphub-user-...` instance.
+The gateway requires Windows native hosting to be enabled and a compatible stdio
+configuration; an unavailable user agent never falls back to Session 0.
+The machine service opens the agent pipe once, validates its process session,
+executable path and token user against the session's WTS user token, then resolves
+`nativeSecretRefs` and forwards the streaming connection over that same handle.
+The agent never reads the machine DPAPI store. The broker requires the installed
+LocalSystem service; a standalone elevated gateway cannot replace WTS token access.
+Disconnect closes the remote process lease. Service status lists service processes;
+agent processes remain in the agent's own status, without a merged management view yet.
 The first user-agent pipe instance is exclusive: a duplicate agent using that
 pipe fails without replacing the original host. For service/agent-only changes,
 `native/build-windows.ps1 -Action service` builds that executable without

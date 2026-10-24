@@ -4,6 +4,8 @@
 #[cfg(windows)]
 use mcphub_runtime_core::secret_store::SecretStore;
 #[cfg(windows)]
+mod interactive;
+#[cfg(windows)]
 mod options;
 #[cfg(windows)]
 mod pipe_access;
@@ -207,6 +209,7 @@ fn handle_request(
                     "processes": processes,
                     "gatewayHealthy": !options().no_gateway && gateway_healthy(),
                     "executionContext": if options().user_agent { "interactive" } else { "service" },
+                    "interactiveDelegation": !options().user_agent,
                     "sessionId": pipe_access::current_session_id()?,
                 })
             }
@@ -222,6 +225,34 @@ fn handle_request(
         _ => serde_json::json!({"error": "unknown operation"}),
     };
     Ok(serde_json::to_string(&response)?)
+}
+
+#[cfg(windows)]
+fn resolve_start_secrets(
+    request: &mut serde_json::Value,
+    secrets: Option<&SecretStore>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(refs) = request.get("secret_env") {
+        let refs = refs
+            .as_object()
+            .ok_or("secret_env must be an object")?
+            .clone();
+        let env = request["spec"]
+            .get_mut("env")
+            .and_then(|v| v.as_object_mut())
+            .ok_or("start spec env must be an object")?;
+        for (key, id) in refs {
+            let id = id.as_str().ok_or("secret_env values must be strings")?;
+            let value = String::from_utf8(
+                secrets
+                    .ok_or("credentials unavailable in user agent")?
+                    .get(id)?,
+            )?;
+            env.insert(key, serde_json::Value::String(value));
+        }
+        request.as_object_mut().unwrap().remove("secret_env");
+    }
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -246,31 +277,7 @@ fn handle_request_with_secrets(
                 .delete(request["id"].as_str().unwrap_or_default())?;
             return Ok(serde_json::json!({"ok": true}).to_string());
         }
-        Some("start") => {
-            if let Some(secret_env) = request
-                .get("secret_env")
-                .and_then(|value| value.as_object())
-                .cloned()
-            {
-                let env = request["spec"]
-                    .get_mut("env")
-                    .and_then(|value| value.as_object_mut());
-                let Some(env) = env else {
-                    return Err("start spec env must be an object".into());
-                };
-                for (key, secret_id) in secret_env {
-                    let secret_id = secret_id
-                        .as_str()
-                        .ok_or("secret_env values must be strings")?;
-                    let value = String::from_utf8(
-                        secrets
-                            .ok_or("credentials unavailable in user agent")?
-                            .get(secret_id)?,
-                    )?;
-                    env.insert(key.clone(), serde_json::Value::String(value));
-                }
-            }
-        }
+        Some("start") => resolve_start_secrets(&mut request, secrets)?,
         _ => {}
     }
     handle_request(supervisor, &serde_json::to_string(&request)?)
@@ -319,6 +326,33 @@ fn serve_named_pipe_client(
             break;
         }
         let request = serde_json::from_str::<serde_json::Value>(line.trim());
+        if request
+            .as_ref()
+            .is_ok_and(|r| r.get("execution_context").is_some())
+        {
+            let result = (|| -> Result<_, Box<dyn std::error::Error>> {
+                if options().user_agent {
+                    return Err("interactive delegation requires the machine service".into());
+                }
+                let mut request = request?;
+                if owned.is_some() || request["op"] != "start" || request["stream"] != true {
+                    return Err("interactive delegation requires a new streaming connection".into());
+                }
+                let agent = interactive::connect(&request["execution_context"])?;
+                resolve_start_secrets(&mut request, secrets.as_ref().as_ref())?;
+                request.as_object_mut().unwrap().remove("execution_context");
+                Ok((agent, request))
+            })();
+            match result {
+                Ok((agent, request)) => {
+                    let _ = interactive::relay(reader, Arc::clone(&writer), agent, &request);
+                }
+                Err(error) => {
+                    let _ = write_control(&writer, &serde_json::json!({"error":error.to_string()}));
+                }
+            }
+            return;
+        }
         let mut events = None;
         let result = (|| -> Result<serde_json::Value, Box<dyn std::error::Error>> {
             let request = request?;

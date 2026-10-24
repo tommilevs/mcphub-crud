@@ -445,6 +445,8 @@ export interface StoredCredentialBinding {
   updatedAt: string;
 }
 
+export type NativeExecution = {kind:'service'} | {kind:'interactive';sessionId:number;pipeName?:string};
+
 // Configuration details for an individual server
 export interface ServerConfig {
   credentialTemplate?: CredentialSlot[]; // Metadata only; every slot requires a personal binding.
@@ -475,6 +477,7 @@ export interface ServerConfig {
   options?: Partial<
     Pick<RequestOptions, 'timeout' | 'resetTimeoutOnProgress' | 'maxTotalTimeout'>
   > & {
+    nativeExecution?: NativeExecution;
     maxBufferSize?: number; // Stdio read buffer limit in bytes; omitted uses the SDK default (10 MiB).
     // Internal persistence carriers for startOnDemand/idleTimeoutMs (see below). The
     // database-backed ServerDao has no dedicated columns for those two fields, so

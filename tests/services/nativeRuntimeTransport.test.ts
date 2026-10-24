@@ -18,6 +18,13 @@ suite('native transport over a real isolated Windows named pipe',()=>{
   });
   afterEach(async()=>{for(const socket of sockets)socket.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));});
   const transport=()=>new NativeRuntimeTransport({id:'fixture',command:'unused.exe',args:[],env:{},request_timeout_ms:100},pipe);
+  test('interactive execution refuses a legacy service before any process is started',async()=>{
+    const client=new NativeRuntimeTransport({id:'interactive',command:'unused.exe',args:[],env:{},streaming:true,
+      execution_context:{kind:'interactive',session_id:7}},pipe);
+    try{await expect(client.start()).rejects.toThrow('does not support interactive delegation');}
+    finally{await client.close();}
+    expect(requests.map(request=>request.op)).toEqual(['status']);
+  });
   test('configured service pipe is shared by transports and administrative requests',async()=>{
     const previous=process.env.MCPHUB_NATIVE_PIPE;
     process.env.MCPHUB_NATIVE_PIPE=pipe;

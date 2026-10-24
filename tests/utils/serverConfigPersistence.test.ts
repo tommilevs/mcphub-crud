@@ -2,6 +2,12 @@ import { normalizeServerConfigForPersistence } from '../../src/utils/serverConfi
 import { ServerConfig, ServerInfo } from '../../src/types/index.js';
 
 describe('normalizeServerConfigForPersistence', () => {
+  it('persists explicit interactive execution inside the existing options column', () => {
+    const nativeExecution={kind:'interactive' as const,sessionId:7};
+    expect(normalizeServerConfigForPersistence({type:'stdio',command:'node',options:{nativeExecution}}).options?.nativeExecution).toEqual(nativeExecution);
+    expect(()=>normalizeServerConfigForPersistence({type:'stdio',command:'node',options:{nativeExecution:{kind:'interactive',sessionId:0}}})).toThrow();
+    expect(()=>normalizeServerConfigForPersistence({type:'sse',url:'https://example.com',options:{nativeExecution}})).toThrow('requires a stdio server');
+  });
   it('preserves opaque native runtime secret references', () => {
     const normalized = normalizeServerConfigForPersistence({
       type: 'stdio',

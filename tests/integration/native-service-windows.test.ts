@@ -8,13 +8,59 @@ const suite=process.platform==='win32'&&process.env.MCPHUB_NATIVE_TEST_PIPE?desc
 suite('isolated installed Windows SCM service',()=>{
   const pipe=process.env.MCPHUB_NATIVE_TEST_PIPE!,secretRoot=process.env.MCPHUB_NATIVE_TEST_SECRET_DIR!;
   const ids=new Set<string>();
-  const control=(request:object)=>new Promise<any>((resolve,reject)=>{
-    const socket=net.createConnection(pipe);let buffer='';
+  const control=(request:object,target=pipe)=>new Promise<any>((resolve,reject)=>{
+    const socket=net.createConnection(target);let buffer='';
     const timer=setTimeout(()=>{socket.destroy();reject(new Error('Acceptance control timed out'));},8000);
     const finish=(error?:Error,value?:any)=>{clearTimeout(timer);socket.destroy();if(error)reject(error);else resolve(value);};
     socket.once('error',error=>finish(error));socket.once('connect',()=>socket.write(JSON.stringify(request)+'\n'));
     socket.on('data',chunk=>{buffer+=chunk.toString();const newline=buffer.indexOf('\n');if(newline>=0){try{finish(undefined,JSON.parse(buffer.slice(0,newline)));}catch(error){finish(error as Error);}}});
   });
+  test('service delegates a secret-backed SDK stream to the explicit user session and cleans its lease',async()=>{
+    const agentName=process.env.MCPHUB_NATIVE_TEST_AGENT_PIPE!;
+    const agentPipe=`\\\\.\\pipe\\${agentName}`;
+    const session=Number(process.env.MCPHUB_NATIVE_TEST_AGENT_SESSION);
+    expect(session).toBeGreaterThan(0);
+    const id=`delegated-${randomUUID()}`,secretId=`delegated-${randomUUID()}`,value=`synthetic-${randomUUID()}`;
+    await control({op:'secret_put',id:secretId,value});
+    const transport=new NativeRuntimeTransport({id,command:process.execPath,args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{},streaming:true,
+      secret_env:{MCPHUB_NATIVE_TEST_SECRET:secretId},execution_context:{kind:'interactive',session_id:session,pipe_name:agentName}},pipe);
+    const client=new LegacyMcpClient({name:'delegated-acceptance',version:'1'});
+    let childPid=0;
+    try{
+      await client.connect(transport);
+      expect((await client.listTools()).tools[0].name).toBe('check_secret');
+      expect((await client.callTool({name:'check_secret',arguments:{expected:value}})).content)
+        .toEqual([{type:'text',text:'{"secretMatches":true}'}]);
+      const agent=await control({op:'status'},agentPipe);
+      expect(agent).toMatchObject({executionContext:'interactive',sessionId:session});
+      childPid=agent.processes.find((p:any)=>p.id===transport.processId).pid;
+      expect((await control({op:'status'})).processes.some((p:any)=>p.id===transport.processId)).toBe(false);
+      expect(JSON.stringify(agent)).not.toContain(value);
+    }finally{await client.close();await control({op:'secret_delete',id:secretId});}
+    const deadline=Date.now()+3000;
+    while((await control({op:'status'},agentPipe)).processes.some((p:any)=>p.id===transport.processId)){
+      if(Date.now()>deadline)throw new Error('Delegated lease survived disconnect');
+      await new Promise(resolve=>setTimeout(resolve,25));
+    }
+    expect(()=>process.kill(childPid,0)).toThrow();
+  },15000);
+  test('delegation rejects session ambiguity and counterfeit agent before resolving any secret',async()=>{
+    const spec={id:`denied-${randomUUID()}`,command:process.execPath,args:[],env:{}};
+    expect(await control({op:'start',stream:true,spec,execution_context:{kind:'interactive',session_id:0}}))
+      .toHaveProperty('error','interactive execution requires an explicit nonzero Windows session id');
+    expect(await control({op:'start',stream:true,spec,execution_context:{kind:'interactive',
+      session_id:Number(process.env.MCPHUB_NATIVE_TEST_AGENT_SESSION)+1,pipe_name:process.env.MCPHUB_NATIVE_TEST_AGENT_PIPE}}))
+      .toHaveProperty('error','agent Windows session mismatch');
+    const spoof=`mcphub-user-counterfeit-${randomUUID()}`;
+    const server=net.createServer(socket=>socket.on('error',()=>{}));
+    await new Promise<void>((resolve,reject)=>{server.once('error',reject);server.listen(`\\\\.\\pipe\\${spoof}`,resolve);});
+    try{
+      expect(await control({op:'start',stream:true,spec,secret_env:{TOKEN:'nonexistent-secret'},
+        execution_context:{kind:'interactive',session_id:Number(process.env.MCPHUB_NATIVE_TEST_AGENT_SESSION),pipe_name:spoof}}))
+        .toHaveProperty('error','agent executable mismatch');
+    }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));}
+    expect((await control({op:'status'})).processes.some((p:any)=>p.id===spec.id)).toBe(false);
+  },10000);
   afterEach(async()=>{
     for(const id of ids)await control({op:'stop',id});
     const status=await control({op:'status'});
@@ -23,7 +69,9 @@ suite('isolated installed Windows SCM service',()=>{
   });
   test('real SDK initialize/list/call resolves a DPAPI reference without exposing secret values in status',async()=>{
     const id=`acceptance-${randomUUID()}`,secretId=`fixture-${randomUUID()}`,value=`synthetic-${randomUUID()}`;ids.add(id);
-    expect(await control({op:'status'})).toMatchObject({gatewayHealthy:false});
+    const serviceStatus=await control({op:'status'});
+    expect(serviceStatus).toMatchObject({executionContext:'service',sessionId:0});
+    expect(typeof serviceStatus.gatewayHealthy).toBe('boolean');
     expect(await control({op:'secret_put',id:secretId,value})).toMatchObject({ok:true});
     const client=new LegacyMcpClient({name:'native-acceptance-client',version:'1'});
     const transport=new NativeRuntimeTransport({id,command:process.execPath,args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{},
@@ -54,9 +102,10 @@ suite('isolated installed Windows SCM service',()=>{
     const started=Date.now();expect(await control({op:'status'})).toHaveProperty('processes');expect(Date.now()-started).toBeLessThan(1000);
     expect(await pending).toHaveProperty('error');
   },10000);
-  test('live duplex delivers progress, answers a server request and cancels a pending call without blocking the next call',async()=>{
+  test.each([false,true])('live duplex preserves progress, server requests and cancellation (interactive=%s)',async(interactive)=>{
     const name=`duplex-${randomUUID()}`;
-    const transport=new NativeRuntimeTransport({id:name,command:process.execPath,args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{},streaming:true},pipe);
+    const execution_context=interactive?{kind:'interactive' as const,session_id:Number(process.env.MCPHUB_NATIVE_TEST_AGENT_SESSION),pipe_name:process.env.MCPHUB_NATIVE_TEST_AGENT_PIPE}:undefined;
+    const transport=new NativeRuntimeTransport({id:name,command:process.execPath,args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{},streaming:true,execution_context},pipe);
     ids.add(transport.processId);
     const client=new LegacyMcpClient({name:'duplex-acceptance',version:'1'});
     let answered=0,progress=0;client.setRequestHandler('ping',async()=>{answered++;return {};});

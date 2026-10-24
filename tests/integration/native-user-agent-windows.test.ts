@@ -38,6 +38,9 @@ suite('interactive Windows runtime agent',()=>{
     expect(()=>process.kill(pid,0)).toThrow();
   },15000);
   test('machine credential operations and references are unavailable in the agent',async()=>{
+    expect(await control({op:'start',execution_context:{kind:'interactive',session_id:0},
+      spec:{id:'recursive-delegation',command:'nonexistent-recursive-agent-fixture',args:[],env:{}}}))
+      .toHaveProperty('error','interactive delegation requires the machine service');
     for(const op of ['secret_put','secret_delete'])expect(await control({op,id:'machine-only',value:'synthetic'})).toHaveProperty('error','credentials unavailable in user agent');
     expect(await control({op:'start',spec:{id:'denied',command:process.execPath,args:[],env:{}},secret_env:{TOKEN:'machine-only'}}))
       .toHaveProperty('error','credentials unavailable in user agent');

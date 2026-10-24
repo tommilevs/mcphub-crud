@@ -2,6 +2,12 @@ import type { ServerFormData } from '../../frontend/src/types';
 import { buildServerPayload } from '../../frontend/src/utils/serverFormPayload';
 
 describe('buildServerPayload', () => {
+  it('round-trips the selected Windows session and custom agent pipe', () => {
+    const nativeExecution={kind:'interactive' as const,sessionId:7,pipeName:'mcphub-user-specific'};
+    const payload=buildServerPayload({formData:{name:'desktop',url:'',command:'node',arguments:'',args:[],env:[],headers:[],options:{nativeExecution}},
+      serverType:'stdio',envVars:[],headerVars:[]});
+    expect(payload.config.options?.nativeExecution).toEqual(nativeExecution);
+  });
   it('serializes native runtime secret refs without secret values', () => {
     const payload = buildServerPayload({
       formData: {

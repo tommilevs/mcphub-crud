@@ -239,6 +239,7 @@ export interface ServerConfig {
     resetTimeoutOnProgress?: boolean; // Reset timeout on progress notifications
     maxTotalTimeout?: number; // Maximum total timeout in milliseconds
     maxBufferSize?: number; // Stdio read buffer limit in bytes
+    nativeExecution?: {kind:'service'} | {kind:'interactive';sessionId:number;pipeName?:string};
   }; // MCP request options configuration
   // Proxychains4 proxy configuration for STDIO servers (Linux/macOS only, Windows not supported)
   proxy?: ProxychainsConfig;
@@ -407,6 +408,7 @@ export interface ServerFormData {
     resetTimeoutOnProgress?: boolean;
     maxTotalTimeout?: number;
     maxBufferSize?: number;
+    nativeExecution?: NonNullable<ServerConfig['options']>['nativeExecution'];
   };
   // Proxychains4 proxy configuration for STDIO servers (Linux/macOS only).
   // Round-tripped from the stored config so an edit does not drop it.

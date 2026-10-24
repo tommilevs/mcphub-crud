@@ -142,6 +142,7 @@ const ServerForm = ({
     visibility: (initialData?.config?.visibility ?? 'private') as 'private' | 'group' | 'public',
     sharedWithUsers: initialData?.config?.sharedWithUsers || [],
     options: {
+      nativeExecution: initialData?.config?.options?.nativeExecution,
       maxBufferSize: initialData?.config?.options?.maxBufferSize,
       timeout:
         (initialData &&
@@ -1864,6 +1865,41 @@ const ServerForm = ({
               {serverType === 'stdio' && (
                 <fieldset className="space-y-2 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
                   <legend className="px-1 font-medium">Native runtime secret references</legend>
+                  <label htmlFor="nativeExecutionKind" className="block text-sm font-medium">
+                    Run in
+                  </label>
+                  <select
+                    id="nativeExecutionKind"
+                    className="w-full py-2 px-3 form-input"
+                    value={formData.options?.nativeExecution?.kind || 'service'}
+                    onChange={(event) => setFormData({ ...formData, options: {
+                      ...formData.options,
+                      nativeExecution: event.target.value === 'interactive'
+                        ? {kind:'interactive', sessionId:0}
+                        : undefined,
+                    } })}
+                  >
+                    <option value="service">Windows service (default)</option>
+                    <option value="interactive">Signed-in user's desktop</option>
+                  </select>
+                  {formData.options?.nativeExecution?.kind === 'interactive' && (
+                    <div className="space-y-2">
+                      <label htmlFor="nativeSessionId" className="block text-sm font-medium">Windows session ID</label>
+                      <input id="nativeSessionId" type="number" min={1} max={4294967295} required
+                        className="w-full py-2 px-3 form-input"
+                        value={formData.options.nativeExecution.sessionId || ''}
+                        onChange={(event) => setFormData({ ...formData, options: {
+                          ...formData.options,
+                          nativeExecution: { ...formData.options!.nativeExecution as {kind:'interactive';sessionId:number;pipeName?:string},
+                            sessionId:Number(event.target.value) },
+                        } })}
+                      />
+                      <p className="text-sm text-gray-500">
+                        Start the MCPHub tray in the selected session first. If the user agent is unavailable,
+                        the server stays disconnected. It will not run in the service session instead.
+                      </p>
+                    </div>
+                  )}
                   <p className="text-sm text-gray-500">
                     One <code>ENV_KEY=secret-id</code> per line. IDs refer to secrets enrolled in the
                     Windows native runtime; secret values are never stored in this form.

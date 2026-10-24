@@ -50,6 +50,11 @@ pub fn connect(pipe: HANDLE) -> io::Result<()> {
 #[derive(Clone)]
 pub struct Pipe(Arc<Handle>);
 impl Pipe {
+    pub fn cancel(&self) {
+        unsafe {
+            windows_sys::Win32::System::IO::CancelIoEx(self.0 .0, std::ptr::null());
+        }
+    }
     pub unsafe fn from_raw(handle: HANDLE) -> Self {
         Self(Arc::new(Handle(handle)))
     }
