@@ -73,10 +73,12 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
     let install_dir = executable.parent()?;
     // Tauri places bundled resources under `<install>\\resources`; keep the
     // install-root fallback for development and older bundles.
-    let resource_dir = [install_dir.join("resources"), install_dir.to_path_buf()]
-        .into_iter()
-        .map(|dir| dir.join("runtime"))
-        .find(|dir| dir.join("node.exe").exists() && dir.join("dist").join("index.js").exists())?;
+    let resource_dir = options().runtime_dir.clone().or_else(|| {
+        [install_dir.join("resources"), install_dir.to_path_buf()]
+            .into_iter()
+            .map(|dir| dir.join("runtime"))
+            .find(|dir| dir.join("node.exe").exists() && dir.join("dist").join("index.js").exists())
+    })?;
     let node = resource_dir.join("node.exe");
     let backend = resource_dir.join("dist").join("index.js");
     let data_dir = options().data_dir.clone().unwrap_or_else(|| {

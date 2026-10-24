@@ -7,6 +7,7 @@ pub struct Options {
     pub no_gateway: bool,
     pub gateway_port: u16,
     pub data_dir: Option<PathBuf>,
+    pub runtime_dir: Option<PathBuf>,
 }
 impl Options {
     pub fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self, String> {
@@ -17,6 +18,7 @@ impl Options {
             no_gateway: false,
             gateway_port: 3000,
             data_dir: None,
+            runtime_dir: None,
         };
         let mut args = arguments.into_iter();
         while let Some(flag) = args.next() {
@@ -51,15 +53,17 @@ impl Options {
                     }
                     options.gateway_port = port;
                 }
-                "--secret-dir" | "--data-dir" => {
+                "--secret-dir" | "--data-dir" | "--runtime-dir" => {
                     let path = PathBuf::from(args.next().ok_or("missing secret directory")?);
                     if !path.is_absolute() {
                         return Err("secret directory must be absolute".into());
                     }
                     if flag == "--secret-dir" {
                         options.secret_dir = Some(path);
-                    } else {
+                    } else if flag == "--data-dir" {
                         options.data_dir = Some(path);
+                    } else {
+                        options.runtime_dir = Some(path);
                     }
                 }
                 _ => return Err(format!("unknown runtime option: {flag}")),
@@ -83,6 +87,7 @@ mod tests {
         assert!(!options.no_gateway);
         assert_eq!(options.gateway_port, 3000);
         assert!(options.data_dir.is_none());
+        assert!(options.runtime_dir.is_none());
     }
     #[test]
     fn isolated_gateway_options_validate_port_and_absolute_data_path() {
@@ -99,6 +104,7 @@ mod tests {
             &["--gateway-port"],
             &["--data-dir", "relative"],
             &["--data-dir"],
+            &["--runtime-dir", "relative"],
         ] {
             assert!(parse(args).is_err());
         }

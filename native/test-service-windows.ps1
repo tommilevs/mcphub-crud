@@ -1,4 +1,6 @@
-param([string]$ServiceBinary=(Join-Path $PSScriptRoot 'target\release\mcphub-runtime-service.exe'))
+param([string]$ServiceBinary=(Join-Path $PSScriptRoot 'target\release\mcphub-runtime-service.exe'),
+  [switch]$WithGateway,
+  [string]$RuntimeDirectory=(Join-Path $PSScriptRoot 'staging'))
 $ErrorActionPreference='Stop'
 if (-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {throw 'SCM acceptance requires an elevated Windows administrator.'}
 $repo=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -17,8 +19,18 @@ try {
   New-Item -ItemType Directory -Path $testRoot | Out-Null
   if(Get-Service -Name $name -ErrorAction SilentlyContinue){throw 'Acceptance service name collision.'}
   $command='"'+$binary+'" --service-name "'+$name+'" --pipe-name "'+$pipe+'" --secret-dir "'+$secrets+'" --no-gateway'
+  if($WithGateway){
+    $runtime=(Resolve-Path -LiteralPath $RuntimeDirectory).Path
+    $listener=[Net.Sockets.TcpListener]::new([Net.IPAddress]::Loopback,0)
+    $listener.Start();$port=$listener.LocalEndpoint.Port;$listener.Stop()
+    $command='"'+$binary+'" --service-name "'+$name+'" --pipe-name "'+$pipe+'" --secret-dir "'+$secrets+'" --gateway-port '+$port+' --data-dir "'+$testRoot+'" --runtime-dir "'+$runtime+'"'
+  }
   $registration=New-Service -Name $name -BinaryPathName $command -StartupType Manual -DisplayName $name
   $created=$true;$registration.Dispose()
+  if($WithGateway){
+    # Synthetic acceptance credential only; the service key is deleted in finally.
+    New-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name Environment -PropertyType MultiString -Value @('USE_DB=false','NODE_ENV=production','ADMIN_PASSWORD=MCPHub-Acceptance-Only-42!') | Out-Null
+  }
   Start-Service -Name $name
   $service=Get-Service -Name $name
   try{$service.WaitForStatus('Running',[TimeSpan]::FromSeconds(15))}finally{$service.Dispose()}
@@ -26,13 +38,37 @@ try {
   $env:MCPHUB_NATIVE_TEST_SECRET_DIR=$secrets
   npm run -s test -- --runInBand tests/integration/native-service-windows.test.ts --silent
   if($LASTEXITCODE -ne 0){throw "SCM acceptance failed: $LASTEXITCODE"}
+  if($WithGateway){
+    $base="http://127.0.0.1:$port"
+    $deadline=[DateTime]::UtcNow.AddSeconds(60)
+    do {
+      try{$health=Invoke-RestMethod "$base/health" -TimeoutSec 2;break}catch{Start-Sleep -Milliseconds 500}
+    } while([DateTime]::UtcNow -lt $deadline)
+    if(-not $health){throw 'Bundled gateway never became healthy.'}
+    $login=Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' -Body '{"username":"admin","password":"MCPHub-Acceptance-Only-42!"}'
+    if(-not $login.token){throw 'Bundled gateway login failed.'}
+    $status=Invoke-RestMethod "$base/api/native-runtime/status" -Headers @{'x-auth-token'=$login.token}
+    if(-not $status.data -or $null -eq $status.data.processes){throw 'Gateway could not query its isolated service pipe.'}
+    if(-not (Test-Path -LiteralPath (Join-Path $testRoot 'mcp_settings.json'))){throw 'Gateway did not use isolated settings.'}
+    $page=Invoke-WebRequest "$base/" -TimeoutSec 5
+    if($page.Content -notmatch '<div id="root"'){throw 'Bundled dashboard was not served.'}
+    Write-Output 'Bundled gateway HTTP health/login/native status passed.'
+  }
   # Verify SCM recovery independently of the child-process watchdog.
   sc.exe failure $name reset= 60 actions= restart/1000 | Out-Null
   if($LASTEXITCODE -ne 0){throw 'Cannot configure isolated recovery actions.'}
   sc.exe failureflag $name 1 | Out-Null
   if($LASTEXITCODE -ne 0){throw 'Cannot configure isolated failure flag.'}
   $before=Get-CimInstance Win32_Service -Filter "Name='$name'"
+  if($WithGateway){
+    $gatewayPid=(Get-NetTCPConnection -LocalPort $port -State Listen | Select-Object -First 1).OwningProcess
+    $gatewayProcess=Get-Process -Id $gatewayPid
+  }
   Stop-Process -Id $before.ProcessId -Force
+  if($WithGateway){
+    if(-not $gatewayProcess.WaitForExit(5000)){throw 'Gateway survived a hard service crash.'}
+    $gatewayProcess.Dispose()
+  }
   $deadline=[DateTime]::UtcNow.AddSeconds(15)
   do {
     Start-Sleep -Milliseconds 250

@@ -97,6 +97,8 @@ allow a separate gateway instance with its own settings file. The service passes
 its pipe name as `MCPHUB_NATIVE_PIPE`; both gateway transports and administrative
 requests use that pipe. These options do not provision a separate PostgreSQL
 database or isolate inherited provider configuration.
+`--runtime-dir ABSOLUTE_PATH` selects an explicit bundle containing `node.exe`
+and `dist/index.js`; otherwise the installed resource locations are used.
 Names allow only letters, digits, dots, underscores and hyphens. These arguments
 let acceptance tests use a separate SCM registration and credential directory
 without touching an existing gateway or production secrets.
@@ -111,6 +113,12 @@ and its owned test directory; existing service registrations and port 3000 are
 not changed. It also force-kills the service with SCM recovery enabled, verifies
 a new service PID, and checks that an intentional stop stays stopped. This test
 does not prove bundled gateway, tray or installer behavior.
+With freshly staged resources, `./native/test-service-windows.ps1 -WithGateway`
+also starts the actual bundle on an unused local port with separate settings,
+JSON storage and a synthetic test administrator configured only on the temporary
+service. It checks HTTP health, login, dashboard delivery, native status through
+the selected pipe and gateway termination after a hard service crash. This does
+not test fresh-install password enrollment or the installer/tray UI.
 
 The Windows Tauri installer can include a self-contained gateway runtime. Run
 `native/package-windows.ps1` before `cargo tauri build` to stage portable
