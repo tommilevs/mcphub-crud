@@ -1,10 +1,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod gateway_start;
 
+use gateway_start::background_command;
 use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpStream},
-    process::{Command, Stdio},
+    process::Stdio,
     time::Duration,
 };
 use tauri::{
@@ -59,7 +60,7 @@ fn start_gateway(app: &AppHandle, port: u16) {
     if !settings.exists() && std::fs::write(&settings, b"{\"mcpServers\":{}}\n").is_err() {
         return;
     }
-    let _ = Command::new(node)
+    let _ = background_command(node)
         .arg(backend)
         .current_dir(resource_dir.join("runtime"))
         .stdin(Stdio::null())
@@ -90,11 +91,11 @@ fn open_dashboard(app: &AppHandle, port: u16) {
     // Keep a useful fallback for a damaged/older bundle without creating a
     // second dashboard window.
     #[cfg(windows)]
-    let _ = Command::new("cmd")
+    let _ = background_command("cmd")
         .args(["/C", "start", "", &format!("http://127.0.0.1:{port}")])
         .spawn();
     #[cfg(not(windows))]
-    let _ = Command::new("xdg-open")
+    let _ = background_command("xdg-open")
         .arg(format!("http://127.0.0.1:{port}"))
         .spawn();
 }
@@ -102,14 +103,14 @@ fn open_dashboard(app: &AppHandle, port: u16) {
 fn restart_service() {
     #[cfg(windows)]
     {
-        let _ = Command::new("sc").args(["stop", "MCPHub"]).status();
-        let _ = Command::new("sc").args(["start", "MCPHub"]).status();
+        let _ = background_command("sc").args(["stop", "MCPHub"]).status();
+        let _ = background_command("sc").args(["start", "MCPHub"]).status();
     }
 }
 
 #[cfg(windows)]
 fn tray_autostart_enabled() -> bool {
-    Command::new("reg")
+    background_command("reg")
         .args([
             "query",
             r"HKCU\Software\Microsoft\Windows\CurrentVersion\Run",
@@ -133,7 +134,7 @@ fn set_tray_autostart(enabled: bool) -> bool {
         let Ok(executable) = std::env::current_exe() else {
             return false;
         };
-        Command::new("reg")
+        background_command("reg")
             .args([
                 "add",
                 key,
@@ -142,14 +143,14 @@ fn set_tray_autostart(enabled: bool) -> bool {
                 "/t",
                 "REG_SZ",
                 "/d",
-                &executable.to_string_lossy(),
+                &format!("\"{}\"", executable.to_string_lossy()),
                 "/f",
             ])
             .status()
             .map(|status| status.success())
             .unwrap_or(false)
     } else {
-        Command::new("reg")
+        background_command("reg")
             .args(["delete", key, "/v", "MCPHub", "/f"])
             .status()
             .map(|status| status.success())

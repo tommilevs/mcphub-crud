@@ -11,6 +11,16 @@ pub fn desktop_port(value: Option<&str>) -> Result<u16, &'static str> {
     }
 }
 
+pub fn background_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    }
+    command
+}
+
 #[cfg(windows)]
 pub fn service_absent(name: &str) -> bool {
     use std::os::windows::process::CommandExt;
@@ -26,6 +36,33 @@ pub fn service_absent(name: &str) -> bool {
 
 #[cfg(all(test, windows))]
 mod tests {
+    #[test]
+    fn background_console_fixture() {
+        if std::env::var_os("MCPHUB_CONSOLE_FIXTURE").is_some() {
+            #[link(name = "kernel32")]
+            extern "system" {
+                fn GetConsoleWindow() -> *mut std::ffi::c_void;
+            }
+            assert!(unsafe { GetConsoleWindow() }.is_null());
+        }
+    }
+    #[test]
+    fn background_utilities_do_not_create_a_console_window() {
+        let result = super::background_command(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "tests::background_console_fixture",
+                "--nocapture",
+            ])
+            .env("MCPHUB_CONSOLE_FIXTURE", "1")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stdout)
+        );
+    }
     #[test]
     fn desktop_endpoint_has_a_stable_default_and_rejects_invalid_ports() {
         assert_eq!(super::desktop_port(None), Ok(3000));
