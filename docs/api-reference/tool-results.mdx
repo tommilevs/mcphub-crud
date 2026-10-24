@@ -3,7 +3,7 @@ title: "Tool Result History"
 description: "Inspect immutable MCP tool execution results and retrieval metrics."
 ---
 
-Tool Result History is available in database mode and is restricted to administrators. Each eligible tool execution receives a `result_id`. The original MCP response is stored as immutable RAW before optional legacy compression; pin and usage counters are stored separately.
+Tool Result History is available in database mode and is restricted to administrators. Each successfully persisted eligible tool execution receives a `result_id`. A storage failure does not fail or repeat the upstream tool call. Retention maintenance failure preserves an already saved result ID and is retried on the next capture. The original MCP response is stored as immutable RAW before optional legacy compression; pin and usage counters are stored separately.
 
 All endpoints below are under `/api` and use the normal dashboard authentication.
 
@@ -14,7 +14,7 @@ GET /api/tool-results/available
 GET /api/tool-results?page=1&limit=20&server=desktop-commander&status=error
 ```
 
-List filters include `server`, `tool`, `status`, `sessionId`, `conversationId`, `pinned`, `startDate`, and `endDate`. The list response omits RAW content and includes pagination metadata.
+List filters include `server`, `tool`, `status`, `sessionId`, `conversationId`, `pinned`, `startDate`, and `endDate`. Attribution filters also include `modelId`, `taskId`, `traceId`, and `branchId`. Invalid dates or a start date after the end date return `400` before retrieval. The list response omits RAW content and includes pagination metadata.
 
 ## Search and retrieval
 
@@ -32,6 +32,8 @@ Search uses hybrid vector plus PostgreSQL full-text retrieval when the vector pa
 
 RAW is never returned by list, search, or metadata endpoints. Metadata-only records return `409` from RAW endpoints with the configured omission reason.
 The result-scoped search endpoint searches indexed original chunks and returns retrieval scores without rewriting or exposing the full RAW payload.
+Newly captured text includes structured MCP output as well as text blocks. Lexical chunks cover the complete result text; vector embedding input remains bounded to 64,000 UTF-16 units per result, so later chunks may be lexical-only. Chunk boundaries preserve line endings and Unicode characters.
+
 The chunks endpoint returns the exact indexed chunk text with chunk version, byte size, and embedding availability/dimensions. It does not mutate or rewrite immutable RAW.
 The reindex endpoint accepts `{ "limit": 25, "onlyMissing": true }` and rebuilds derived chunk/vector rows from existing immutable RAW. It never updates or replaces the stored result payload.
 
@@ -44,6 +46,8 @@ GET /api/tool-results/:resultId/lineage
 POST /api/tool-results/compare
 PATCH /api/tool-results/:resultId/pin
 ```
+
+Both timeline endpoints accept `page` (default 1) and `limit` (default 100, maximum 500). Pagination reports the actual total and page count without duplicating RAW records.
 
 Comparison accepts two to ten `resultIds`:
 
