@@ -3,8 +3,9 @@ import { apiDelete, apiGet, apiPost, apiPut } from '@/utils/fetchInterceptor';
 import { useToast } from '@/contexts/ToastContext';
 
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
-type NativeProcessStatus = { id: string; serverName?:string; state?: string; running: boolean; pid?: number; restarts: number; restart_limit?: number; protocolReady?: boolean; lastError?: string };
-type NativeRuntimeStatusResponse = NativeProcessStatus[] | { processes: NativeProcessStatus[]; gatewayHealthy?: boolean };
+type ExecutionContext={kind:'service'}|{kind:'interactive';sessionId:number;pipeName?:string};
+type NativeProcessStatus = { id: string; serverName?:string; executionContext?:ExecutionContext; state?: string; running: boolean; pid?: number; restarts: number; restart_limit?: number; protocolReady?: boolean; lastError?: string };
+type NativeRuntimeStatusResponse = NativeProcessStatus[] | { processes: NativeProcessStatus[]; gatewayHealthy?: boolean;agents?:Array<{executionContext:ExecutionContext;available:boolean}> };
 
 /** Admin-only enrollment UI. The value is sent once and never rendered back. */
 const NativeRuntimeSecretsPanel: React.FC = () => {
@@ -15,10 +16,12 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
   const [runtimeStatus, setRuntimeStatus] = useState<NativeProcessStatus[] | null>(null);
   const [gatewayHealthy, setGatewayHealthy] = useState<boolean | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
+  const [unavailableAgents,setUnavailableAgents]=useState<ExecutionContext[]>([]);
 
   const refreshStatus = async () => {
+    try {
     const response = await apiGet<{ success?: boolean; data?: NativeRuntimeStatusResponse; message?: string }>(
-      '/native-runtime/status',
+      '/native-runtime/status?includeInteractive=true',
     );
     const payload = response?.data;
     const processes = Array.isArray(payload) ? payload : payload?.processes;
@@ -31,6 +34,10 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
     setStatusError(null);
     setRuntimeStatus(processes);
     setGatewayHealthy(Array.isArray(payload) || !payload ? null : payload.gatewayHealthy ?? null);
+    setUnavailableAgents(Array.isArray(payload)||!payload?[]:(payload.agents??[]).filter(agent=>!agent.available).map(agent=>agent.executionContext));
+    }catch(error){
+      setStatusError(error instanceof Error?error.message:'Native runtime unavailable');
+    }
   };
 
   useEffect(() => {
@@ -76,10 +83,10 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
     }
   };
 
-  const restart = async (processId: string) => {
+  const restart = async (processId: string,executionContext?:ExecutionContext) => {
     setBusy(true);
     try {
-      const response = await apiPost(`/native-runtime/processes/${encodeURIComponent(processId)}/restart`, {});
+      const response = await apiPost(`/native-runtime/processes/${encodeURIComponent(processId)}/restart`, executionContext?{executionContext}:{});
       if (response?.success === false) throw new Error(response.message || response.error);
       showToast(`Restart requested for ${processId}.`, 'success');
       await refreshStatus();
@@ -104,16 +111,22 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
           Refresh status
         </button>
       </div>
+      {unavailableAgents.map(context=>(
+        <p key={JSON.stringify(context)} className="mt-2 text-sm text-amber-600">
+          User agent unavailable{context.kind==='interactive'?` · Windows session ${context.sessionId}`:''}
+        </p>
+      ))}
       {runtimeStatus && runtimeStatus.length > 0 && (
         <div className="mt-3 space-y-2">
           {runtimeStatus.map((process) => (
-            <div key={process.id} className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--hub-line)] px-3 py-2 text-sm">
+            <div key={`${JSON.stringify(process.executionContext)}:${process.id}`} className="flex flex-wrap items-center justify-between gap-2 rounded border border-[var(--hub-line)] px-3 py-2 text-sm">
               <span className="font-medium">{process.serverName||process.id}</span>
+              <span className="text-xs text-[var(--hub-ink-2)]">{process.executionContext?.kind==='interactive'?`Windows session ${process.executionContext.sessionId}`:'Windows service'}</span>
               <span className={process.running ? 'text-green-600' : 'text-amber-600'}>
                 {process.state || (process.running ? 'RUNNING' : 'STOPPED')} · {process.restarts}/{process.restart_limit ?? '—'} restarts
               </span>
               {process.lastError && <span className="basis-full text-xs text-red-600">{process.lastError}</span>}
-              <button type="button" disabled={busy} onClick={() => void restart(process.id)} className="hub-btn secondary !py-1 !px-2">Restart</button>
+              <button type="button" disabled={busy} onClick={() => void restart(process.id,process.executionContext)} className="hub-btn secondary !py-1 !px-2">Restart</button>
             </div>
           ))}
         </div>

@@ -222,8 +222,7 @@ directory. Relative paths are rejected by the API and runtime; older runtimes
 must advertise working-directory support before the transport sends start,
 so a configured directory is never silently ignored. The UI preserves this
 option inside the existing options JSON storage, without a schema migration.
-Disconnect closes the remote process lease. Service status lists service processes;
-agent processes remain in the agent's own status, without a merged management view yet.
+Disconnect closes the remote process lease. Service status lists service processes.
 Administrators can explicitly target that agent through the machine broker:
 `GET /api/native-runtime/status?sessionId=7&pipeName=mcphub-user-session-7`
 and `POST /api/native-runtime/processes/:id/restart` with
@@ -234,7 +233,16 @@ service-only behavior. The broker validates the connected agent's session,
 user and executable exactly as for a streaming start, and never falls back to
 Session 0. Secret administration and shutdown cannot be delegated. Restarting
 a live MCP process interrupts its connection; the client must reconnect and
-initialize again. The dashboard does not yet combine both process lists.
+initialize again.
+
+The dashboard requests `GET /api/native-runtime/status?includeInteractive=true`
+to combine service processes with agents referenced by configured stdio servers.
+Equivalent session/pipe targets are queried once, with at most four concurrent
+connections. Each process row includes its `executionContext`; Restart sends
+that exact target, so identical process IDs in different sessions stay separate.
+Unreachable agents appear as unavailable without hiding healthy service rows.
+This is configuration-scoped discovery, not enumeration of all Windows sessions.
+The default status API remains service-only for existing clients.
 
 `native/test-managed-tools-windows.ps1 -ComputerUseExecutable <installed-exe>
 -DesktopCommanderEntry <installed-index.js>` checks real installed desktop-tool

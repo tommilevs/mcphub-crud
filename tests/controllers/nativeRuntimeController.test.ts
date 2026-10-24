@@ -2,6 +2,8 @@ const mockPut = jest.fn();
 const mockDelete = jest.fn();
 const mockStatus = jest.fn();
 const mockRestart = jest.fn();
+const mockOverview = jest.fn();
+jest.mock('../../src/services/nativeRuntimeOverview.js',()=>({getNativeRuntimeOverview:mockOverview}));
 
 jest.mock('../../src/services/nativeRuntimeSecretService.js', () => ({
   putNativeRuntimeSecret: mockPut,
@@ -78,6 +80,13 @@ describe('nativeRuntimeController', () => {
     expect(mockStatus).toHaveBeenCalledWith(execution);
     await restartProcess({params:{id:'fixture'},body:{executionContext:execution}} as unknown as Request,response());
     expect(mockRestart).toHaveBeenCalledWith('fixture',execution);
+  });
+  it('returns a configured-agent overview only when requested',async()=>{
+    mockOverview.mockResolvedValue({processes:[],agents:[]});
+    const res=response();
+    await getStatus({query:{includeInteractive:'true'}} as unknown as Request,res);
+    expect(mockOverview).toHaveBeenCalledTimes(1);expect(mockStatus).not.toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({data:{processes:[],agents:[]}});
   });
   it('rejects invalid interactive targets before reaching the runtime',async()=>{
     const res=response();

@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { normalizeNativeExecution } from '../utils/nativeExecution.js';
 import type { NativeExecution } from '../types/index.js';
+import { getNativeRuntimeOverview } from '../services/nativeRuntimeOverview.js';
 import {
   deleteNativeRuntimeSecret,
   putNativeRuntimeSecret,
@@ -49,7 +50,7 @@ export const getStatus = async (req: Request, res: Response): Promise<void> => {
     }
   }catch(error){res.status(400).json({error:error instanceof Error?error.message:'Invalid execution context'});return;}
   try {
-    const status = await (execution?getNativeRuntimeStatus(execution):getNativeRuntimeStatus());
+    const status = await (execution?getNativeRuntimeStatus(execution):req.query?.includeInteractive==='true'?getNativeRuntimeOverview():getNativeRuntimeStatus());
     res.json({ data: status });
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : 'Native runtime unavailable' });
