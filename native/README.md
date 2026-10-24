@@ -171,6 +171,13 @@ that endpoint before navigation, so isolated tests do not contact port 3000.
 `native/test-service-windows.ps1 -WithDesktop` runs the gateway fixture and
 desktop on the same temporary port, then waits for interactive checks of closing
 the window and Exit tray while verifying the gateway remains available.
+Before Exit, also check Open Dashboard reopens the same test endpoint. When the
+MCPHub autostart entry was initially absent, toggle Start MCPHub with Windows on
+and off and verify the Run entry contains the exact quoted tray executable,
+then becomes absent again. The native menu toggles its check state before the
+callback; persistence must use that state directly and roll it back on failure.
+The harness removes a newly created autostart entry only when it points to its
+exact test executable, leaving pre-existing or unrelated entries untouched.
 New service settings advertise their configured port; existing settings are
 preserved and can be edited in the dashboard.
 

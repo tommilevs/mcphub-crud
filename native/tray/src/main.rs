@@ -236,9 +236,10 @@ fn main() {
                         }
                     }
                     "autostart" => {
-                        let enabled = !autostart.is_checked().unwrap_or(false);
-                        if set_tray_autostart(enabled) {
-                            let _ = autostart.set_checked(enabled);
+                        // The native check menu item toggles before emitting this event.
+                        let enabled = autostart.is_checked().unwrap_or(false);
+                        if !set_tray_autostart(enabled) {
+                            let _ = autostart.set_checked(!enabled);
                         }
                     }
                     "quit" => app.exit(0),

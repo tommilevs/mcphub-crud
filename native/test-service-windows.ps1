@@ -16,6 +16,7 @@ $secrets=Join-Path $testRoot 'secrets'
 $binary=(Resolve-Path -LiteralPath $ServiceBinary).Path
 $created=$false
 $desktop=$null
+$desktopAutostartInitiallyAbsent=$WithDesktop -and -not (Get-ItemProperty -LiteralPath HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name MCPHub -ErrorAction SilentlyContinue)
 $desktopAgentPipe="mcphub-user-desktop-$guid"
 $oldPipe=$env:MCPHUB_NATIVE_TEST_PIPE
 $oldSecrets=$env:MCPHUB_NATIVE_TEST_SECRET_DIR
@@ -175,6 +176,11 @@ finally {
   if($acceptanceAgent){if(-not $acceptanceAgent.HasExited){$acceptanceAgent.Kill();$acceptanceAgent.WaitForExit()};$acceptanceAgent.Dispose()}
   $env:MCPHUB_NATIVE_TEST_AGENT_PIPE=$oldAgentPipe;$env:MCPHUB_NATIVE_TEST_AGENT_SESSION=$oldAgentSession
   if($desktop){if(-not $desktop.HasExited){$desktop.Kill();$desktop.WaitForExit()};$desktop.Dispose()}
+  if($desktopAutostartInitiallyAbsent){
+    $testAutostart='"'+(Join-Path $PSScriptRoot 'target\release\mcphub-tray.exe')+'"'
+    $currentAutostart=(Get-ItemProperty -LiteralPath HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name MCPHub -ErrorAction SilentlyContinue).MCPHub
+    if($currentAutostart -eq $testAutostart){Remove-ItemProperty -LiteralPath HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name MCPHub -ErrorAction Stop}
+  }
   if($WithDesktop){Get-CimInstance Win32_Process -Filter "Name='mcphub-runtime-service.exe'" | Where-Object {$_.CommandLine -and $_.CommandLine.Contains($desktopAgentPipe)} | ForEach-Object {Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue}}
   $env:MCPHUB_NATIVE_TEST_PIPE=$oldPipe;$env:MCPHUB_NATIVE_TEST_SECRET_DIR=$oldSecrets
   $env:MCPHUB_RESTART_TEST_SERVICE=$oldRestartService
