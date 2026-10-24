@@ -24,6 +24,7 @@ const Pagination: React.FC<PaginationProps> = ({
     buttons.push(
       <button
         key="first"
+          disabled={disabled}
         onClick={() => onPageChange(1)}
         className={`px-3 py-1 mx-1 rounded ${currentPage === 1
           ? 'bg-blue-500 text-white btn-primary'
@@ -51,6 +52,7 @@ const Pagination: React.FC<PaginationProps> = ({
       buttons.push(
         <button
           key={i}
+          disabled={disabled}
           onClick={() => onPageChange(i)}
           className={`px-3 py-1 mx-1 rounded ${currentPage === i
             ? 'bg-blue-500 text-white btn-primary'
@@ -76,6 +78,7 @@ const Pagination: React.FC<PaginationProps> = ({
       buttons.push(
         <button
           key="last"
+          disabled={disabled}
           onClick={() => onPageChange(totalPages)}
           className={`px-3 py-1 mx-1 rounded ${currentPage === totalPages
             ? 'bg-blue-500 text-white btn-primary'

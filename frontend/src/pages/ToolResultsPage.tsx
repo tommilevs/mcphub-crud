@@ -318,6 +318,7 @@ const ToolResultsPage: React.FC = () => {
   const [comparisonRaw, setComparisonRaw] = useState<Record<string, string>>({});
   const [comparisonRawLoading, setComparisonRawLoading] = useState(false);
   const [comparisonRawError, setComparisonRawError] = useState('');
+  const timelineRequestRef = useRef(0);
   const [timeline, setTimeline] = useState<ToolResultSummary[] | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
   const [timelinePagination, setTimelinePagination] = useState<PaginationInfo | null>(null);
@@ -389,12 +390,14 @@ const ToolResultsPage: React.FC = () => {
         ? { kind: 'conversation' as const, id: conversationId }
         : null);
     if (!context) return;
+    const requestId = ++timelineRequestRef.current;
     setTimelineLoading(true);
     setTimelineError('');
     try {
       const response = context.kind === 'session'
         ? await getToolResultTimeline(context.id, 100, timelinePage)
         : await getToolResultConversationTimeline(context.id, 100, timelinePage);
+      if (requestId !== timelineRequestRef.current) return;
       if (response.success && response.data) {
         setTimeline(response.data);
         setTimelinePagination(response.pagination || null);
@@ -402,12 +405,14 @@ const ToolResultsPage: React.FC = () => {
       }
       else setTimelineError(response.message || t('toolResults.fetchError'));
     } catch (cause) {
+      if (requestId !== timelineRequestRef.current) return;
       setTimelineError(cause instanceof Error ? cause.message : t('toolResults.fetchError'));
     } finally {
-      setTimelineLoading(false);
+      if (requestId === timelineRequestRef.current) setTimelineLoading(false);
     }
   };
 
+  useEffect(() => () => { timelineRequestRef.current += 1; }, [resultId]);
   useEffect(() => { if (!resultId) void load(); }, [load, resultId]);
   if (resultId) return <ToolResultDetailView resultId={resultId} />;
 
@@ -444,7 +449,7 @@ const ToolResultsPage: React.FC = () => {
     {error && <div className="hub-card p-4 text-sm text-red-500">{error}</div>}
     {timelineError && !timeline && <div className="hub-card p-4 text-sm text-red-500">{timelineError}</div>}
     {timeline && <div className="hub-card p-3">
-      <div className="flex items-center justify-between gap-2"><div><div className="text-sm font-medium">{t('toolResults.timeline')}</div><div className="hub-mono text-xs text-[var(--hub-ink-3)] truncate">{timelineContext?.id}</div></div><button className="hub-btn" onClick={() => { setTimeline(null); setTimelineContext(null); setTimelinePagination(null); }}>{t('common.close')}</button></div>
+      <div className="flex items-center justify-between gap-2"><div><div className="text-sm font-medium">{t('toolResults.timeline')}</div><div className="hub-mono text-xs text-[var(--hub-ink-3)] truncate">{timelineContext?.id}</div></div><button className="hub-btn" onClick={() => { timelineRequestRef.current += 1; setTimelineLoading(false); setTimelineError(''); setTimeline(null); setTimelineContext(null); setTimelinePagination(null); }}>{t('common.close')}</button></div>
       {timelineError && <div className="mt-2 text-sm text-red-500">{timelineError}</div>}
       {!timelineLoading && timeline.length === 0 && <div className="mt-3 text-sm text-[var(--hub-ink-3)]">{t('toolResults.timelineEmpty')}</div>}
       <div className="mt-3 space-y-2">{timeline.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 hover:bg-[var(--hub-surface-hover)]"><div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{item.server} / {item.tool}</span><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span></div><div className="mt-1 text-xs text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()} · {item.durationMs} ms · {bytes(item.rawBytes)}</div></Link>)}</div>
