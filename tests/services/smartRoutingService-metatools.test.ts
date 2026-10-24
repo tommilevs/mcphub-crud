@@ -218,3 +218,10 @@ describe('search_tools server list', () => {
     expect(await serverList('$smart/empty')).toBe('Available servers: ');
   });
 });
+
+it('adds result memory definitions only when history storage is available',()=>{
+ const enabled=buildSmartRoutingMetaTools('scope','fixture',false,undefined,'off',true);
+ expect(enabled.map(tool=>tool.name)).toEqual(expect.arrayContaining(['get_tool_result','get_tool_result_range','pin_tool_result','unpin_tool_result']));
+ const disabled=buildSmartRoutingMetaTools('scope','fixture',false,undefined,'off',false);
+ expect(disabled.map(tool=>tool.name)).not.toContain('get_tool_result');
+});

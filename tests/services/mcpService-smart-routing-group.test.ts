@@ -1,3 +1,5 @@
+let mockHistoryRepository: any;
+jest.mock('../../src/services/toolResultHistoryRegistry.js',()=>({getToolResultRepository:()=>mockHistoryRepository,isToolResultHistoryAvailable:()=>!!mockHistoryRepository}));
 // Mock dependencies before importing mcpService
 jest.mock('../../src/services/oauthService.js', () => ({
   initializeAllOAuthClients: jest.fn(),
@@ -120,6 +122,7 @@ import { handleSearchToolsRequest } from '../../src/services/smartRoutingService
 describe('MCP Service - Smart Routing with Group Support', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockHistoryRepository=undefined;
     mcpService.setServerInfosForTest([]);
     // Setup mock return for handleSearchToolsRequest
     mockHandleSearchToolsRequest.mockResolvedValue({
@@ -494,4 +497,15 @@ describe('MCP Service - Smart Routing with Group Support', () => {
       );
     });
   });
+  it('reads a stored result locally on $smart without calling its upstream tool',async()=>{
+    const callTool=jest.fn();
+    mcpService.setServerInfosForTest([{name:'server1',status:'connected',enabled:true,tools:[{name:'server1::direct-tool',inputSchema:{type:'object'}}],client:{callTool},options:{}}] as any);
+    const raw='{"content":[{"type":"text","text":"stored evidence"}]}';
+    mockHistoryRepository={findById:jest.fn().mockResolvedValue({resultId:'id',username:'alice',server:'server1',tool:'direct-tool',raw,payloadAvailable:true}),incrementUseCount:jest.fn().mockResolvedValue(undefined),setPinned:jest.fn()};
+    const result=await mcpService.handleCallToolRequest({params:{name:'get_tool_result',arguments:{result_id:'id'}}},{sessionId:'session-smart',username:'alice'});
+    expect(result.content[0].text).toBe(raw);
+    expect(callTool).not.toHaveBeenCalled();
+    expect(mockHistoryRepository.incrementUseCount).toHaveBeenCalledWith('id');
+  });
+
 });

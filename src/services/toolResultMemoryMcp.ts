@@ -42,3 +42,11 @@ export async function readStoredToolResult(
     return text(JSON.stringify({result_id:id,start,end,total_bytes:bytes.length,raw_sha256:record.rawSha256,encoding:'base64',data}));
   }catch{return failure('Stored result is temporarily unavailable');}
 }
+
+export const RESULT_MEMORY_READ_NAMES = new Set<ResultMemoryReadName>(['get_tool_result','get_tool_result_range','pin_tool_result','unpin_tool_result']);
+export const resultMemoryReadDefinitions = () => [...RESULT_MEMORY_READ_NAMES].map(name=>({
+  name,
+  description: name==='get_tool_result'?'Read immutable stored RAW by result_id without executing the original tool; use byte ranges above 65536 bytes.':name==='get_tool_result_range'?'Read an end-exclusive byte range of stored RAW (maximum 65536 bytes), encoded as base64 for exact reconstruction.':name==='pin_tool_result'?'Pin an owned stored result against automatic retention.':'Remove the pin from an owned stored result.',
+  inputSchema:{type:'object',properties:{result_id:{type:'string',format:'uuid'},...(name==='get_tool_result_range'?{start:{type:'integer',minimum:0},end:{type:'integer',minimum:1}}:{})},required:name==='get_tool_result_range'?['result_id','start','end']:['result_id'],additionalProperties:false},
+  annotations:{readOnlyHint:name==='get_tool_result'||name==='get_tool_result_range',destructiveHint:false},
+}));

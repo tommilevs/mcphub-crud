@@ -1,3 +1,5 @@
+import { resultMemoryReadDefinitions } from './toolResultMemoryMcp.js';
+import { isToolResultHistoryAvailable } from './toolResultHistoryRegistry.js';
 /**
  * Smart Routing Service
  *
@@ -204,6 +206,7 @@ export const buildSmartRoutingMetaTools = (
   progressiveDisclosure: boolean,
   fullSchemaTopN?: number,
   attributionMode: 'off' | 'compatible' = process.env.MCPHUB_ATTRIBUTION_MODE === 'compatible' ? 'compatible' : 'off',
+  resultMemoryAvailable = false,
 ): any[] => {
   const tools: any[] = [];
 
@@ -386,6 +389,7 @@ Available servers: ${serversList}`,
       tool.description += '\nOptional attribution: start a task with hub_context.action=start; report model_claim only if known exactly. Retain the returned trace_key for subsequent calls. Never guess your model.';
     }
   }
+  if (resultMemoryAvailable) tools.push(...resultMemoryReadDefinitions());
   return tools;
 };
 
@@ -465,6 +469,7 @@ export const getSmartRoutingMetaToolDefinitions = async (
     progressiveDisclosure,
     smartRoutingConfig.fullSchemaTopN,
     smartRoutingConfig.attributionMode,
+    isToolResultHistoryAvailable(),
   );
 };
 
@@ -490,6 +495,7 @@ export const getSmartRoutingTools = async (
       progressiveDisclosure,
       smartRoutingConfig.fullSchemaTopN,
       smartRoutingConfig.attributionMode,
+      isToolResultHistoryAvailable(),
     ),
   };
 };
