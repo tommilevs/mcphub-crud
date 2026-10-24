@@ -49,6 +49,21 @@ export interface ToolResultHistoryOptions {
   recentLimit?: number;
 }
 
+export function extractToolResultText(result: unknown): string {
+  if (!result || typeof result !== 'object') return String(result ?? '');
+  const content = (result as { content?: unknown }).content;
+  if (!Array.isArray(content)) return JSON.stringify(result);
+  const text = content
+    .filter((block): block is { text: string } => {
+      return !!block && typeof block === 'object' && typeof (block as { text?: unknown }).text === 'string';
+    })
+    .map((block) => block.text)
+    .join('\n');
+  const structured = (result as { structuredContent?: unknown }).structuredContent;
+  return structured === undefined ? text : [text, JSON.stringify(structured)].filter(Boolean).join('\n');
+}
+
+
 export class ToolResultHistoryService {
   private readonly recentLimit: number;
 
@@ -80,7 +95,7 @@ export class ToolResultHistoryService {
       objective: input.objective,
       arguments: args,
       raw,
-      rawText: capturePayload ? this.extractText(input.result) : null,
+      rawText: capturePayload ? extractToolResultText(input.result) : null,
       rawBytes: raw === null ? 0 : Buffer.byteLength(raw),
       rawSha256: raw === null ? null : createHash('sha256').update(raw).digest('hex'),
       payloadAvailable: capturePayload,
@@ -98,20 +113,6 @@ export class ToolResultHistoryService {
       logger.warn('Tool result retention failed; saved result remains available:', saved.resultId);
     }
     return saved;
-  }
-
-  private extractText(result: unknown): string {
-    if (!result || typeof result !== 'object') return String(result ?? '');
-    const content = (result as { content?: unknown }).content;
-    if (!Array.isArray(content)) return JSON.stringify(result);
-    const text = content
-      .filter((block): block is { text: string } => {
-        return !!block && typeof block === 'object' && typeof (block as { text?: unknown }).text === 'string';
-      })
-      .map((block) => block.text)
-      .join('\n');
-    const structured = (result as { structuredContent?: unknown }).structuredContent;
-    return structured === undefined ? text : [text, JSON.stringify(structured)].filter(Boolean).join('\n');
   }
 
   getByteRange(raw: string, start: number, end: number): Buffer {

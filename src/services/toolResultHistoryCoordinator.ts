@@ -3,7 +3,7 @@ import { observeLoopGuard } from './loopGuardCoordinator.js';
 import { ToolResultRepositoryDb } from '../db/repositories/ToolResultRepository.js';
 import type { ToolResultStatus } from '../types/toolResult.js';
 import { logger } from '../utils/logger.js';
-import { ToolResultHistoryService } from './toolResultHistoryService.js';
+import { ToolResultHistoryService, extractToolResultText } from './toolResultHistoryService.js';
 import { getToolResultRepository } from './toolResultHistoryRegistry.js';
 import { generateEmbedding } from './vectorSearchService.js';
 import { recordToolResultIndexAttempt, recordToolResultIndexFailure } from './toolResultMetricsService.js';
@@ -82,11 +82,16 @@ export const reindexToolResultHistory = async (
     const records = await repository.findForReindex(limit, onlyMissing);
     summary.selected = records.length;
     for (const record of records) {
-      if (!record.rawText) {
+      let text = record.rawText;
+      if (record.raw && record.payloadAvailable !== false) {
+        try { text = extractToolResultText(JSON.parse(record.raw)); }
+        catch { /* Retain the existing derived text if historical RAW is malformed. */ }
+      }
+      if (!text) {
         summary.skipped += 1;
         continue;
       }
-      const searchable = [record.server, record.tool, record.objective, record.rawText]
+      const searchable = [record.server, record.tool, record.objective, text]
         .filter(Boolean)
         .join('\n');
       const chunks = chunkToolResultText(searchable);
