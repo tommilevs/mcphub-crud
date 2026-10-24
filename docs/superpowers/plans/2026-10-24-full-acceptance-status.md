@@ -8,7 +8,7 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | --- | --- | --- |
 | Upstream compatibility | v1.1.8 baseline; legacy routing and group tests | Final deployed configuration acceptance |
 | Immutable RAW, IDs, retention, pins | History/coordinator/repository tests; agent memory dispatch tests | Real PostgreSQL retention and approximately 10k-result workload |
-| Hybrid history retrieval | SQL binding tests and pending `history-search-postgres.test.ts` | Fix and prove duplicate result ranks and owner candidate starvation on PostgreSQL |
+| Hybrid history retrieval | Real PostgreSQL 17 CI passes five regressions at `b8ffa2b`: unique results, owner-before-limit, key/server scope, dimension mismatch, atomic index rollback | Approximately 10k-result workload and deployed data acceptance |
 | Objective-aware large replies | Exact-source BM25, vector fusion, token budgets, capture proof, dispatcher tests; local 1 MB logs/JSON/diff smoke benchmark | Live vector/provider acceptance, representative workload calibration and richer structural chunking |
 | Per-tool policies | Controller persistence/validation tests; actual browser add/save/remove and bounds checks | Deployed settings acceptance |
 | Result Explorer | Browser timeline pagination, stale-response rejection, network recovery; source compare/chunks/metrics | Complete Smart/RAW/Chunks/Related and chunk-to-RAW navigation audit |
@@ -21,7 +21,14 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | Native dashboard | Actual browser same-ID service/agent restart targets, offline agent and narrow layout | Deployed package acceptance |
 | Installer | Official NSIS bundle built and entry assets checked; install helper exercised in PowerShell 7 and 5.1 | Wizard/shortcuts/bootstrap flow and real logon/reboot |
 
-Current external constraints: the saved PostgreSQL administrator credential was
+PostgreSQL query regressions now run in disposable pgvector CI, without needing
+the production administrator credential. The red run was
+[40132171539](https://github.com/tommilevs/mcphub-crud/actions/runs/40132171539);
+the five-test green run was
+[40132321341](https://github.com/tommilevs/mcphub-crud/actions/runs/40132321341).
+This proves the tested database behavior, not a production deployment.
+
+Current external constraints: the saved production PostgreSQL credential was
 rejected; do not retry it without new information. Production cutover was rejected
 by automatic approval review; do not repackage an equivalent migration attempt.
 These constraints do not prevent independent source work. Keep the entire goal

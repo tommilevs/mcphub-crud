@@ -1,17 +1,17 @@
-name: History PostgreSQL integration
+name: PostgreSQL integration
 
 on:
   push:
     branches: [main, develop, feat/tool-result-history]
     paths:
       - '.github/workflows/history-postgres.yml'
-      - 'tests/integration/history-search-postgres.test.ts'
-      - 'src/db/repositories/ToolResultRepository.ts'
+      - 'tests/integration/*postgres.test.ts'
+      - 'src/**'
   pull_request:
     paths:
       - '.github/workflows/history-postgres.yml'
-      - 'tests/integration/history-search-postgres.test.ts'
-      - 'src/db/repositories/ToolResultRepository.ts'
+      - 'tests/integration/*postgres.test.ts'
+      - 'src/**'
   workflow_dispatch:
 
 permissions:
@@ -54,5 +54,5 @@ jobs:
       - name: Enable vector extension in the disposable database
         run: |
           node -e "const {Client}=require('pg');(async()=>{const db=new Client({host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST,user:process.env.MCPHUB_ATTRIBUTION_TEST_USER,password:process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,database:process.env.MCPHUB_ATTRIBUTION_TEST_DB});try{await db.connect();await db.query('CREATE EXTENSION IF NOT EXISTS vector')}finally{await db.end()}})().catch(error=>{console.error(error);process.exitCode=1})"
-      - name: Verify real PostgreSQL history queries and atomic index replacement
-        run: pnpm exec jest --runInBand tests/integration/history-search-postgres.test.ts
+      - name: Verify history, attribution, reviewed evidence and dataset storage
+        run: pnpm exec jest --runInBand tests/integration/history-search-postgres.test.ts tests/integration/attribution-postgres.test.ts
