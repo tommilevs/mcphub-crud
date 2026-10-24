@@ -8,7 +8,7 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | --- | --- | --- |
 | Upstream compatibility | v1.1.8 baseline; legacy routing and group tests | Final deployed configuration acceptance |
 | Immutable RAW, IDs, retention, pins | Production schema initialized twice on PostgreSQL; immutable UPDATE rejection; independent state; 10,005 owner rows pruned to 10,000 plus pins, another owner preserved, expired chunks cascaded | Representative payload-size/search workload and deployed data acceptance |
-| Hybrid history retrieval | Real PostgreSQL 17 CI passes five regressions at `b8ffa2b`: unique results, owner-before-limit, key/server scope, dimension mismatch, atomic index rollback | Approximately 10k-result workload and deployed data acceptance |
+| Hybrid history retrieval | Real PostgreSQL regressions plus 10k indexed rows with 1536-dimensional vectors: unique scoped hits, correct final pagination, oldest pin protected | Mixed real-payload retrieval quality and deployed data acceptance |
 | Objective-aware large replies | Exact-source BM25, vector fusion, token budgets, capture proof, dispatcher tests; local 1 MB logs/JSON/diff smoke benchmark | Live vector/provider acceptance, representative workload calibration and richer structural chunking |
 | Per-tool policies | Controller persistence/validation tests; actual browser add/save/remove and bounds checks | Deployed settings acceptance |
 | Result Explorer | Browser timeline pagination, stale-response rejection, network recovery and exact chunk-to-RAW highlighting; source compare/chunks/metrics | Complete Smart/RAW/Chunks/Related acceptance with deployed data |
@@ -33,6 +33,15 @@ passes 23 tests across history search, production schema/10k retention and
 attribution/review/dataset/experience integration. The 10k test took 330 ms,
 including fixture insertion and assertions; its timed retention/check section
 reported 20 ms. These synthetic measurements are not production guarantees.
+
+The stronger follow-up
+[40133128337](https://github.com/tommilevs/mcphub-crud/actions/runs/40133128337)
+also passes all 23 tests. It seeds 10,005 indexed owner rows, retains 10,000 plus a
+pinned row dated 2000, preserves another owner and verifies the final history page.
+Its 1536-dimensional hybrid query returned 20 distinct scoped hits in 130 ms;
+retention/checks took 19 ms. Text and vectors are deliberately synthetic and
+repeated, so these figures do not establish real-world relevance quality or
+embedding-provider latency. No cloud embedding requests were made.
 
 Current external constraints: the saved production PostgreSQL credential was
 rejected; do not retry it without new information. Production cutover was rejected
