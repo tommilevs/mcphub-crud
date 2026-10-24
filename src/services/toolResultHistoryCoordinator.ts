@@ -102,8 +102,8 @@ export const reindexToolResultHistory = async (
           let embedding: number[] | null = null;
           try {
             const embeddingText = chunks[chunkIndex].slice(0, embeddingBudget).replace(/[\uD800-\uDBFF]$/, '');
-                embeddingBudget -= embeddingText.length;
-                if (embeddingText) embedding = await generateEmbedding(embeddingText, 'document');
+            embeddingBudget -= embeddingText.length;
+            if (embeddingText) embedding = await generateEmbedding(embeddingText, 'document');
           } catch (error) {
             summary.embeddingFailures += 1;
             recordToolResultIndexFailure();

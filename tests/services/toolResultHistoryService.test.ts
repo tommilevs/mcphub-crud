@@ -99,6 +99,16 @@ describe('ToolResultHistoryService', () => {
     );
   });
 
+  it.each([{content:[]}, {content:[{type:'text',text:'wrapper'}]}])('makes structured MCP results searchable without rewriting RAW (%j)', async ({content}) => {
+    const repository = createRepository();
+    repository.create.mockImplementation(async record => record);
+    const result = {content,structuredContent:{device:'gpu-7',state:'healthy'}};
+    const saved = await new ToolResultHistoryService(repository).capture({server:'fixture',tool:'status',durationMs:1,status:'success',result});
+    expect(saved?.raw).toBe(JSON.stringify(result));
+    expect(saved?.rawText).toContain('gpu-7');
+    expect(saved?.rawText).toContain('healthy');
+  });
+
   it('returns UTF-8 byte ranges and rejects invalid boundaries', () => {
     const service = new ToolResultHistoryService(createRepository());
     const raw = 'A🙂B';

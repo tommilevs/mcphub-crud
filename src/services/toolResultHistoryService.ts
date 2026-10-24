@@ -104,12 +104,14 @@ export class ToolResultHistoryService {
     if (!result || typeof result !== 'object') return String(result ?? '');
     const content = (result as { content?: unknown }).content;
     if (!Array.isArray(content)) return JSON.stringify(result);
-    return content
+    const text = content
       .filter((block): block is { text: string } => {
         return !!block && typeof block === 'object' && typeof (block as { text?: unknown }).text === 'string';
       })
       .map((block) => block.text)
       .join('\n');
+    const structured = (result as { structuredContent?: unknown }).structuredContent;
+    return structured === undefined ? text : [text, JSON.stringify(structured)].filter(Boolean).join('\n');
   }
 
   getByteRange(raw: string, start: number, end: number): Buffer {
