@@ -308,6 +308,7 @@ const ToolResultsPage: React.FC = () => {
   const [stats, setStats] = useState<ToolResultStats | null>(null);
   const [pagination, setPagination] = useState<PaginationInfo | null>(null);
   const [page, setPage] = useState(1);
+  const historyRequestRef = useRef(0);
   const initialAttribution = Object.fromEntries(['modelId', 'taskId', 'traceId', 'branchId'].map((key) => [key, searchParams.get(key) || undefined]));
   const [draft, setDraft] = useState<ToolResultFilter>({ ...initialAttribution, sessionId: initialSessionId, conversationId: initialConversationId });
   const [filter, setFilter] = useState<ToolResultFilter>({ ...initialAttribution, sessionId: initialSessionId, conversationId: initialConversationId });
@@ -329,16 +330,23 @@ const ToolResultsPage: React.FC = () => {
   const [reindexMessage, setReindexMessage] = useState('');
 
   const load = useCallback(async () => {
+    const requestId = ++historyRequestRef.current;
     setLoading(true); setError('');
-    const [list, totals] = await Promise.all([getToolResults(page, 20, filter), getToolResultStats(filter)]);
-    if (list.success && list.data) {
-      setItems(list.data);
-      setRetrievalDiagnostics(filter.query && list.meta ? list.meta : null);
-      setPagination(list.pagination || (filter.query ? { page: 1, limit: 20, total: list.data.length, totalPages: 1, hasNextPage: false, hasPrevPage: false } : null));
+    try {
+      const [list, totals] = await Promise.all([getToolResults(page, 20, filter), getToolResultStats(filter)]);
+      if (requestId !== historyRequestRef.current) return;
+      if (list.success && list.data) {
+        setItems(list.data);
+        setRetrievalDiagnostics(filter.query && list.meta ? list.meta : null);
+        setPagination(list.pagination || (filter.query ? { page: 1, limit: 20, total: list.data.length, totalPages: 1, hasNextPage: false, hasPrevPage: false } : null));
+      }
+      else setError(list.message || t('toolResults.fetchError'));
+      if (totals.success && totals.data) setStats(totals.data);
+    } catch (cause) {
+      if (requestId === historyRequestRef.current) setError(cause instanceof Error ? cause.message : t('toolResults.fetchError'));
+    } finally {
+      if (requestId === historyRequestRef.current) setLoading(false);
     }
-    else setError(list.message || t('toolResults.fetchError'));
-    if (totals.success && totals.data) setStats(totals.data);
-    setLoading(false);
   }, [page, filter, t]);
 
   const runCompare = async () => {
@@ -412,7 +420,7 @@ const ToolResultsPage: React.FC = () => {
     }
   };
 
-  useEffect(() => () => { timelineRequestRef.current += 1; }, [resultId]);
+  useEffect(() => () => { timelineRequestRef.current += 1; historyRequestRef.current += 1; }, [resultId]);
   useEffect(() => { if (!resultId) void load(); }, [load, resultId]);
   if (resultId) return <ToolResultDetailView resultId={resultId} />;
 
