@@ -1,4 +1,5 @@
 import express from 'express';
+import request from 'supertest';
 import { jest } from '@jest/globals';
 
 const routeHandler = jest.fn();
@@ -487,4 +488,25 @@ it('registers metrics at the root independently of dashboard API authentication'
   const app = express();
   await initRoutes(app);
   expect(findAppRoute(app, 'get', '/metrics')).toBeDefined();
+});
+
+
+describe('tool call route compatibility', () => {
+  it('dispatches the legacy call URL through the authenticated API router', async () => {
+    const app = express();
+    app.use(express.json());
+    await initRoutes(app);
+    routeHandler.mockImplementation((...args: unknown[]) => {
+      const [req, res] = args as [express.Request, express.Response];
+      res.json(req.params);
+    });
+    try {
+      const result = await request(app).post('/api/tools/call/weather').send({toolName:'forecast',arguments:{}});
+      expect(result.status).toBe(200);
+      expect(result.body).toEqual({server:'weather'});
+      const direct = await request(app).post('/api/tools/weather/forecast').send({});
+      expect(direct.status).toBe(200);
+      expect(direct.body).toEqual({serverName:'weather',toolName:'forecast'});
+    } finally { routeHandler.mockReset(); }
+  });
 });

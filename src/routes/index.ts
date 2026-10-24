@@ -602,7 +602,14 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
 
   // OpenAPI-compatible tool execution endpoints
   app.get(`${config.basePath}/api/tools/:serverName/:toolName`, executeToolViaOpenAPI);
-  app.post(`${config.basePath}/api/tools/:serverName/:toolName`, executeToolViaOpenAPI);
+  app.post(`${config.basePath}/api/tools/:serverName/:toolName`, (req, res, next) => {
+    // Preserve the existing authenticated /tools/call/:server endpoint below.
+    if (req.params.serverName === 'call') {
+      next();
+      return;
+    }
+    return executeToolViaOpenAPI(req, res);
+  });
   app.get(`${config.basePath}/api/:name/tools/:serverName/:toolName`, executeToolViaOpenAPI);
   app.post(`${config.basePath}/api/:name/tools/:serverName/:toolName`, executeToolViaOpenAPI);
 
