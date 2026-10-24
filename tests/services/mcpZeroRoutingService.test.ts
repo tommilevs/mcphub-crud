@@ -34,4 +34,15 @@ describe('mcpZeroRoutingService', () => {
       mcpZero: { serverRank: 1, toolRank: 1, serverScore: 0.9, toolScore: 0.7 },
     });
   });
+  it('counts each tool only once per ranking source', () => {
+    const repeated = {serverName:'mail',toolName:'send',similarity:0.9};
+    const shared = {serverName:'maps',toolName:'route',similarity:0.8};
+    const zero = {candidate:shared,serverRank:1,serverScore:0.9,toolRank:1,toolScore:0.8};
+    const expected = fuseMcpZeroCandidates([repeated,shared],[zero],10);
+    const actual = fuseMcpZeroCandidates([repeated,repeated,shared],[zero,zero],10);
+    expect(actual.map(item=>item.toolName)).toEqual(expected.map(item=>item.toolName));
+    expect(actual.find(item=>item.toolName==='send')?.similarity).toBe(expected.find(item=>item.toolName==='send')?.similarity);
+    expect(actual.find(item=>item.toolName==='route')?.similarity).toBe(expected.find(item=>item.toolName==='route')?.similarity);
+  });
+
 });

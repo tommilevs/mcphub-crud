@@ -72,8 +72,20 @@ export const fuseMcpZeroCandidates = <T extends RoutingCandidate>(
     fused.set(key, existing);
   };
 
-  baseline.forEach((candidate, index) => add(candidate, index + 1, 'baseline'));
-  mcpZero.forEach((entry, index) => add(entry.candidate, index + 1, 'mcpZero', entry));
+  const baselineSeen = new Set<string>();
+  baseline.forEach(candidate => {
+    const key = identityFor(candidate);
+    if (baselineSeen.has(key)) return;
+    baselineSeen.add(key);
+    add(candidate, baselineSeen.size, 'baseline');
+  });
+  const mcpZeroSeen = new Set<string>();
+  mcpZero.forEach(entry => {
+    const key = identityFor(entry.candidate);
+    if (mcpZeroSeen.has(key)) return;
+    mcpZeroSeen.add(key);
+    add(entry.candidate, mcpZeroSeen.size, 'mcpZero', entry);
+  });
 
   return [...fused.values()]
     .sort((left, right) => right.score - left.score)
