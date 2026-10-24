@@ -87,14 +87,16 @@ export const getToolResultStats = (filter: ToolResultFilter): Promise<ApiRespons
 export const getToolResultTimeline = (
   sessionId: string,
   limit = 100,
-): Promise<ApiResponse<ToolResultSummary[]>> =>
-  apiGet(`/tool-results/timeline/${encodeURIComponent(sessionId)}?limit=${limit}`);
+  page = 1,
+): Promise<ApiResponse<ToolResultSummary[]> & { pagination?: PaginationInfo }> =>
+  apiGet(`/tool-results/timeline/${encodeURIComponent(sessionId)}?${query({limit,page})}`);
 
 export const getToolResultConversationTimeline = (
   conversationId: string,
   limit = 100,
-): Promise<ApiResponse<ToolResultSummary[]>> =>
-  apiGet(`/tool-results/conversation-timeline/${encodeURIComponent(conversationId)}?limit=${limit}`);
+  page = 1,
+): Promise<ApiResponse<ToolResultSummary[]> & { pagination?: PaginationInfo }> =>
+  apiGet(`/tool-results/conversation-timeline/${encodeURIComponent(conversationId)}?${query({limit,page})}`);
 
 export const getToolResultLineage = (resultId: string): Promise<ApiResponse<ToolResultLineage>> =>
   apiGet(`/tool-results/${encodeURIComponent(resultId)}/lineage`);

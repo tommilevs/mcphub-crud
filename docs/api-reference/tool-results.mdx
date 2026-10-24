@@ -38,8 +38,8 @@ The reindex endpoint accepts `{ "limit": 25, "onlyMissing": true }` and rebuilds
 ## Sessions, lineage, pinning, and comparison
 
 ```http
-GET /api/tool-results/timeline/:sessionId?limit=100
-GET /api/tool-results/conversation-timeline/:conversationId?limit=100
+GET /api/tool-results/timeline/:sessionId?page=1&limit=100
+GET /api/tool-results/conversation-timeline/:conversationId?page=1&limit=100
 GET /api/tool-results/:resultId/lineage
 POST /api/tool-results/compare
 PATCH /api/tool-results/:resultId/pin

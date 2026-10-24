@@ -320,6 +320,7 @@ const ToolResultsPage: React.FC = () => {
   const [comparisonRawError, setComparisonRawError] = useState('');
   const [timeline, setTimeline] = useState<ToolResultSummary[] | null>(null);
   const [timelineLoading, setTimelineLoading] = useState(false);
+  const [timelinePagination, setTimelinePagination] = useState<PaginationInfo | null>(null);
   const [timelineError, setTimelineError] = useState('');
   const [timelineContext, setTimelineContext] = useState<{ kind: 'session' | 'conversation'; id: string } | null>(null);
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<ToolResultSearchDiagnostics | null>(null);
@@ -379,24 +380,27 @@ const ToolResultsPage: React.FC = () => {
     setComparisonRawLoading(false);
   };
 
-  const runTimeline = async () => {
+  const runTimeline = async (timelinePage = 1, existingContext: typeof timelineContext = null) => {
     const sessionId = filter.sessionId?.trim();
     const conversationId = filter.conversationId?.trim();
-    const context = sessionId
+    const context = existingContext ?? (sessionId
       ? { kind: 'session' as const, id: sessionId }
       : conversationId
         ? { kind: 'conversation' as const, id: conversationId }
-        : null;
+        : null);
     if (!context) return;
     setTimelineLoading(true);
     setTimelineError('');
     try {
       const response = context.kind === 'session'
-        ? await getToolResultTimeline(context.id)
-        : await getToolResultConversationTimeline(context.id);
-      if (response.success && response.data) setTimeline(response.data);
+        ? await getToolResultTimeline(context.id, 100, timelinePage)
+        : await getToolResultConversationTimeline(context.id, 100, timelinePage);
+      if (response.success && response.data) {
+        setTimeline(response.data);
+        setTimelinePagination(response.pagination || null);
+        setTimelineContext(context);
+      }
       else setTimelineError(response.message || t('toolResults.fetchError'));
-      setTimelineContext(context);
     } catch (cause) {
       setTimelineError(cause instanceof Error ? cause.message : t('toolResults.fetchError'));
     } finally {
@@ -440,10 +444,11 @@ const ToolResultsPage: React.FC = () => {
     {error && <div className="hub-card p-4 text-sm text-red-500">{error}</div>}
     {timelineError && !timeline && <div className="hub-card p-4 text-sm text-red-500">{timelineError}</div>}
     {timeline && <div className="hub-card p-3">
-      <div className="flex items-center justify-between gap-2"><div><div className="text-sm font-medium">{t('toolResults.timeline')}</div><div className="hub-mono text-xs text-[var(--hub-ink-3)] truncate">{timelineContext?.id}</div></div><button className="hub-btn" onClick={() => { setTimeline(null); setTimelineContext(null); }}>{t('common.close')}</button></div>
+      <div className="flex items-center justify-between gap-2"><div><div className="text-sm font-medium">{t('toolResults.timeline')}</div><div className="hub-mono text-xs text-[var(--hub-ink-3)] truncate">{timelineContext?.id}</div></div><button className="hub-btn" onClick={() => { setTimeline(null); setTimelineContext(null); setTimelinePagination(null); }}>{t('common.close')}</button></div>
       {timelineError && <div className="mt-2 text-sm text-red-500">{timelineError}</div>}
       {!timelineLoading && timeline.length === 0 && <div className="mt-3 text-sm text-[var(--hub-ink-3)]">{t('toolResults.timelineEmpty')}</div>}
       <div className="mt-3 space-y-2">{timeline.map((item) => <Link key={item.resultId} to={`/tool-results/${item.resultId}`} className="block rounded border border-[var(--hub-line)] p-2 hover:bg-[var(--hub-surface-hover)]"><div className="flex items-center justify-between gap-2 text-xs"><span className="font-medium">{item.server} / {item.tool}</span><span className={item.status === 'error' ? 'text-red-500' : 'text-emerald-500'}>{item.status}</span></div><div className="mt-1 text-xs text-[var(--hub-ink-3)]">{new Date(item.timestamp).toLocaleString()} · {item.durationMs} ms · {bytes(item.rawBytes)}</div></Link>)}</div>
+      {timelinePagination && <Pagination currentPage={timelinePagination.page} totalPages={Math.max(1, timelinePagination.totalPages)} onPageChange={nextPage => void runTimeline(nextPage, timelineContext)} disabled={timelineLoading} />}
     </div>}
     <ExperienceMemoryPanel resultIds={selected}/>
     {selected.length>0&&<DatasetBuilderPanel resultIds={selected}/>}

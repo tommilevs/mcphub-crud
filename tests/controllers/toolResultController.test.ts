@@ -205,6 +205,26 @@ describe('toolResultController', () => {
     expect(payload.pagination).toMatchObject({total:1,page:1,limit:20});
   });
 
+  it.each([
+    {handler:getToolResultTimeline,params:{sessionId:'session'},filter:{sessionId:'session'}},
+    {handler:getToolResultConversationTimeline,params:{conversationId:'conversation'},filter:{conversationId:'conversation'}},
+  ])('paginates the complete timeline ($params)', async ({handler,params,filter}) => {
+    repository.findPaginated.mockResolvedValue({data:[],total:101,page:2,limit:50,totalPages:3});
+    const res=makeRes();
+    await handler(makeReq({params,query:{page:'2',limit:'50'}}),res);
+    expect(repository.findPaginated).toHaveBeenCalledWith(2,50,filter);
+    expect(res.json).toHaveBeenCalledWith(expect.objectContaining({pagination:expect.objectContaining({page:2,total:101,totalPages:3,hasNextPage:true,hasPrevPage:true})}));
+  });
+
+  it.each(['0','-1','invalid','1.5'])('rejects invalid timeline page %s', async page => {
+    for(const handler of [getToolResultTimeline,getToolResultConversationTimeline]){
+      const res=makeRes();
+      await handler(makeReq({params:{sessionId:'session',conversationId:'conversation'},query:{page}}),res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    }
+    expect(repository.findPaginated).not.toHaveBeenCalled();
+  });
+
   it('returns bounded parent and child lineage without RAW', async () => {
     repository.findById
       .mockResolvedValueOnce({ resultId: 'child', parentResultId: 'parent', raw: 'hidden' })
