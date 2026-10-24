@@ -103,13 +103,20 @@ machine-DPAPI enrollment/reference resolution/deletion, automatic child restarts
 without dashboard polling and management during a silent stdio exchange. Only
 synthetic fixture values are used. It verifies removal of the temporary service
 and its owned test directory; existing service registrations and port 3000 are
-not changed. This test does not prove bundled gateway, tray or installer behavior.
+not changed. It also force-kills the service with SCM recovery enabled, verifies
+a new service PID, and checks that an intentional stop stays stopped. This test
+does not prove bundled gateway, tray or installer behavior.
 
 The Windows Tauri installer can include a self-contained gateway runtime. Run
 `native/package-windows.ps1` before `cargo tauri build` to stage portable
 `node.exe`, the compiled backend `dist`, frontend `frontend/dist`, and production `node_modules`. The installed
 Windows service starts and watches that gateway from the machine runtime
-directory, so it remains available across logoff and tray closure. The tray
+directory, so it remains available across logoff and tray closure. A gateway
+started by the service is attached to a kill-on-close Job Object before it runs;
+service termination also terminates that gateway's descendants. An existing
+external gateway is not adopted into this job. Core Windows tests verify both
+normal owner drop and a hard-killed owner without Rust destructor execution.
+The tray
 reuses an already listening gateway and only starts a fallback process when
 the service resources are absent. Development and host-managed deployments can
 run the Node gateway separately (`pnpm backend:dev` or `pnpm backend:build`

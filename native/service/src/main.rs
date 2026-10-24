@@ -23,13 +23,15 @@ use std::io::{self, BufRead, BufReader};
 use std::{thread, time::Duration};
 
 #[cfg(windows)]
+use mcphub_runtime_core::OwnedChild as Child;
+#[cfg(windows)]
 use std::ffi::OsString;
 #[cfg(windows)]
 use std::io::{Read, Write};
 #[cfg(windows)]
 use std::net::{SocketAddr, TcpStream};
 #[cfg(windows)]
-use std::process::{Child, Command, Stdio};
+use std::process::{Command, Stdio};
 #[cfg(windows)]
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -86,7 +88,8 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
     if !settings.exists() {
         std::fs::write(&settings, b"{\"mcpServers\":{}}\n").ok()?;
     }
-    let child = Command::new(node)
+    let mut command = Command::new(node);
+    command
         .arg(backend)
         .current_dir(resource_dir)
         .stdin(Stdio::null())
@@ -95,9 +98,8 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
         .env("PORT", "3000")
         .env("DISABLE_WEB", "false")
         .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
-        .env("MCPHUB_SETTING_PATH", settings)
-        .spawn()
-        .ok()?;
+        .env("MCPHUB_SETTING_PATH", settings);
+    let child = Child::spawn(&mut command).ok()?;
     Some((child, Instant::now()))
 }
 

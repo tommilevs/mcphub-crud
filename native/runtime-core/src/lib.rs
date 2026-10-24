@@ -20,6 +20,44 @@ pub mod secret_store;
 mod stdio;
 pub use stdio::StdioSession;
 
+/// A non-stdio child whose complete process tree belongs to this host.
+/// Job ownership also survives abrupt host termination via kernel handle cleanup.
+#[cfg(windows)]
+pub struct OwnedChild {
+    child: Child,
+    _job: windows::JobHandle,
+}
+#[cfg(windows)]
+impl OwnedChild {
+    pub fn spawn(command: &mut Command) -> std::io::Result<Self> {
+        use std::os::windows::process::CommandExt;
+        use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
+        command.creation_flags(CREATE_NO_WINDOW | CREATE_SUSPENDED);
+        let mut child = command.spawn()?;
+        match windows::assign_to_job(child.id()) {
+            Ok(job) => Ok(Self { child, _job: job }),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                Err(std::io::Error::other(error))
+            }
+        }
+    }
+}
+#[cfg(windows)]
+impl std::ops::Deref for OwnedChild {
+    type Target = Child;
+    fn deref(&self) -> &Child {
+        &self.child
+    }
+}
+#[cfg(windows)]
+impl std::ops::DerefMut for OwnedChild {
+    fn deref_mut(&mut self) -> &mut Child {
+        &mut self.child
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ManagedProcessSpec {
     #[serde(default)]
