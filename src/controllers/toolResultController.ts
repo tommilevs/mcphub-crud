@@ -114,7 +114,7 @@ export const getToolResultTimeline = async (req: Request, res: Response): Promis
     return;
   }
   const result = await repository.findPaginated(1, limit, { sessionId });
-  res.json({ success: true, data: result.data.map(publicRecord), pagination: { ...result, totalPages: 1 } });
+  res.json({ success: true, data: result.data.map(publicRecord), pagination: { page: result.page, limit: result.limit, total: result.total, totalPages: 1 } });
 };
 
 export const getToolResultConversationTimeline = async (req: Request, res: Response): Promise<void> => {
@@ -128,7 +128,7 @@ export const getToolResultConversationTimeline = async (req: Request, res: Respo
     return;
   }
   const result = await repository.findPaginated(1, limit, { conversationId });
-  res.json({ success: true, data: result.data.map(publicRecord), pagination: { ...result, totalPages: 1 } });
+  res.json({ success: true, data: result.data.map(publicRecord), pagination: { page: result.page, limit: result.limit, total: result.total, totalPages: 1 } });
 };
 
 export const getToolResultLineage = async (req: Request, res: Response): Promise<void> => {

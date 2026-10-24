@@ -174,6 +174,20 @@ describe('toolResultController', () => {
     expect(repository.findPaginated).toHaveBeenCalledWith(1, 40, { conversationId: 'c-1' });
   });
 
+  it.each([
+    {handler:getToolResultTimeline,params:{sessionId:'session'}},
+    {handler:getToolResultConversationTimeline,params:{conversationId:'conversation'}},
+  ])('omits RAW from the entire timeline response ($params)', async ({handler,params}) => {
+    repository.findPaginated.mockResolvedValue({data:[{resultId:'id',raw:'RAW_PAYLOAD_MARKER',rawText:'RAW_TEXT_MARKER'}],total:1,page:1,limit:20,totalPages:1});
+    const res=makeRes();
+    await handler(makeReq({params,query:{limit:'20'}}),res);
+    const payload=(res.json as jest.Mock).mock.calls[0][0];
+    expect(JSON.stringify(payload).includes('RAW_PAYLOAD_MARKER')).toBe(false);
+    expect(JSON.stringify(payload).includes('RAW_TEXT_MARKER')).toBe(false);
+    expect(payload.data[0].resultId).toBe('id');
+    expect(payload.pagination).toMatchObject({total:1,page:1,limit:20});
+  });
+
   it('returns bounded parent and child lineage without RAW', async () => {
     repository.findById
       .mockResolvedValueOnce({ resultId: 'child', parentResultId: 'parent', raw: 'hidden' })
