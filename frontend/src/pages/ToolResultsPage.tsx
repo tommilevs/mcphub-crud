@@ -328,6 +328,7 @@ const ToolResultsPage: React.FC = () => {
   const [retrievalDiagnostics, setRetrievalDiagnostics] = useState<ToolResultSearchDiagnostics | null>(null);
   const [reindexing, setReindexing] = useState(false);
   const [reindexMessage, setReindexMessage] = useState('');
+  const [reindexCursor, setReindexCursor] = useState<string | undefined>();
 
   const load = useCallback(async () => {
     const requestId = ++historyRequestRef.current;
@@ -362,8 +363,9 @@ const ToolResultsPage: React.FC = () => {
     setReindexing(true);
     setReindexMessage('');
     try {
-      const response = await reindexToolResults(25, true);
+      const response = await reindexToolResults(25, true, reindexCursor);
       if (response.success && response.data) {
+        setReindexCursor(response.data.nextCursor);
         setReindexMessage(`${response.data.indexed} indexed · ${response.data.remaining} remaining · ${response.data.skipped} skipped · ${response.data.embeddingFailures} embedding failures`);
       } else {
         setReindexMessage(response.message || t('toolResults.reindexError'));

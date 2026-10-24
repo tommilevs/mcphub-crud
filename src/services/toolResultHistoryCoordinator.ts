@@ -27,6 +27,7 @@ export interface ToolResultHistoryCapture {
 export const TOOL_RESULT_CHUNK_CHARS = 12_000;
 
 export interface ToolResultReindexSummary {
+  nextCursor?: string;
   requested: number;
   selected: number;
   indexed: number;
@@ -63,6 +64,7 @@ export const chunkToolResultText = (
 export const reindexToolResultHistory = async (
   limit = 25,
   onlyMissing = true,
+  afterResultId?: string,
 ): Promise<ToolResultReindexSummary> => {
   if (reindexInFlight) throw new Error('A tool result reindex pass is already running');
   const repository = getToolResultRepository();
@@ -79,7 +81,7 @@ export const reindexToolResultHistory = async (
     remaining: 0,
   };
   try {
-    const records = await repository.findForReindex(limit, onlyMissing);
+    const records = await repository.findForReindex(limit, onlyMissing, afterResultId);
     summary.selected = records.length;
     for (const record of records) {
       let text = record.rawText;
@@ -131,7 +133,9 @@ export const reindexToolResultHistory = async (
       }
       summary.indexed += 1;
     }
-    summary.remaining = await repository.countForReindex(onlyMissing);
+    const lastResultId = records[records.length - 1]?.resultId ?? afterResultId;
+    summary.remaining = await repository.countForReindex(onlyMissing, lastResultId);
+    if (summary.remaining > 0 && records.length > 0) summary.nextCursor = lastResultId;
     return summary;
   } finally {
     reindexInFlight = false;

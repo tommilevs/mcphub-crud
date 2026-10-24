@@ -307,6 +307,11 @@ export const reindexToolResults = async (req: Request, res: Response): Promise<v
     return;
   }
   const limit = req.body?.limit === undefined ? 25 : Number(req.body.limit);
+  const afterResultId = req.body?.afterResultId;
+  if (afterResultId !== undefined && (typeof afterResultId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(afterResultId))) {
+    res.status(400).json({ success: false, message: 'Invalid reindex cursor' });
+    return;
+  }
   const rawOnlyMissing = req.body?.onlyMissing;
   const onlyMissing = rawOnlyMissing === undefined ? true : rawOnlyMissing;
   if (!Number.isInteger(limit) || limit < 1 || limit > 100 || typeof onlyMissing !== 'boolean') {
@@ -314,7 +319,7 @@ export const reindexToolResults = async (req: Request, res: Response): Promise<v
     return;
   }
   try {
-    res.json({ success: true, data: await reindexToolResultHistory(limit, onlyMissing) });
+    res.json({ success: true, data: await reindexToolResultHistory(limit, onlyMissing, afterResultId) });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Tool result reindex failed';
     res.status(message.includes('already running') ? 409 : 503).json({ success: false, message });

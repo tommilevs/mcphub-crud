@@ -265,4 +265,10 @@ describe('toolResultController', () => {
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true, data: expect.objectContaining({ sameRaw: true }) }));
     expect((res.json as jest.Mock).mock.calls[0][0].data.results[0]).not.toHaveProperty('raw');
   });
+  it.each(['invalid',5,''])('rejects invalid rebuild cursor %s',async afterResultId=>{
+    const res=makeRes();
+    await reindexToolResults(makeReq({body:{afterResultId}}),res);
+    expect(res.status).toHaveBeenCalledWith(400);
+  });
+
 });

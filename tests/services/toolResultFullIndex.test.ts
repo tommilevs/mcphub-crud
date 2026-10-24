@@ -1,7 +1,9 @@
 const mockIndexChunks=jest.fn().mockResolvedValue(undefined);
 const mockEmbedding=jest.fn().mockResolvedValue(null);
 const mockRecord={raw:null as string|null,resultId:'fixture',server:'server',tool:'read',rawText:'x'.repeat(100000)+' UNIQUE_TAIL_EVIDENCE'};
-jest.mock('../../src/services/toolResultHistoryRegistry.js',()=>({getToolResultRepository:()=>({findForReindex:async()=>[mockRecord],countForReindex:async()=>0,indexChunks:mockIndexChunks})}));
+const mockFindForReindex=jest.fn(async (_limit?:number,_missing?:boolean,_after?:string)=>[mockRecord]);
+const mockCountForReindex=jest.fn(async (_missing?:boolean,_after?:string)=>0);
+jest.mock('../../src/services/toolResultHistoryRegistry.js',()=>({getToolResultRepository:()=>({findForReindex:mockFindForReindex,countForReindex:mockCountForReindex,indexChunks:mockIndexChunks})}));
 jest.mock('../../src/services/vectorSearchService.js',()=>({generateEmbedding:(...args:unknown[])=>mockEmbedding(...args)}));
 import {reindexToolResultHistory,ToolResultHistoryCoordinator} from '../../src/services/toolResultHistoryCoordinator.js';
 it.each(['reindex','capture'])('%s indexes the full result while keeping embedding input bounded',async mode=>{
@@ -31,4 +33,21 @@ it.each(['', 'legacy wrapper'])('reindexes legacy structured RAW without modifyi
   expect(mockRecord.raw).toBe(raw);
   expect(mockRecord.rawText).toBe(rawText);
  }finally{Object.assign(mockRecord,previous);}
+});
+
+it('continues a full rebuild after its last processed result instead of repeating the first batch',async()=>{
+ const rows=[1,2].map(i=>({...mockRecord,resultId:`00000000-0000-4000-8000-${String(i).padStart(12,'0')}`,rawText:'fixture'}));
+ mockFindForReindex.mockImplementation(async(limit=1,_missing,after)=>rows.filter(row=>!after||row.resultId>after).slice(0,limit));
+ mockCountForReindex.mockImplementation(async(_missing,after)=>rows.filter(row=>!after||row.resultId>after).length);
+ mockIndexChunks.mockClear();
+ try {
+  const first=await reindexToolResultHistory(1,false);
+  expect(first.nextCursor).toBe(rows[0].resultId);
+  const second=await reindexToolResultHistory(1,false,first.nextCursor);
+  expect(second.remaining).toBe(0);
+  expect(second.nextCursor).toBeUndefined();
+  expect(mockIndexChunks.mock.calls.map(call=>call[0])).toEqual(rows.map(row=>row.resultId));
+ }finally{
+  mockFindForReindex.mockImplementation(async()=>[mockRecord]);mockCountForReindex.mockImplementation(async()=>0);
+ }
 });

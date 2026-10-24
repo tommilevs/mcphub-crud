@@ -155,4 +155,17 @@ describe('ToolResultRepositoryDb', () => {
     expect(sql).toContain('tool_result_chunks');
     expect(params).toEqual([true]);
   });
+  it('binds stable result ID cursors for selecting and counting rebuild candidates', async()=>{
+    const query=jest.fn().mockResolvedValue([]);
+    const repository=new ToolResultRepositoryDb({query} as never);
+    const cursor='00000000-0000-4000-8000-000000000001';
+    await repository.findForReindex(25,false,cursor);
+    expect(query.mock.calls[0][0]).toContain('result.result_id > $3::uuid');
+    expect(query.mock.calls[0][0]).toContain('ORDER BY result.result_id ASC');
+    expect(query.mock.calls[0][1]).toEqual([25,false,cursor]);
+    await repository.countForReindex(false,cursor);
+    expect(query.mock.calls[1][0]).toContain('result.result_id > $2::uuid');
+    expect(query.mock.calls[1][1]).toEqual([false,cursor]);
+  });
+
 });

@@ -170,7 +170,7 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     return { data: rows.map(mapRow), total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
-  async findForReindex(limit: number, onlyMissing: boolean): Promise<ToolResultRecord[]> {
+  async findForReindex(limit: number, onlyMissing: boolean, afterResultId?: string): Promise<ToolResultRecord[]> {
     const rows = await this.dataSource.query<ToolResultRow[]>(
       `SELECT ${SELECT_COLUMNS}
        WHERE result.payload_available = TRUE
@@ -178,14 +178,15 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
          AND ($2::boolean = FALSE OR NOT EXISTS (
            SELECT 1 FROM tool_result_chunks chunks WHERE chunks.result_id = result.result_id
          ))
-       ORDER BY result.timestamp ASC, result.result_id ASC
+       ${afterResultId ? 'AND result.result_id > $3::uuid' : ''}
+       ORDER BY result.result_id ASC
        LIMIT $1`,
-      [limit, onlyMissing],
+      [limit, onlyMissing, ...(afterResultId ? [afterResultId] : [])],
     );
     return rows.map(mapRow);
   }
 
-  async countForReindex(onlyMissing: boolean): Promise<number> {
+  async countForReindex(onlyMissing: boolean, afterResultId?: string): Promise<number> {
     const rows = await this.dataSource.query<Array<{ count: string }>>(
       `SELECT COUNT(*)::text AS count
        FROM tool_results result
@@ -193,8 +194,9 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
          AND result.raw_text IS NOT NULL
          AND ($1::boolean = FALSE OR NOT EXISTS (
            SELECT 1 FROM tool_result_chunks chunks WHERE chunks.result_id = result.result_id
-         ))`,
-      [onlyMissing],
+         ))
+         ${afterResultId ? 'AND result.result_id > $2::uuid' : ''}`,
+      [onlyMissing, ...(afterResultId ? [afterResultId] : [])],
     );
     return Number(rows[0]?.count ?? 0);
   }

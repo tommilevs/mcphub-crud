@@ -24,8 +24,8 @@ export interface ToolResultRepository {
   enforceRetention(limit: number, username?: string): Promise<number>;
   findById(resultId: string): Promise<ToolResultRecord | null>;
   findPaginated(page: number, limit: number, filter?: ToolResultFilter): Promise<ToolResultPage>;
-  findForReindex(limit: number, onlyMissing: boolean): Promise<ToolResultRecord[]>;
-  countForReindex(onlyMissing: boolean): Promise<number>;
+  findForReindex(limit: number, onlyMissing: boolean, afterResultId?: string): Promise<ToolResultRecord[]>;
+  countForReindex(onlyMissing: boolean, afterResultId?: string): Promise<number>;
   search(query: string, limit: number, filter?: ToolResultFilter): Promise<ToolResultRecord[]>;
   indexContent?(resultId: string, content: string, embedding: number[] | null): Promise<void>;
   indexChunks?(
