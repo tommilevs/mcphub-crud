@@ -1,5 +1,5 @@
 import {countTokens} from '../utils/tokenCost.js';
-import {originalResultWindows} from './originalResultWindows.js';
+import {originalResultWindows,precedingDiffHeader} from './originalResultWindows.js';
 export interface OriginalResultFragment {start:number;end:number;text:string;score:number;}
 export interface ResultRetrievalOptions {objective:string;maxOutputTokens:number;minTokens?:number;}
 const savedResults=new WeakMap<object,{resultId:string;payloadAvailable:boolean;raw?:string|null}>();
@@ -67,7 +67,13 @@ export async function retrieveOriginalResult<T extends Record<string,any>>(resul
   if(!fragments.length)return result;
   const selected:typeof fragments=[];
   for(const fragment of fragments)if(!selected.some(hit=>hit.text===fragment.text||(hit.source===fragment.source&&hit.block===fragment.block&&hit.start<fragment.end&&fragment.start<hit.end)))selected.push(fragment);
-  fragments.splice(0,fragments.length,...selected);
+  const context:Fragment[]=[];
+  for(const fragment of selected){
+   const source=sources.find(item=>item.source===fragment.source&&item.block===fragment.block);
+   const header=source?precedingDiffHeader(source.text,fragment.start):null;
+   if(header&&![...selected,...context].some(hit=>hit.source===fragment.source&&hit.block===fragment.block&&hit.start<header.end&&header.start<hit.end))context.push({...fragment,...header,score:0});
+  }
+  fragments.splice(0,fragments.length,...selected,...context);
   const makeReply=()=>({
    content:[{type:'text',text:JSON.stringify({representation:'original-fragments',format_version:1,result_id:saved.resultId,offset_units:'UTF-16 code units; end exclusive',fragments:[...fragments].sort(order).map(({score:_score,...hit})=>hit),full_result_tool:'get_tool_result'})}],
    ...(original.isError!==undefined?{isError:original.isError}:{}),

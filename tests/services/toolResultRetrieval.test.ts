@@ -84,3 +84,14 @@ it('uses retained structured evidence rather than a later-mutated object',async(
  expect(JSON.stringify(reply).includes('saved diagnostic')).toBe(true);expect(JSON.stringify(reply).includes('invented after capture')).toBe(false);
  expect(reply.isError).toBe(true);
 });
+it('keeps the matching diff file header as exact context for a late hunk',async()=>{
+ const header='diff --git a/config.ini b/config.ini\n--- a/config.ini\n+++ b/config.ini\n';
+ const text=header+'@@ -1 +1 @@\n-old\n+new\n'.repeat(3000)+'@@ -5000 +5000 @@\n-peer_access=true\n+peer_access=false\n';
+ const result={content:[{type:'text',text}]};rememberSavedResult(result,'saved',true,JSON.stringify(result));
+ const reply=await retrieveOriginalResult(result,{objective:'peer_access=false',maxOutputTokens:3000});
+ const body=JSON.parse(reply.content[0].text);
+ expect(body.fragments.some((fragment:any)=>fragment.text.includes('diff --git a/config.ini b/config.ini'))).toBe(true);
+ expect(body.fragments.some((fragment:any)=>fragment.text.includes('+peer_access=false'))).toBe(true);
+ for(const fragment of body.fragments)expect(text.slice(fragment.start,fragment.end)).toBe(fragment.text);
+ expect(await countTokens(JSON.stringify(reply))).toBeLessThanOrEqual(3000);
+});

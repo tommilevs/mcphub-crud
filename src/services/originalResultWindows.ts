@@ -1,4 +1,17 @@
 export interface OriginalWindow {start:number;end:number;text:string;}
+/** Exact preceding git file header; never substitute a header from another file. */
+export function precedingDiffHeader(text:string,before:number):OriginalWindow|null{
+ const files=/^diff --git /gm;let match:RegExpExecArray|null,start=-1;
+ while((match=files.exec(text))){if(match.index>before)break;start=match.index;}
+ if(start<0)return null;
+ const nextFile=text.indexOf('\ndiff --git ',start+1);
+ const hunks=/^@@ /gm;hunks.lastIndex=start;const hunk=hunks.exec(text);
+ let end=Math.min(text.length,start+512,nextFile<0?text.length:nextFile+1,hunk?.index??text.length);
+ const newline=text.lastIndexOf('\n',end-1);if(newline>=start)end=newline+1;
+ if(/[\uD800-\uDBFF]/.test(text[end-1])&&/[\uDC00-\uDFFF]/.test(text[end]))end--;
+ if(text[end-1]==='\r'&&text[end]==='\n')end--;
+ return end>start?{start,end,text:text.slice(start,end)}:null;
+}
 /** Structural boundaries are preferences, never permission to rewrite source text. */
 export function originalResultWindows(text:string,maxChars:number,bodyStart=0):OriginalWindow[]{
  if(!Number.isSafeInteger(maxChars)||maxChars<2||!Number.isSafeInteger(bodyStart)||bodyStart<0||bodyStart>text.length)throw new RangeError('Invalid original window size or body offset');

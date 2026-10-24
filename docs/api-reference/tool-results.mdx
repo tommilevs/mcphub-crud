@@ -124,6 +124,9 @@ diff text prefers file/hunk boundaries. Metadata prefixes are identified
 separately, so they do not prevent JSON detection. Oversized elements/hunks still
 split to the configured character bound, preserving original text, CRLF and
 Unicode pairs. Concatenating the chunks reconstructs the indexed text exactly.
+Immediate diff retrieval also includes the nearest original git file header as
+a separate exact-source fragment when the token budget permits. Headers are
+limited to 512 characters and are never synthesized or borrowed from another file.
 Malformed JSON falls back to line-aware text windows. Version 1 records remain
 readable; a full reindex (`onlyMissing: false`) optionally upgrades old indexes
 without modifying RAW.
