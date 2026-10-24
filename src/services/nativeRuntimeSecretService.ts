@@ -1,4 +1,5 @@
 import net from 'node:net';
+import { StringDecoder } from 'node:string_decoder';
 
 type RuntimeResponse = { ok?: boolean; error?: string; id?: string } & Record<string, unknown>;
 
@@ -11,18 +12,22 @@ const callRuntime = (request: Record<string, unknown>): Promise<RuntimeResponse>
   return new Promise((resolve, reject) => {
     const socket = net.createConnection(process.env.MCPHUB_NATIVE_PIPE || '\\\\.\\pipe\\mcphub-runtime');
     let buffer = '';
+    const decoder = new StringDecoder('utf8');
+    let settled = false;
     const timer = setTimeout(() => {
-      socket.destroy();
-      reject(new Error('Native runtime service request timed out'));
+      finish(() => reject(new Error('Native runtime service request timed out')));
     }, 30_000);
     const finish = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
       clearTimeout(timer);
       callback();
       socket.destroy();
     };
     socket.once('connect', () => socket.write(`${JSON.stringify(request)}\n`));
     socket.on('data', (chunk) => {
-      buffer += chunk.toString('utf8');
+      if (settled) return;
+      buffer += decoder.write(chunk);
       const newline = buffer.indexOf('\n');
       if (newline < 0) return;
       const line = buffer.slice(0, newline).trim();
@@ -35,6 +40,7 @@ const callRuntime = (request: Record<string, unknown>): Promise<RuntimeResponse>
       }
     });
     socket.once('error', (error) => finish(() => reject(error)));
+    socket.once('close', () => finish(() => reject(new Error('Native runtime service connection closed before its response'))));
   });
 };
 

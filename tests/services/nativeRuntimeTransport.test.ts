@@ -18,6 +18,22 @@ suite('native transport over a real isolated Windows named pipe',()=>{
   });
   afterEach(async()=>{for(const socket of sockets)socket.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));});
   const transport=()=>new NativeRuntimeTransport({id:'fixture',command:'unused.exe',args:[],env:{},request_timeout_ms:100},pipe);
+  test('administrative status preserves fragmented Unicode over the real pipe',async()=>{
+    const previous=process.env.MCPHUB_NATIVE_PIPE;process.env.MCPHUB_NATIVE_PIPE=pipe;
+    handler=(_request,socket)=>{
+      const bytes=Buffer.from(JSON.stringify({processes:[{id:'сервер😀'}]})+'\n');
+      const cut=bytes.indexOf(Buffer.from('😀'))+1;
+      socket.write(bytes.subarray(0,cut));setTimeout(()=>socket.write(bytes.subarray(cut)),20);
+    };
+    try{await expect(getNativeRuntimeStatus()).resolves.toEqual({processes:[{id:'сервер😀'}]});}
+    finally{if(previous===undefined)delete process.env.MCPHUB_NATIVE_PIPE;else process.env.MCPHUB_NATIVE_PIPE=previous;}
+  });
+  test('administrative status rejects a runtime that closes without replying',async()=>{
+    const previous=process.env.MCPHUB_NATIVE_PIPE;process.env.MCPHUB_NATIVE_PIPE=pipe;
+    handler=(_request,socket)=>socket.end();
+    try{await expect(getNativeRuntimeStatus()).rejects.toThrow(/closed before its response/);}
+    finally{if(previous===undefined)delete process.env.MCPHUB_NATIVE_PIPE;else process.env.MCPHUB_NATIVE_PIPE=previous;}
+  });
   test('explicit working directory refuses an old runtime before starting a process',async()=>{
     const client=new NativeRuntimeTransport({id:'cwd-fixture',command:'unused.exe',args:[],env:{},streaming:true,cwd:'C:\\tools'},pipe);
     try{await expect(client.start()).rejects.toThrow('does not support explicit working directories');}
