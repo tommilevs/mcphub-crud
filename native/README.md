@@ -172,7 +172,9 @@ streaming supervisor in the user's session, with no gateway or machine secret
 store; credential enrollment, deletion and unresolved secret references fail.
 The tray launches the agent silently and supervises its pipe while the tray is
 running (up to five launch attempts). It reuses an existing host in the same
-Windows session. Closing the tray leaves the agent independent; reopening the
+Windows session only after checking the pipe server's process token user SID
+and executable path against the current user and installed runtime. Failure to
+inspect either identity stops reuse. Closing the tray leaves the agent independent; reopening the
 tray resumes monitoring. `MCPHUB_USER_AGENT_PIPE` can select a separate
 `mcphub-user-...` pipe for isolated testing.
 Run `native/test-user-agent-windows.ps1` to verify real SDK calls, child session

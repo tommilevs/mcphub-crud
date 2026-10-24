@@ -23,7 +23,7 @@ try {
   if($LASTEXITCODE -ne 0){throw 'Cannot compile agent lifecycle acceptance.'}
   $env:MCPHUB_USER_RUNTIME_TEST_BINARY=(Resolve-Path -LiteralPath $RuntimeBinary).Path
   $env:MCPHUB_USER_RUNTIME_TEST_PIPE="$pipe-watchdog"
-  & $lifecycleTest --exact agent_lifecycle::tests::actual_agent_survives_tray_watchdog_exit_is_reused_and_recovers_after_crash
+  & $lifecycleTest agent_lifecycle::tests::
   if($LASTEXITCODE -ne 0){throw 'Agent lifecycle acceptance failed.'}
 } finally {
   $env:MCPHUB_NATIVE_USER_PIPE=$oldPipe;$env:MCPHUB_NATIVE_USER_SESSION=$oldSession
