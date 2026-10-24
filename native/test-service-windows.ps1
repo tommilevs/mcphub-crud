@@ -2,9 +2,10 @@ param([string]$ServiceBinary=(Join-Path $PSScriptRoot 'target\release\mcphub-run
   [switch]$WithGateway,
   [switch]$WithGeneratedPassword,
   [switch]$WithDesktop,
+  [switch]$WithPlaywrightConnection,
   [string]$RuntimeDirectory=(Join-Path $PSScriptRoot 'staging'))
 $ErrorActionPreference='Stop'
-if($WithDesktop){$WithGateway=$true}
+if($WithDesktop -or $WithPlaywrightConnection){$WithGateway=$true}
 if (-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {throw 'SCM acceptance requires an elevated Windows administrator.'}
 $repo=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $workRoot=(Resolve-Path -LiteralPath (Join-Path $repo '..')).Path
@@ -47,7 +48,14 @@ try {
   try{$service.WaitForStatus('Running',[TimeSpan]::FromSeconds(15))}finally{$service.Dispose()}
   $env:MCPHUB_NATIVE_TEST_PIPE="\\.\pipe\$pipe"
   $env:MCPHUB_NATIVE_TEST_SECRET_DIR=$secrets
-  $acceptanceAgent=Start-Process -FilePath $binary -ArgumentList @('--user-agent','--pipe-name',"mcphub-user-broker-$guid") -WindowStyle Hidden -PassThru
+  $previousExtensionToken=$env:PLAYWRIGHT_MCP_EXTENSION_TOKEN
+  try {
+    if($WithPlaywrightConnection){
+      $env:PLAYWRIGHT_MCP_EXTENSION_TOKEN=[Environment]::GetEnvironmentVariable('PLAYWRIGHT_MCP_EXTENSION_TOKEN','User')
+      if(-not $env:PLAYWRIGHT_MCP_EXTENSION_TOKEN){throw 'Existing user extension credential is unavailable.'}
+    }
+    $acceptanceAgent=Start-Process -FilePath $binary -ArgumentList @('--user-agent','--pipe-name',"mcphub-user-broker-$guid") -WindowStyle Hidden -PassThru
+  } finally {$env:PLAYWRIGHT_MCP_EXTENSION_TOKEN=$previousExtensionToken;$previousExtensionToken=$null}
   $env:MCPHUB_NATIVE_TEST_AGENT_PIPE="mcphub-user-broker-$guid"
   $env:MCPHUB_NATIVE_TEST_AGENT_SESSION="$([Diagnostics.Process]::GetCurrentProcess().SessionId)"
   npm run -s test -- --runInBand tests/integration/native-service-windows.test.ts --silent
@@ -128,6 +136,26 @@ try {
       Invoke-RestMethod "$base/api/servers/$desktopServer" -Method Delete -Headers $headers | Out-Null
       Invoke-RestMethod "$base/api/native-runtime/secrets/$desktopSecret" -Method Delete -Headers $headers | Out-Null
       $synthetic=$null
+    }
+    if($WithPlaywrightConnection){
+      $playwrightServer="playwright-http-$guid"
+      try {
+        $playwrightDefinition=@{name=$playwrightServer;config=@{type='stdio';command=(Join-Path $runtime 'node.exe');args=@('C:\aitools\playwright-mcp\node_modules\@playwright\mcp\cli.js','--extension','--profile-dir-name','Default','--allowed-hosts','*','--shared-browser-context');env=@{};options=@{nativeWorkingDirectory='C:\aitools\playwright-mcp';nativeExecution=@{kind='interactive';sessionId=[int]$env:MCPHUB_NATIVE_TEST_AGENT_SESSION;pipeName=$env:MCPHUB_NATIVE_TEST_AGENT_PIPE}}}}
+        $added=Invoke-RestMethod "$base/api/servers" -Method Post -Headers $headers -ContentType 'application/json' -Body ($playwrightDefinition|ConvertTo-Json -Depth 8 -Compress)
+        if(-not $added.success){throw 'Gateway rejected Playwright configuration.'}
+        $deadline=[DateTime]::UtcNow.AddSeconds(30)
+        do {
+          $connected=Invoke-RestMethod "$base/api/servers/$playwrightServer" -Headers $headers
+          if($connected.data.status -eq 'connected'){break}
+          Start-Sleep -Milliseconds 100
+        }while([DateTime]::UtcNow -lt $deadline)
+        if($connected.data.status -ne 'connected'){throw 'Gateway Playwright did not connect.'}
+        $tabs=Invoke-RestMethod "$base/api/tools/$playwrightServer/browser_tabs" -Method Post -Headers $headers -ContentType 'application/json' -Body '{"action":"list"}' -TimeoutSec 40
+        if($tabs.isError -or -not $tabs.content.Count){throw 'Gateway Playwright extension call failed; browser contents omitted.'}
+        Write-Output 'Actual gateway/service broker/user-session/working-directory/Playwright extension call passed (credential inherited in memory only).'
+      }finally{
+        Invoke-RestMethod "$base/api/servers/$playwrightServer" -Method Delete -Headers $headers | Out-Null
+      }
     }
     if($WithDesktop){
       $desktop=Start-Process -FilePath (Join-Path $PSScriptRoot 'target\release\mcphub-tray.exe') -ArgumentList '--open-dashboard' -Environment @{MCPHUB_DESKTOP_PORT="$port";MCPHUB_USER_AGENT_PIPE=$desktopAgentPipe} -WindowStyle Hidden -PassThru
