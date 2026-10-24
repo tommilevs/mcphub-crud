@@ -1,13 +1,22 @@
 const query = jest.fn();
 const getAdvice=jest.fn();
 jest.mock('../../src/services/experienceAdvice.js',()=>({getExperienceAdvice:(...args:any[])=>getAdvice(...args)}));
-const config = { loopGuardEnabled: true, loopGuardRepetitions: 4, loopGuardToolBudgets: {} as Record<string, number> };
+const config = { loopGuardEnabled: true, loopGuardRepetitions: 4, loopGuardToolBudgets: {} as Record<string, number>,loopGuardUnchangedTools:[] as string[] };
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => ({ query }) }));
 jest.mock('../../src/utils/smartRouting.js', () => ({ getSmartRoutingConfig: async () => config }));
+jest.mock('../../src/utils/systemConfigCache.js',()=>({getCachedSystemConfig:()=>({smartRouting:config})}));
 import { observeLoopGuard } from '../../src/services/loopGuardCoordinator.js';
 import type { ToolResultRecord } from '../../src/types/toolResult.js';
 
-beforeEach(() => { query.mockReset();getAdvice.mockReset().mockResolvedValue([]); config.loopGuardToolBudgets = {}; });
+beforeEach(() => { query.mockReset();getAdvice.mockReset().mockResolvedValue([]); config.loopGuardToolBudgets = {};config.loopGuardUnchangedTools=[]; });
+test('observes successful responses only for explicitly selected tools and preserves success',async()=>{
+ const record={resultId:'current',timestamp:new Date(5000),server:'demo',tool:'inspect',status:'success',arguments:'{}',rawSha256:'digest',attribution:{traceId:'trace',branchId:'branch'}} as ToolResultRecord;
+ expect(await observeLoopGuard(record)).toBeNull();expect(query).not.toHaveBeenCalled();
+ config.loopGuardUnchangedTools=['demo/inspect'];
+ query.mockResolvedValueOnce([4,3,2,1].map(index=>({result_id:`r${index}`,timestamp:new Date(index*1000),server:'demo',tool:'inspect',status:'success',arguments:'{}',raw_sha256:'digest'}))).mockResolvedValueOnce([]);
+ expect((await observeLoopGuard(record))?.trigger).toBe('repeated_unchanged_response');
+ expect(record.status).toBe('success');expect(query.mock.calls[1][0]).toContain('tool_result_state');
+});
 
 test('honors the larger tool budget in an alternating cycle regardless of current tool', async () => {
   config.loopGuardToolBudgets = { 'demo/b': 5 };

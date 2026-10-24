@@ -74,9 +74,24 @@ future advice; deliberate-repeat intent remains a separate call-local field.
 
 These are observations of repeated technical failures, not verified task failures
 or training labels. Intentional repeats can still occur and remain permitted.
-Unchanged successful states, independently verified agent behavior/outcomes,
-and richer reviewed task/error context for reasoning are
+Independently verified agent behavior/outcomes and richer reviewed task/error context for reasoning are
 subsequent parts of the broader ToolPilot design, not completed features here.
+
+### Explicit unchanged-response observation
+
+Settings → Smart Routing can opt exact `server/tool` names into
+`smartRouting.loopGuardUnchangedTools` (empty by default, at most 100 names).
+LoopGuard and compatible attribution must still be enabled. Five or more rapid
+successful calls with identical arguments and RAW digests can produce
+`repeated_unchanged_response`; a larger per-tool repetition budget still applies.
+Changed evidence, intervening errors, gaps of ten seconds or more, polling/wait/status tools,
+pagination and explicit repeat intent suppress this signal.
+
+This observes identical successful **responses**, not task progress or failure.
+It never blocks, suppresses or replays a call and never creates a negative
+training label. The success status remains unchanged. Optional internal ToolPilot
+receives zero failures and the observation count for this trigger. Existing
+ignored-tool rules and reviewed feedback remain applicable.
 
 ## Optional internal ToolPilot
 

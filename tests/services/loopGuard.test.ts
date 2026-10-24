@@ -1,8 +1,17 @@
-import { detectRepeatedFailure } from '../../src/services/loopGuard.js';
+import { detectRepeatedFailure,detectUnchangedSuccess } from '../../src/services/loopGuard.js';
 
 const observation = (index: number, overrides = {}) => ({
   resultId: `result-${index}`, server: 'demo', tool: 'inspect', status: 'error',
   arguments: '{}', resultDigest: 'same-error', timestamp: new Date(1000 * index), ...overrides,
+});
+test('labels repeated successful responses as unchanged evidence, never failures',()=>{
+ const calls=Array.from({length:5},(_,index)=>observation(5-index,{status:'success'}));
+ expect(detectUnchangedSuccess(calls)).toMatchObject({trigger:'repeated_unchanged_response',resultIds:calls.map(call=>call.resultId)});
+ for(const change of [{repeatIntent:'poll'},{tool:'wait_for_status'},{arguments:'{"cursor":"next"}'},{resultDigest:'changed'},{timestamp:new Date(-30000)},{status:'error'}]){
+  const modified=calls.map(call=>({...call}));Object.assign(modified[1],change);
+  expect(detectUnchangedSuccess(modified)).toBeNull();
+ }
+ expect(detectUnchangedSuccess(calls.slice(0,4))).toBeNull();
 });
 
 test('respects a larger retry budget for identical failures and cycles', () => {

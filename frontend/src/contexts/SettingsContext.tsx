@@ -55,6 +55,7 @@ interface SmartRoutingConfig {
   loopGuardToolBudgets?: Record<string, number>;
   resultRetrieval?:import('../types/resultRetrieval').ResultRetrievalConfig;
   loopGuardIgnoredTools?: string[];
+  loopGuardUnchangedTools?:string[];
   embeddingMaxTokens?: number;
   embeddingQueryPrefix?: string;
   embeddingDocumentPrefix?: string;
@@ -509,6 +510,7 @@ export const SettingsProvider: React.FC<SettingsProviderProps> = ({ children }) 
           loopGuardRepetitions: data.data.systemConfig.smartRouting.loopGuardRepetitions ?? 3,
           loopGuardToolBudgets: data.data.systemConfig.smartRouting.loopGuardToolBudgets ?? {},
           loopGuardIgnoredTools: data.data.systemConfig.smartRouting.loopGuardIgnoredTools ?? [],
+          loopGuardUnchangedTools:data.data.systemConfig.smartRouting.loopGuardUnchangedTools??[],
           embeddingMaxTokens: data.data.systemConfig.smartRouting.embeddingMaxTokens,
           embeddingQueryPrefix: data.data.systemConfig.smartRouting.embeddingQueryPrefix || '',
           embeddingDocumentPrefix:

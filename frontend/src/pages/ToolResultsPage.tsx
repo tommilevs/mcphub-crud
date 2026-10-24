@@ -244,7 +244,9 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
       }}/>
       {detail.loopGuardAdvice && <section className="hub-card p-3 space-y-2">
         <h2 className="text-sm font-medium">LoopGuard</h2>
-        <p className="text-xs">{detail.loopGuardAdvice.trigger === 'alternating_failure_cycle'
+        <p className="text-xs">{detail.loopGuardAdvice.trigger === 'repeated_unchanged_response'
+          ? t('attribution.unchangedAdvice','Repeated identical successful responses were observed. This does not prove task failure or lack of progress. Consider another observation if useful; intentional repeats remain allowed.')
+          : detail.loopGuardAdvice.trigger === 'alternating_failure_cycle'
           ? t('attribution.loopCycleAdviceCount', { count: detail.loopGuardAdvice.resultIds.length / 2, defaultValue: 'A two-step failure cycle repeated {{count}} times. Review both errors and consider changing the diagnostic strategy. Intentional retries remain allowed.' })
           : t('attribution.loopAdviceCount', { count: detail.loopGuardAdvice.resultIds.length, defaultValue: '{{count}} identical rapid failures were observed. Review the saved error and tool schema before retrying. Intentional retries remain allowed.' })}</p>
         <div className="flex flex-wrap gap-2">{detail.loopGuardAdvice.resultIds.map((id) => <Link key={id} className="hub-mono text-xs text-[var(--hub-accent)] break-all" to={`/tool-results/${encodeURIComponent(id)}`}>{id}</Link>)}</div>

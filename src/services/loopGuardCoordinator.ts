@@ -1,21 +1,26 @@
 import type { ToolResultRecord } from '../types/toolResult.js';
 import { getAppDataSource } from '../db/connection.js';
-import { detectRepeatedFailure, type LoopGuardAdvice } from './loopGuard.js';
+import { detectRepeatedFailure,detectUnchangedSuccess, type LoopGuardAdvice } from './loopGuard.js';
 import { getSmartRoutingConfig } from '../utils/smartRouting.js';
 import { escalateLoopGuard } from './toolPilot.js';
 import {getExperienceAdvice} from './experienceAdvice.js';
+import {getCachedSystemConfig} from '../utils/systemConfigCache.js';
 
 export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGuardAdvice | null> {
   const context = record.attribution;
-  if (record.status !== 'error' ||
+  if (!['error','success'].includes(record.status) ||
     !context?.traceId || !context.branchId) return null;
+  // Successful calls keep their old fast path unless the loaded settings explicitly opt in.
+  if(record.status==='success'&&!getCachedSystemConfig()?.smartRouting?.loopGuardUnchangedTools?.includes(`${record.server}/${record.tool}`))return null;
   try {
     const config = await getSmartRoutingConfig();
     if (!config.loopGuardEnabled || config.loopGuardIgnoredTools?.includes(`${record.server}/${record.tool}`)) return null;
+    const unchanged=record.status==='success';
+    if(unchanged&&!config.loopGuardUnchangedTools?.includes(`${record.server}/${record.tool}`))return null;
     const defaultRepetitions = config.loopGuardRepetitions ?? 3;
     const budgets = config.loopGuardToolBudgets ?? {};
     const budgetFor = (server: string, tool: string) => budgets[`${server}/${tool}`] ?? defaultRepetitions;
-    const historyLimit = Math.max(defaultRepetitions, ...Object.values(budgets)) * 2 - 1;
+    const historyLimit = Math.max(unchanged?5:defaultRepetitions,defaultRepetitions, ...Object.values(budgets)) * 2 - 1;
     const db = getAppDataSource();
     const rows = await db.query(`SELECT result_id, timestamp, server, tool, status, arguments, raw_sha256, attribution->>'repeatIntent' AS repeat_intent
       FROM tool_results WHERE username IS NOT DISTINCT FROM $1 AND key_id IS NOT DISTINCT FROM $2
@@ -25,11 +30,12 @@ export async function observeLoopGuard(record: ToolResultRecord): Promise<LoopGu
     // A/B cycles must respect both tools' policies, whichever tool is current.
     const repetitions = Math.max(budgetFor(record.server, record.tool),
       rows[0] ? budgetFor(rows[0].server, rows[0].tool) : 3);
-    const advice = detectRepeatedFailure([{ resultId: record.resultId, timestamp: record.timestamp,
+    const detect=unchanged?detectUnchangedSuccess:detectRepeatedFailure;
+    const advice = detect([{ resultId: record.resultId, timestamp: record.timestamp,
       server: record.server, tool: record.tool, status: record.status, arguments: record.arguments,
       resultDigest: record.rawSha256, repeatIntent: context.repeatIntent }, ...rows.map((row: any) => ({ resultId: row.result_id,
       timestamp: new Date(row.timestamp), server: row.server, tool: row.tool,
-      status: row.status, arguments: row.arguments, resultDigest: row.raw_sha256, repeatIntent: row.repeat_intent }))], { repetitions });
+      status: row.status, arguments: row.arguments, resultDigest: row.raw_sha256, repeatIntent: row.repeat_intent }))], { repetitions:unchanged?Math.max(5,budgetFor(record.server,record.tool)):repetitions });
     if (advice && rows.some((row: any) => advice.resultIds.includes(row.result_id) &&
       config.loopGuardIgnoredTools?.includes(`${row.server}/${row.tool}`))) return null;
     if (advice) {

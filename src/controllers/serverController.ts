@@ -1,6 +1,6 @@
 import { validateAllowedCidrs } from '../utils/ssrf.js';
 import {parseResultRetrievalPolicy} from '../services/toolResultRetrievalPolicy.js';
-import { parseLoopGuardToolBudgets } from '../utils/loopGuardPolicy.js';
+import { parseLoopGuardToolBudgets,parseLoopGuardUnchangedTools } from '../utils/loopGuardPolicy.js';
 import {
   copyCredentialBindings,
   deleteCredentialBindings,
@@ -2038,6 +2038,7 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         smartRouting.loopGuardRepetitions !== undefined ||
         smartRouting.loopGuardToolBudgets !== undefined ||
         smartRouting.loopGuardIgnoredTools !== undefined ||
+        smartRouting.loopGuardUnchangedTools !== undefined ||
         smartRouting.attributionTtlHours !== undefined ||
         typeof smartRouting.mcpZeroTopServers === 'number' ||
         typeof smartRouting.azureOpenaiEmbeddingModel === 'string' ||
@@ -2493,6 +2494,11 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
           res.status(400).json({ success: false, message: 'Invalid LoopGuard ignored tools' }); return;
         }
         systemConfig.smartRouting.loopGuardIgnoredTools = [...new Set(entries.map((entry: string) => entry.trim()))];
+      }
+      if(smartRouting.loopGuardUnchangedTools!==undefined){
+        const tools=parseLoopGuardUnchangedTools(smartRouting.loopGuardUnchangedTools);
+        if(!tools){res.status(400).json({success:false,message:'Invalid LoopGuard unchanged-response tools'});return;}
+        systemConfig.smartRouting.loopGuardUnchangedTools=tools;
       }
       if (smartRouting.attributionTtlHours !== undefined) {
         if (!Number.isSafeInteger(smartRouting.attributionTtlHours) || smartRouting.attributionTtlHours < 1 || smartRouting.attributionTtlHours > 8760) {

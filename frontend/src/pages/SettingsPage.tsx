@@ -3063,6 +3063,13 @@ const SettingsPage: React.FC = () => {
                     onChange={(value) => updateSmartRoutingConfig('loopGuardToolBudgets', value)} />
                   <ResultRetrievalPolicies disabled={loading} value={smartRoutingConfig.resultRetrieval??{}}
                     onChange={value=>{void updateSmartRoutingConfig('resultRetrieval',value);}} />
+                  <label className="block text-xs">{t('attribution.unchangedTools','Observe unchanged successful responses for these tools, one server/tool per line')}
+                    <p className="mt-1 text-xs text-[var(--hub-ink-3)]">{t('attribution.unchangedToolsHelp','Optional, disabled when empty. At least five rapid identical responses trigger advice only; no task failure is inferred. Polling and explicit repeat intent remain excluded.')}</p>
+                    <textarea className="hub-input mt-1 block w-full" rows={3} disabled={loading}
+                      defaultValue={(smartRoutingConfig.loopGuardUnchangedTools??[]).join('\n')}
+                      key={(smartRoutingConfig.loopGuardUnchangedTools??[]).join('\n')}
+                      onBlur={event=>{const tools=event.target.value.split('\n').map(value=>value.trim()).filter(Boolean);if(JSON.stringify(tools)!==JSON.stringify(smartRoutingConfig.loopGuardUnchangedTools??[]))void updateSmartRoutingConfig('loopGuardUnchangedTools',tools);}}/>
+                  </label>
                   <label className="block text-xs">{t('attribution.loopIgnoredTools', 'Tools excluded from LoopGuard, one server/tool per line')}
                     <textarea className="hub-input mt-1 block w-full" rows={3} disabled={loading}
                       value={(smartRoutingConfig.loopGuardIgnoredTools ?? []).join('\n')}

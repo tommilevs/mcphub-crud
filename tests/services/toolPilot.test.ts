@@ -21,6 +21,11 @@ test('returns bounded advice with separate internal model identity and no execut
   expect(request.tools).toBeUndefined();
   expect(client.mock.calls[0][0]).toMatchObject({ maxRetries: 0, timeout: 3000 });
 });
+test('does not tell the internal model that unchanged successes were failures',async()=>{
+  create.mockClear();create.mockResolvedValue({choices:[{message:{content:'Consider another observation.'}}]});
+  await adviseWithToolPilot({trigger:'repeated_unchanged_response',resultIds:['a','b','c','d','e'],recommendation:'Review'}, {server:'demo',tool:'inspect'},config);
+  expect(JSON.parse(create.mock.calls[0][0].messages[1].content)).toMatchObject({failures:0,observations:5});
+});
 test('provider failure and empty output preserve deterministic advice', async () => {
   create.mockRejectedValueOnce(new Error('offline')).mockResolvedValueOnce({ choices: [{ message: { content: '' } }] });
   expect(await adviseWithToolPilot(advice, { server: 'demo', tool: 'inspect' }, config)).toBeUndefined();

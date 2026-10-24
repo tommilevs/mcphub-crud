@@ -1,7 +1,7 @@
 export interface LoopGuardAdvice {
   toolPilot?: import('./toolPilot.js').ToolPilotSuggestion;
   experiences?: import('./experienceAdvice.js').ExperienceAdvice[];
-  trigger: 'repeated_identical_failure' | 'alternating_failure_cycle';
+  trigger: 'repeated_identical_failure' | 'alternating_failure_cycle' | 'repeated_unchanged_response';
   resultIds: string[];
   recommendation: string;
 }
@@ -17,9 +17,9 @@ export interface LoopGuardObservation {
 }
 
 /** Conservative advisory only. Never authorizes, suppresses or replays a tool. */
-const eligible = (call: LoopGuardObservation): boolean => {
+const eligible = (call: LoopGuardObservation,status='error'): boolean => {
   if (call.repeatIntent && ['poll', 'pagination', 'wait', 'retry'].includes(call.repeatIntent)) return false;
-  if (call.status !== 'error' || !call.resultDigest || !call.arguments ||
+  if (call.status !== status || !call.resultDigest || !call.arguments ||
     !Number.isFinite(call.timestamp.getTime()) || /(?:poll|wait|read_process_output|status)/i.test(call.tool)) return false;
   try {
     const args = JSON.parse(call.arguments);
@@ -28,15 +28,23 @@ const eligible = (call: LoopGuardObservation): boolean => {
 };
 const same = (a: LoopGuardObservation, b: LoopGuardObservation) => a.server === b.server &&
   a.tool === b.tool && a.arguments === b.arguments && a.resultDigest === b.resultDigest;
-const rapidFailures = (calls: LoopGuardObservation[]) => {
+const rapidFailures = (calls: LoopGuardObservation[],status='error') => {
   for (let index = 0; index < calls.length; index++) {
     const call = calls[index];
-    if (!eligible(call)) return false;
+    if (!eligible(call,status)) return false;
     if (index && (calls[index - 1].timestamp.getTime() - call.timestamp.getTime() >= 10_000 ||
       calls[index - 1].timestamp.getTime() < call.timestamp.getTime())) return false;
   }
   return true;
 };
+/** Caller must explicitly opt the exact tool into successful-response observation. */
+export function detectUnchangedSuccess(recent:LoopGuardObservation[],policy:{repetitions?:number}={}):LoopGuardAdvice|null{
+ const repetitions=policy.repetitions??5;
+ if(!Number.isInteger(repetitions)||repetitions<5||repetitions>100)return null;
+ const calls=recent.slice(0,repetitions);
+ if(calls.length!==repetitions||!rapidFailures(calls,'success')||!calls.every(call=>same(call,calls[0])))return null;
+ return {trigger:'repeated_unchanged_response',resultIds:calls.map(call=>call.resultId),recommendation:`${repetitions} identical rapid successful responses were observed. This does not establish lack of task progress or a task failure. Consider another diagnostic observation if useful; intentional repeats remain allowed.`};
+}
 export function detectRepeatedFailure(recent: LoopGuardObservation[], policy: { repetitions?: number } = {}): LoopGuardAdvice | null {
   const repetitions = policy.repetitions ?? 3;
   if (!Number.isInteger(repetitions) || repetitions < 3 || repetitions > 100) return null;

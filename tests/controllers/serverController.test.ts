@@ -862,6 +862,17 @@ describe('serverController - updateSystemConfig', () => {
     await updateSystemConfig(mockRequest as Request,mockResponse as Response);
     expect(mockStatus).toHaveBeenCalledWith(400);expect(mockSystemConfigDao.update).not.toHaveBeenCalled();
   });
+  it.each([['demo/inspect'],[]])('persists or clears explicit unchanged-response tools',async(...args)=>{
+    const loopGuardUnchangedTools=args;
+    mockRequest.body={smartRouting:{loopGuardUnchangedTools}};
+    await updateSystemConfig(mockRequest as Request,mockResponse as Response);
+    expect(mockSystemConfigDao.update).toHaveBeenCalledWith(expect.objectContaining({smartRouting:expect.objectContaining({loopGuardUnchangedTools})}));
+  });
+  it('rejects unchanged-response observation without an exact server/tool target',async()=>{
+    mockRequest.body={smartRouting:{loopGuardUnchangedTools:['*']}};
+    await updateSystemConfig(mockRequest as Request,mockResponse as Response);
+    expect(mockStatus).toHaveBeenCalledWith(400);expect(mockSystemConfigDao.update).not.toHaveBeenCalled();
+  });
   it.each([{ 'demo/inspect': 8 }, {}])('persists or clears per-tool LoopGuard budgets %s', async (loopGuardToolBudgets) => {
     mockRequest.body = { smartRouting: { loopGuardToolBudgets } };
     await updateSystemConfig(mockRequest as Request, mockResponse as Response);
