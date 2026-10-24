@@ -31,7 +31,7 @@ const requireRepository = (res: Response) => {
   return repository;
 };
 
-const parseFilter = (req: Request): ToolResultFilter => {
+const parseFilter = (req: Request, res: Response): ToolResultFilter | undefined => {
   const filter: ToolResultFilter = {};
   for (const field of ['modelId', 'taskId', 'traceId', 'branchId'] as const) {
     const value = req.query[field];
@@ -45,8 +45,20 @@ const parseFilter = (req: Request): ToolResultFilter => {
   if (typeof req.query.conversationId === 'string' && req.query.conversationId) filter.conversationId = req.query.conversationId;
   if (req.query.pinned === 'true') filter.pinned = true;
   if (req.query.pinned === 'false') filter.pinned = false;
-  if (typeof req.query.startDate === 'string') filter.startDate = new Date(req.query.startDate);
-  if (typeof req.query.endDate === 'string') filter.endDate = new Date(req.query.endDate);
+  for (const field of ['startDate', 'endDate'] as const) {
+    const value = req.query[field];
+    if (value === undefined) continue;
+    const date = typeof value === 'string' ? new Date(value) : new Date(NaN);
+    if (!Number.isFinite(date.getTime())) {
+      res.status(400).json({ success: false, message: 'Invalid date filter' });
+      return undefined;
+    }
+    filter[field] = date;
+  }
+  if (filter.startDate && filter.endDate && filter.startDate > filter.endDate) {
+    res.status(400).json({ success: false, message: 'startDate must not follow endDate' });
+    return undefined;
+  }
   return filter;
 };
 
@@ -77,6 +89,8 @@ export const getToolResults = async (req: Request, res: Response): Promise<void>
   if (!(await requireAdmin(req, res))) return;
   const repository = requireRepository(res);
   if (!repository) return;
+  const filter = parseFilter(req, res);
+  if (!filter) return;
   const page = Number.parseInt(String(req.query.page ?? '1'), 10);
   const limit = Number.parseInt(String(req.query.limit ?? '20'), 10);
   if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1 || limit > 100) {
@@ -84,7 +98,7 @@ export const getToolResults = async (req: Request, res: Response): Promise<void>
     return;
   }
   try {
-    const result = await repository.findPaginated(page, limit, parseFilter(req));
+    const result = await repository.findPaginated(page, limit, filter);
     res.json({
       success: true,
       data: result.data.map(publicRecord),
@@ -309,6 +323,8 @@ export const searchToolResults = async (req: Request, res: Response): Promise<vo
   if (!(await requireAdmin(req, res))) return;
   const repository = requireRepository(res);
   if (!repository) return;
+  const filter = parseFilter(req, res);
+  if (!filter) return;
   const query = typeof req.query.q === 'string' ? req.query.q.trim() : '';
   const limit = Number.parseInt(String(req.query.limit ?? '20'), 10);
   if (!query || !Number.isInteger(limit) || limit < 1 || limit > 100) {
@@ -320,14 +336,14 @@ export const searchToolResults = async (req: Request, res: Response): Promise<vo
   if (repository.hybridSearch) {
     try {
       const embedding = await generateEmbedding(query, 'query');
-      data = await repository.hybridSearch(query, embedding, limit, parseFilter(req));
+      data = await repository.hybridSearch(query, embedding, limit, filter);
       mode = 'hybrid';
     } catch (error) {
       logger.warn('Hybrid result search fell back to lexical search:', error);
-      data = await repository.search(query, limit, parseFilter(req));
+      data = await repository.search(query, limit, filter);
     }
   } else {
-    data = await repository.search(query, limit, parseFilter(req));
+    data = await repository.search(query, limit, filter);
   }
   recordToolResultSearch(mode);
   res.json({ success: true, data: data.map(publicRecord), meta: searchDiagnostics(data, mode) });
@@ -383,5 +399,7 @@ export const getToolResultStats = async (req: Request, res: Response): Promise<v
   if (!(await requireAdmin(req, res))) return;
   const repository = requireRepository(res);
   if (!repository) return;
-  res.json({ success: true, data: { ...(await repository.getStats(parseFilter(req))), retrieval: getToolResultRetrievalMetrics() } });
+  const filter = parseFilter(req, res);
+  if (!filter) return;
+  res.json({ success: true, data: { ...(await repository.getStats(filter)), retrieval: getToolResultRetrievalMetrics() } });
 };

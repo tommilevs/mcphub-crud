@@ -19,6 +19,7 @@ jest.mock('../../src/services/toolResultHistoryRegistry.js', () => ({
 
 import {
   getToolResults,
+  getToolResultStats,
   getToolResultById,
   getToolResultRaw,
   getToolResultRange,
@@ -67,6 +68,22 @@ describe('toolResultController', () => {
       pinned: true,
     });
     expect(res.json).toHaveBeenCalledWith(expect.objectContaining({ success: true }));
+  });
+
+  it.each([
+    {startDate:'invalid-date'}, {endDate:'invalid-date'},
+    {startDate:'2026-10-25',endDate:'2026-10-24'},
+  ])('rejects invalid dates before accessing history (%j)', async dates => {
+    repository.search.mockResolvedValue([]);
+    repository.getStats.mockResolvedValue({});
+    for(const handler of [getToolResults,searchToolResults,getToolResultStats]){
+      const res=makeRes();
+      await handler(makeReq({query:{q:'evidence',...dates}}),res);
+      expect(res.status).toHaveBeenCalledWith(400);
+    }
+    expect(repository.findPaginated).not.toHaveBeenCalled();
+    expect(repository.search).not.toHaveBeenCalled();
+    expect(repository.getStats).not.toHaveBeenCalled();
   });
 
   it('returns immutable RAW and records later reuse', async () => {
