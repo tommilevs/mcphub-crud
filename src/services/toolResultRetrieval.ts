@@ -1,4 +1,40 @@
+import {countTokens} from '../utils/tokenCost.js';
 export interface OriginalResultFragment {start:number;end:number;text:string;score:number;}
+export interface ResultRetrievalOptions {objective:string;maxOutputTokens:number;}
+const savedResults=new WeakMap<object,{resultId:string;payloadAvailable:boolean}>();
+/** In-process capture proof. Upstream JSON cannot manufacture this association. */
+export function rememberSavedResult(result:object,resultId:string,payloadAvailable:boolean){savedResults.set(result,{resultId,payloadAvailable});}
+export function parseResultRetrievalOptions(value:unknown,fallbackObjective?:unknown):ResultRetrievalOptions|undefined{
+ if(value===undefined)return undefined;
+ if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid smart result settings');
+ const settings=value as Record<string,unknown>;
+ if(Object.keys(settings).some(key=>!['retrieve','objective','maxOutputTokens'].includes(key))||typeof settings.retrieve!=='boolean')throw Error('Invalid smart result settings');
+ if(!settings.retrieve)return undefined;
+ const objective=settings.objective??fallbackObjective;
+ const budget=settings.maxOutputTokens??3000;
+ if(typeof objective!=='string'||!objective.trim()||objective.length>2000||typeof budget!=='number'||!Number.isInteger(budget)||budget<512||budget>4096)throw Error('Smart retrieval requires an objective (1–2000 characters) and token budget 512–4096');
+ return {objective:objective.trim(),maxOutputTokens:budget};
+}
+export async function retrieveOriginalResult<T extends Record<string,any>>(result:T,options?:ResultRetrievalOptions):Promise<T>{
+ const saved=savedResults.get(result);
+ if(!options||!saved?.payloadAvailable||!Array.isArray(result.content))return result;
+ try{
+  if(await countTokens(JSON.stringify(result))<=8000)return result;
+  const fragments:Array<OriginalResultFragment&{block:number}>=[];
+  result.content.forEach((block:any,index:number)=>{
+   if(block?.type==='text'&&typeof block.text==='string')fragments.push(...selectResultFragments(block.text,options.objective,options.maxOutputTokens*2).map(hit=>({...hit,block:index})));
+  });
+  if(!fragments.length)return result;
+  fragments.sort((a,b)=>b.score-a.score||a.block-b.block||a.start-b.start);
+  const makeReply=()=>({
+   content:[{type:'text',text:JSON.stringify({representation:'original-fragments',result_id:saved.resultId,offset_units:'UTF-16 code units; end exclusive',fragments:[...fragments].sort((a,b)=>a.block-b.block||a.start-b.start).map(({score:_score,...hit})=>hit),full_result_tool:'get_tool_result'})}],
+   ...(result.isError!==undefined?{isError:result.isError}:{}),
+   _meta:{...result._meta,'mcphub/result_id':saved.resultId,'dev.mcphub/retrieval':{algorithm:'bm25-exact',partial:true,maxOutputTokens:options.maxOutputTokens}},
+  });
+  while(fragments.length){const reply=makeReply();if(await countTokens(JSON.stringify(reply))<=options.maxOutputTokens)return reply as unknown as T;fragments.pop();}
+ }catch{/* Retrieval failure must not lose the original successful tool response. */}
+ return result;
+}
 const tokens=(text:string)=>text.toLocaleLowerCase('en-US').match(/[\p{L}\p{N}_]+(?:[./:\\-][\p{L}\p{N}_]+)*/gu)??[];
 
 /** BM25 over bounded original windows. Offsets are end-exclusive UTF-16 indices.

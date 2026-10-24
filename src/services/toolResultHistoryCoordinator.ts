@@ -1,4 +1,5 @@
 import { getAppDataSource } from '../db/connection.js';
+import {rememberSavedResult} from './toolResultRetrieval.js';
 import { observeLoopGuard } from './loopGuardCoordinator.js';
 import { ToolResultRepositoryDb } from '../db/repositories/ToolResultRepository.js';
 import type { ToolResultStatus } from '../types/toolResult.js';
@@ -204,7 +205,7 @@ export class ToolResultHistoryCoordinator {
         result._meta && typeof result._meta === 'object'
           ? (result._meta as Record<string, unknown>)
           : {};
-      return {
+      const annotated = {
         ...result,
         _meta: {
           ...currentMeta,
@@ -212,6 +213,8 @@ export class ToolResultHistoryCoordinator {
           ...(loopGuardAdvice ? { 'dev.mcphub/loopguard': loopGuardAdvice } : {}),
         },
       };
+      rememberSavedResult(annotated,saved.resultId,saved.payloadAvailable);
+      return annotated;
     } catch (error) {
       logger.error('Failed to persist tool result history:', error);
       return result;

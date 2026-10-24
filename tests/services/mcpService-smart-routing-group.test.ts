@@ -116,6 +116,8 @@ jest.mock('../../src/config/index.js', () => ({
 
 // Import after mocks are set up
 import * as mcpService from '../../src/services/mcpService.js';
+import {ToolResultHistoryCoordinator} from '../../src/services/toolResultHistoryCoordinator.js';
+import {rememberSavedResult} from '../../src/services/toolResultRetrieval.js';
 import { getGroup } from '../../src/services/sseService.js';
 import { handleSearchToolsRequest } from '../../src/services/smartRoutingService.js';
 
@@ -506,6 +508,18 @@ describe('MCP Service - Smart Routing with Group Support', () => {
     expect(result.content[0].text).toBe(raw);
     expect(callTool).not.toHaveBeenCalled();
     expect(mockHistoryRepository.incrementUseCount).toHaveBeenCalledWith('id');
+  });
+  it('uses smart objective after capture and never forwards smart settings to the source tool',async()=>{
+    const raw={content:[{type:'text',text:'routine\n'.repeat(20000)+'Xid 79 failure\n'}]};
+    const callTool=jest.fn().mockResolvedValue(raw);
+    mcpService.setServerInfosForTest([{name:'server1',status:'connected',enabled:true,tools:[{name:'server1::direct-tool',inputSchema:{type:'object'}}],client:{callTool},options:{}}] as any);
+    const capture=jest.spyOn(ToolResultHistoryCoordinator.prototype,'captureAndAnnotate').mockImplementation(async result=>{const annotated={...result,_meta:{'mcphub/result_id':'saved'}};rememberSavedResult(annotated,'saved',true);return annotated;});
+    try{
+      const result=await mcpService.handleCallToolRequest({params:{name:'call_tool',arguments:{toolName:'server1::direct-tool',arguments:{input:'only'},smart:{retrieve:true,objective:'Xid 79',maxOutputTokens:512}}}},{sessionId:'session-smart',username:'alice'});
+      expect(JSON.stringify(result)).toContain('original-fragments');
+      expect(capture).toHaveBeenCalledWith(raw,expect.objectContaining({objective:'Xid 79'}));
+      expect(callTool.mock.calls[0][0].arguments).toEqual({input:'only'});
+    }finally{capture.mockRestore();}
   });
 
   it('searches locally with trusted scope and excludes foreign results and empty groups',async()=>{

@@ -18,5 +18,7 @@ and 23. An objective must affect large-result retrieval, not only history metada
    provider failure, Unicode and diagnostic tails; benchmark representative large
    outputs before choosing production thresholds.
 
-Current status: step 1 implemented and unit-tested only. This is not yet an
-enabled production retrieval path or complete hybrid search.
+Current status: steps 1–3 implemented, opt-in only. Capture proof is kept in an
+in-process WeakMap, so upstream metadata cannot forge retention. Unit and actual
+Smart dispatcher tests cover preservation, budgets and forwarding boundaries.
+Steps 4–5 remain: per-tool policies, semantic fusion and workload benchmarks.

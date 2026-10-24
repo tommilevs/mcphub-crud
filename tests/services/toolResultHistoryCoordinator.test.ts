@@ -5,8 +5,20 @@ import {
   type ToolResultHistoryCapture,
 } from '../../src/services/toolResultHistoryCoordinator.js';
 import type { ToolResultHistoryService } from '../../src/services/toolResultHistoryService.js';
+import {retrieveOriginalResult} from '../../src/services/toolResultRetrieval.js';
 
 describe('ToolResultHistoryCoordinator', () => {
+  it('permits fragment retrieval only on the object returned after successful payload capture',async()=>{
+    const original={content:[{type:'text',text:'routine\n'.repeat(20000)+'Xid 79 failure\n'}]};
+    const capture=jest.fn().mockResolvedValue({resultId:'stored',payloadAvailable:true});
+    const coordinator=new ToolResultHistoryCoordinator(()=>({capture}) as unknown as ToolResultHistoryService);
+    const annotated=await coordinator.captureAndAnnotate(original,{server:'fixture',tool:'read',durationMs:1,status:'success',objective:'Xid 79'});
+    const options={objective:'Xid 79',maxOutputTokens:512};
+    expect(await retrieveOriginalResult(original,options)).toBe(original);
+    expect(await retrieveOriginalResult(annotated,options)).not.toBe(annotated);
+    expect(capture.mock.calls[0][0].result).toBe(original);
+    expect(original.content[0].text).toContain('routine\n'.repeat(20000));
+  });
   it('chunks long evidence without rewriting its text', () => {
     const source = `first line\n${'x'.repeat(TOOL_RESULT_CHUNK_CHARS + 3)}\nlast line`;
     const chunks = chunkToolResultText(source);

@@ -114,6 +114,7 @@ import {
 } from './smartRoutingService.js';
 import { getActivityLoggingService } from './activityLoggingService.js';
 import { maybeCompressToolResult } from './toolResultCompressionService.js';
+import {parseResultRetrievalOptions,retrieveOriginalResult} from './toolResultRetrieval.js';
 import { getToolResultHistoryCoordinator } from './toolResultHistoryCoordinator.js';
 import {
   assertHostedToolAllowed,
@@ -4270,7 +4271,9 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         throw new Error('toolName parameter is required');
       }
 
-      const { arguments: toolArgs, objective } = request.params.arguments || {};
+      const { arguments: toolArgs, objective:callObjective,smart } = request.params.arguments || {};
+      const retrievalOptions=parseResultRetrievalOptions(smart,callObjective);
+      const objective=retrievalOptions?.objective??callObjective;
       // A single connected server on an Apps-enabled route is addressed by
       // its raw (unqualified) tool name, same as before. A multi-server
       // Apps-enabled route falls through to qualified-name group
@@ -4451,6 +4454,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
           sensitive: hasPersonalAuthentication(targetServerInfo.config),
         });
 
+        if(retrievalOptions)return await retrieveOriginalResult(resultWithHistory,retrievalOptions);
         return await maybeCompressToolResult(
           resultWithHistory,
           {
@@ -4552,6 +4556,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         sensitive: hasPersonalAuthentication(targetServerInfo.config),
       });
 
+      if(retrievalOptions)return await retrieveOriginalResult(resultWithHistory,retrievalOptions);
       return await maybeCompressToolResult(resultWithHistory, {
         serverName: targetServerInfo.name,
         toolName: cleanToolName,

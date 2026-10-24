@@ -7,6 +7,35 @@ Tool Result History is available in database mode. Dashboard history endpoints a
 
 ## Agent-facing MCP memory
 
+### Opt-in objective-aware execution
+
+`call_tool` accepts an optional `smart` object, separate from backend arguments:
+
+```json
+{"toolName":"server-read_logs","arguments":{},
+ "smart":{"retrieve":true,"objective":"Find GPU Xid 79 and PCIe failures","maxOutputTokens":3000}}
+```
+
+The objective may fall back to the existing top-level `objective` field. It is
+limited to 2,000 characters; output budget is 512–4,096 estimated cl100k tokens.
+The default remains disabled. The initial execution path uses BM25 lexical
+windows and exact diagnostic identifiers, not semantic vector reranking.
+
+RAW capture happens first. Only a successfully captured, retained payload can
+produce a fragment response; a result ID supplied by an upstream is insufficient.
+Invalid opt-in settings are rejected before invoking the backend tool.
+Results at or below 8,000 estimated tokens, missing useful
+hits, metadata-only capture, failed storage or retrieval failures retain the
+original response. Explicit retrieval bypasses legacy lossy compression.
+
+Fragment responses are labeled `original-fragments`, preserve `isError` and the
+saved result ID, and fit the requested estimated token budget including their
+metadata. Each fragment identifies its original `content` block and end-exclusive
+UTF-16 text offsets. Text is copied exactly, including line endings; it is not a
+summary. Read the complete stored MCP envelope with `get_tool_result` or ranges.
+These provisional thresholds still require workload benchmarks and per-tool
+policies; this lexical path does not claim complete hybrid retrieval.
+
 When database history is available, `$smart` routes expose these additional tools:
 
 | Tool | Arguments | Result |
