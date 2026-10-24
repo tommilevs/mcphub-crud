@@ -1,3 +1,6 @@
+const mockToken=jest.fn(()=> 'test-token' as string|null);
+const mockSkipAuth=jest.fn(async()=>false);
+jest.mock('../../frontend/src/services/configService',()=>({shouldSkipAuth:()=>mockSkipAuth()}));
 jest.mock('../../frontend/src/utils/fetchInterceptor', () => ({
   apiGet: jest.fn(),
   apiDelete: jest.fn(),
@@ -8,7 +11,7 @@ jest.mock('../../frontend/src/utils/runtime', () => ({
 }));
 
 jest.mock('../../frontend/src/utils/interceptors', () => ({
-  getToken: () => 'test-token',
+  getToken: () => mockToken(),
 }));
 
 class FakeEventSource {
@@ -31,6 +34,8 @@ class FakeEventSource {
 describe('LogStreamManager reconnect backoff', () => {
   beforeEach(() => {
     jest.resetModules();
+    mockToken.mockReturnValue('test-token');
+    mockSkipAuth.mockReset().mockResolvedValue(false);
     jest.useFakeTimers();
     FakeEventSource.instances = [];
     (global as unknown as { EventSource: unknown }).EventSource = FakeEventSource;
@@ -81,4 +86,42 @@ describe('LogStreamManager reconnect backoff', () => {
 
     unsubscribe();
   });
+  it('opens the stream without a token when dashboard authentication is disabled', async()=>{
+    mockToken.mockReturnValue(null);mockSkipAuth.mockResolvedValue(true);
+    const {logStreamManager}=await import('../../frontend/src/services/logService');
+    const unsubscribe=logStreamManager.subscribe(()=>{});
+    await Promise.resolve();await Promise.resolve();
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0].url).toBe('http://localhost:3000/api/logs/stream');
+    unsubscribe();
+  });
+  it('does not open an unauthenticated stream when a token is required', async()=>{
+    mockToken.mockReturnValue(null);
+    const {logStreamManager}=await import('../../frontend/src/services/logService');
+    const unsubscribe=logStreamManager.subscribe(()=>{});
+    await Promise.resolve();await Promise.resolve();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    unsubscribe();
+  });
+
+  it('ignores authentication lookup after the final subscriber leaves', async()=>{
+    let resolveAuth!:(value:boolean)=>void;
+    mockToken.mockReturnValue(null);
+    mockSkipAuth.mockReturnValue(new Promise<boolean>(resolve=>{resolveAuth=resolve;}));
+    const {logStreamManager}=await import('../../frontend/src/services/logService');
+    const unsubscribe=logStreamManager.subscribe(()=>{});
+    unsubscribe();resolveAuth(true);
+    await Promise.resolve();await Promise.resolve();
+    expect(FakeEventSource.instances).toHaveLength(0);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+  it('keeps token authentication and encodes its query value without a config lookup', async()=>{
+    mockToken.mockReturnValue('token&second=value');
+    const {logStreamManager}=await import('../../frontend/src/services/logService');
+    const unsubscribe=logStreamManager.subscribe(()=>{});
+    expect(FakeEventSource.instances[0].url).toBe('http://localhost:3000/api/logs/stream?token=token%26second%3Dvalue');
+    expect(mockSkipAuth).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
 });

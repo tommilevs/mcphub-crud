@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { apiGet, apiDelete } from '../utils/fetchInterceptor';
 import { getApiUrl } from '../utils/runtime';
 import { getToken } from '../utils/interceptors';
+import { shouldSkipAuth } from './configService';
 
 export interface LogEntry {
   timestamp: number;
@@ -51,6 +52,7 @@ class LogStreamManager {
   private subscribers = new Set<(event: MessageEvent) => void>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private openAttempts = 0;
+  private openGeneration = 0;
 
   /** Subscribe to incoming SSE messages.  Returns an unsubscribe callback. */
   subscribe(callback: (event: MessageEvent) => void): () => void {
@@ -68,18 +70,23 @@ class LogStreamManager {
     };
   }
 
-  private openEventSource() {
+  private async openEventSource() {
     this.closeEventSource();
+    const generation = ++this.openGeneration;
     const token = getToken();
 
     if (!token) {
-      console.warn('[LogStreamManager] No token available, scheduling reconnect...');
-      this.scheduleReconnect();
-      return;
+      let skipAuth = false;
+      try { skipAuth = await shouldSkipAuth(); } catch { /* Retry with normal backoff. */ }
+      if (generation !== this.openGeneration || this.subscribers.size === 0) return;
+      if (!skipAuth) {
+        this.scheduleReconnect();
+        return;
+      }
     }
 
     try {
-      const url = getApiUrl(`/logs/stream?token=${token}`);
+      const url = getApiUrl(token ? `/logs/stream?token=${encodeURIComponent(token)}` : '/logs/stream');
 
       let redactedUrl = url;
       try {
@@ -150,6 +157,7 @@ class LogStreamManager {
   }
 
   private close() {
+    this.openGeneration += 1;
     this.closeEventSource();
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
