@@ -224,6 +224,17 @@ so a configured directory is never silently ignored. The UI preserves this
 option inside the existing options JSON storage, without a schema migration.
 Disconnect closes the remote process lease. Service status lists service processes;
 agent processes remain in the agent's own status, without a merged management view yet.
+Administrators can explicitly target that agent through the machine broker:
+`GET /api/native-runtime/status?sessionId=7&pipeName=mcphub-user-session-7`
+and `POST /api/native-runtime/processes/:id/restart` with
+`{"executionContext":{"kind":"interactive","sessionId":7,"pipeName":"mcphub-user-session-7"}}`.
+Use the actual signed-in Windows session and configured agent pipe; `pipeName`
+is optional when using the default session pipe. Omitting the target preserves
+service-only behavior. The broker validates the connected agent's session,
+user and executable exactly as for a streaming start, and never falls back to
+Session 0. Secret administration and shutdown cannot be delegated. Restarting
+a live MCP process interrupts its connection; the client must reconnect and
+initialize again. The dashboard does not yet combine both process lists.
 
 `native/test-managed-tools-windows.ps1 -ComputerUseExecutable <installed-exe>
 -DesktopCommanderEntry <installed-index.js>` checks real installed desktop-tool

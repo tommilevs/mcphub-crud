@@ -1,7 +1,7 @@
 import {EventEmitter} from 'node:events';
 const mockConnect=jest.fn();
 jest.mock('node:net',()=>({__esModule:true,default:{createConnection:mockConnect}}));
-import {getNativeRuntimeStatus} from '../../src/services/nativeRuntimeSecretService.js';
+import {getNativeRuntimeStatus,restartNativeRuntimeProcess} from '../../src/services/nativeRuntimeSecretService.js';
 
 const suite=process.platform==='win32'?describe:describe.skip;
 suite('native administrative pipe responses',()=>{
@@ -12,6 +12,15 @@ suite('native administrative pipe responses',()=>{
   mockConnect.mockReturnValue(socket);
  });
  afterEach(()=>{jest.clearAllTimers();jest.useRealTimers();});
+ it('serializes the validated explicit session for both management operations',async()=>{
+  const execution={kind:'interactive' as const,sessionId:7,pipeName:'mcphub-user-fixture'};
+  for(const op of ['status','restart']){
+   const pending=op==='status'?getNativeRuntimeStatus(execution):restartNativeRuntimeProcess('fixture',execution);
+   socket.emit('connect');
+   expect(JSON.parse(socket.write.mock.calls[socket.write.mock.calls.length-1][0])).toEqual({op,...(op==='restart'?{id:'fixture'}:{}),execution_context:{kind:'interactive',session_id:7,pipe_name:'mcphub-user-fixture'}});
+   socket.emit('data',Buffer.from('{"ok":true}\n'));await pending;
+  }
+ });
  it('rejects a disconnected runtime immediately rather than waiting thirty seconds',async()=>{
   const pending=getNativeRuntimeStatus();const outcome=pending.then(()=> 'resolved',()=> 'rejected');
   socket.emit('connect');socket.emit('close');

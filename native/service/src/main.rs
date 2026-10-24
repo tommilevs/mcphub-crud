@@ -20,6 +20,7 @@ fn options() -> &'static options::Options {
         .expect("runtime options initialized before service dispatch")
 }
 use mcphub_runtime_core::{ManagedProcessSpec, RuntimeSupervisor};
+mod delegation;
 use std::io::{self, BufRead, BufReader};
 #[cfg(not(windows))]
 use std::{thread, time::Duration};
@@ -336,11 +337,11 @@ fn serve_named_pipe_client(
                     return Err("interactive delegation requires the machine service".into());
                 }
                 let mut request = request?;
-                if owned.is_some() || request["op"] != "start" || request["stream"] != true {
-                    return Err("interactive delegation requires a new streaming connection".into());
-                }
+                delegation::validate(&request, owned.is_some())?;
                 let agent = interactive::connect(&request["execution_context"])?;
-                resolve_start_secrets(&mut request, secrets.as_ref().as_ref())?;
+                if request["op"] == "start" {
+                    resolve_start_secrets(&mut request, secrets.as_ref().as_ref())?;
+                }
                 request.as_object_mut().unwrap().remove("execution_context");
                 Ok((agent, request))
             })();

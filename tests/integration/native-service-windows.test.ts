@@ -15,6 +15,25 @@ suite('isolated installed Windows SCM service',()=>{
     socket.once('error',error=>finish(error));socket.once('connect',()=>socket.write(JSON.stringify(request)+'\n'));
     socket.on('data',chunk=>{buffer+=chunk.toString();const newline=buffer.indexOf('\n');if(newline>=0){try{finish(undefined,JSON.parse(buffer.slice(0,newline)));}catch(error){finish(error as Error);}}});
   });
+  test('machine broker targets user-agent status and restart without exposing machine processes',async()=>{
+    const agentName=process.env.MCPHUB_NATIVE_TEST_AGENT_PIPE!;
+    const agentPipe=`\\\\.\\pipe\\${agentName}`;
+    const session=Number(process.env.MCPHUB_NATIVE_TEST_AGENT_SESSION);
+    const execution_context={kind:'interactive',session_id:session,pipe_name:agentName};
+    const id=`manage-${randomUUID()}`;
+    try{
+      const started=await control({op:'start',spec:{id,command:process.execPath,args:['-e','setInterval(()=>{},1000)'],env:{},restart_limit:0}},agentPipe);
+      expect(started.pid).toBeGreaterThan(0);
+      const status=await control({op:'status',execution_context});
+      expect(status).toMatchObject({executionContext:'interactive',sessionId:session});
+      expect(status.processes.find((row:any)=>row.id===id)).toMatchObject({running:true,pid:started.pid});
+      expect((await control({op:'status'})).processes.some((row:any)=>row.id===id)).toBe(false);
+      const restarted=await control({op:'restart',id,execution_context});
+      expect(restarted.pid).toBeGreaterThan(0);expect(restarted.pid).not.toBe(started.pid);
+      expect((await control({op:'status',execution_context})).processes.find((row:any)=>row.id===id).pid).toBe(restarted.pid);
+      expect(await control({op:'secret_put',id:'forbidden',value:'synthetic',execution_context})).toHaveProperty('error','unsupported interactive operation');
+    }finally{await control({op:'stop',id},agentPipe);}
+  },15000);
   test('service delegates a secret-backed SDK stream to the explicit user session and cleans its lease',async()=>{
     const agentName=process.env.MCPHUB_NATIVE_TEST_AGENT_PIPE!;
     const agentPipe=`\\\\.\\pipe\\${agentName}`;

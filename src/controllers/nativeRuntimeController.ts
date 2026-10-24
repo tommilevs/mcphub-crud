@@ -1,4 +1,6 @@
 import type { Request, Response } from 'express';
+import { normalizeNativeExecution } from '../utils/nativeExecution.js';
+import type { NativeExecution } from '../types/index.js';
 import {
   deleteNativeRuntimeSecret,
   putNativeRuntimeSecret,
@@ -37,9 +39,17 @@ export const deleteSecret = async (req: Request, res: Response): Promise<void> =
   }
 };
 
-export const getStatus = async (_req: Request, res: Response): Promise<void> => {
+export const getStatus = async (req: Request, res: Response): Promise<void> => {
+  let execution:NativeExecution|undefined;
   try {
-    const status = await getNativeRuntimeStatus();
+    if(req.query?.sessionId!==undefined||req.query?.pipeName!==undefined){
+      const session=req.query.sessionId;
+      if(typeof session!=='string'||!/^\d+$/.test(session))throw new Error('Invalid Windows session id');
+      execution=normalizeNativeExecution({kind:'interactive',sessionId:Number(session),...(req.query.pipeName!==undefined?{pipeName:req.query.pipeName}:{})});
+    }
+  }catch(error){res.status(400).json({error:error instanceof Error?error.message:'Invalid execution context'});return;}
+  try {
+    const status = await (execution?getNativeRuntimeStatus(execution):getNativeRuntimeStatus());
     res.json({ data: status });
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : 'Native runtime unavailable' });
@@ -52,8 +62,11 @@ export const restartProcess = async (req: Request, res: Response): Promise<void>
     res.status(400).json({ error: 'Invalid process id' });
     return;
   }
+  let execution:NativeExecution|undefined;
+  try{execution=normalizeNativeExecution(req.body?.executionContext);}
+  catch(error){res.status(400).json({error:error instanceof Error?error.message:'Invalid execution context'});return;}
   try {
-    const status = await restartNativeRuntimeProcess(id);
+    const status = await (execution?restartNativeRuntimeProcess(id,execution):restartNativeRuntimeProcess(id));
     res.json({ data: status });
   } catch (error) {
     res.status(503).json({ error: error instanceof Error ? error.message : 'Native runtime unavailable' });

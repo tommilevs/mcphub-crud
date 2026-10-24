@@ -1,5 +1,7 @@
 import net from 'node:net';
 import { StringDecoder } from 'node:string_decoder';
+import type { NativeExecution } from '../types/index.js';
+import { interactiveExecutionRequest } from '../utils/nativeExecution.js';
 
 type RuntimeResponse = { ok?: boolean; error?: string; id?: string } & Record<string, unknown>;
 
@@ -50,7 +52,12 @@ export const putNativeRuntimeSecret = (id: string, value: string): Promise<Runti
 export const deleteNativeRuntimeSecret = (id: string): Promise<RuntimeResponse> =>
   callRuntime({ op: 'secret_delete', id });
 
-export const getNativeRuntimeStatus = (): Promise<RuntimeResponse> => callRuntime({ op: 'status' });
+export const getNativeRuntimeStatus = (execution?: NativeExecution): Promise<RuntimeResponse> => {
+  const context=interactiveExecutionRequest(execution,true);
+  return callRuntime({op:'status',...(context?{execution_context:context}:{})});
+};
 
-export const restartNativeRuntimeProcess = (id: string): Promise<RuntimeResponse> =>
-  callRuntime({ op: 'restart', id });
+export const restartNativeRuntimeProcess = (id: string,execution?: NativeExecution): Promise<RuntimeResponse> => {
+  const context=interactiveExecutionRequest(execution,true);
+  return callRuntime({op:'restart',id,...(context?{execution_context:context}:{})});
+};

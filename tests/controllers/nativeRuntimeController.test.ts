@@ -71,4 +71,20 @@ describe('nativeRuntimeController', () => {
     expect(mockRestart).toHaveBeenCalledWith('desktop-commander');
     expect(res.json).toHaveBeenCalledWith({ data: { id: 'desktop-commander', state: 'STARTING' } });
   });
+  it('targets an explicit interactive session for status and restart',async()=>{
+    const execution={kind:'interactive',sessionId:7,pipeName:'mcphub-user-fixture'};
+    mockStatus.mockResolvedValue({processes:[]});mockRestart.mockResolvedValue({ok:true});
+    await getStatus({query:{sessionId:'7',pipeName:execution.pipeName}} as unknown as Request,response());
+    expect(mockStatus).toHaveBeenCalledWith(execution);
+    await restartProcess({params:{id:'fixture'},body:{executionContext:execution}} as unknown as Request,response());
+    expect(mockRestart).toHaveBeenCalledWith('fixture',execution);
+  });
+  it('rejects invalid interactive targets before reaching the runtime',async()=>{
+    const res=response();
+    await getStatus({query:{sessionId:'0'}} as unknown as Request,res);
+    expect(res.status).toHaveBeenCalledWith(400);expect(mockStatus).not.toHaveBeenCalled();
+    const restart=response();
+    await restartProcess({params:{id:'fixture'},body:{executionContext:{kind:'interactive',sessionId:0}}} as unknown as Request,restart);
+    expect(restart.status).toHaveBeenCalledWith(400);expect(mockRestart).not.toHaveBeenCalled();
+  });
 });
