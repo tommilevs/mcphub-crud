@@ -9,7 +9,9 @@ export async function getNativeRuntimeOverview(){
  const processes:Array<Record<string,unknown>>=(Array.isArray(machine)?machine:machine.processes as Record<string,unknown>[]??[])
    .map(row=>({...row,executionContext:{kind:'service'}}));
  const contexts=new Map<string,NativeExecution>();
- for(const server of await getServerDao().findAll()){
+ let configurationAvailable=true;
+ const servers=await getServerDao().findAll().catch(()=>{configurationAvailable=false;return [];});
+ for(const server of servers){
   if(!server.command||(server.type&&server.type!=='stdio'))continue;
   try{
    const execution=normalizeNativeExecution(server.options?.nativeExecution);
@@ -34,5 +36,5 @@ export async function getNativeRuntimeOverview(){
    processes.push(...agent.processes.map(row=>({...row,executionContext:agent.executionContext})));
   }
  }
- return {...(Array.isArray(machine)?{}:machine),processes,agents};
+ return {...(Array.isArray(machine)?{}:machine),processes,agents,configurationAvailable};
 }

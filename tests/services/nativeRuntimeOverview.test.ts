@@ -3,6 +3,10 @@ jest.mock('../../src/services/nativeRuntimeSecretService.js',()=>({getNativeRunt
 jest.mock('../../src/dao/DaoFactory.js',()=>({getServerDao:()=>({findAll:mockServers})}));
 import {getNativeRuntimeOverview} from '../../src/services/nativeRuntimeOverview.js';
 beforeEach(()=>{jest.resetAllMocks();});
+it('keeps service management available when configuration storage fails',async()=>{
+ mockStatus.mockResolvedValue({processes:[{id:'machine'}]});mockServers.mockRejectedValue(Error('private database error'));
+ await expect(getNativeRuntimeOverview()).resolves.toMatchObject({processes:[{id:'machine'}],agents:[],configurationAvailable:false});
+});
 it('merges configured agents once and keeps explicit restart targets even for duplicate process ids',async()=>{
  mockServers.mockResolvedValue([{command:'node',options:{nativeExecution:{kind:'interactive',sessionId:7}}},{command:'node',options:{nativeExecution:{kind:'interactive',sessionId:7,pipeName:'mcphub-user-session-7'}}}]);
  mockStatus.mockResolvedValueOnce({processes:[{id:'same',running:true}],gatewayHealthy:true}).mockResolvedValue({processes:[{id:'same',running:true}]});

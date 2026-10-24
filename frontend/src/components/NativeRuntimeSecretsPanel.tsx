@@ -5,7 +5,7 @@ import { useToast } from '@/contexts/ToastContext';
 const SECRET_ID = /^[A-Za-z0-9_.-]{1,128}$/;
 type ExecutionContext={kind:'service'}|{kind:'interactive';sessionId:number;pipeName?:string};
 type NativeProcessStatus = { id: string; serverName?:string; executionContext?:ExecutionContext; state?: string; running: boolean; pid?: number; restarts: number; restart_limit?: number; protocolReady?: boolean; lastError?: string };
-type NativeRuntimeStatusResponse = NativeProcessStatus[] | { processes: NativeProcessStatus[]; gatewayHealthy?: boolean;agents?:Array<{executionContext:ExecutionContext;available:boolean}> };
+type NativeRuntimeStatusResponse = NativeProcessStatus[] | { processes: NativeProcessStatus[]; gatewayHealthy?: boolean;configurationAvailable?:boolean;agents?:Array<{executionContext:ExecutionContext;available:boolean}> };
 
 /** Admin-only enrollment UI. The value is sent once and never rendered back. */
 const NativeRuntimeSecretsPanel: React.FC = () => {
@@ -17,6 +17,7 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
   const [gatewayHealthy, setGatewayHealthy] = useState<boolean | null>(null);
   const [statusError, setStatusError] = useState<string | null>(null);
   const [unavailableAgents,setUnavailableAgents]=useState<ExecutionContext[]>([]);
+  const [configurationAvailable,setConfigurationAvailable]=useState(true);
 
   const refreshStatus = async () => {
     try {
@@ -35,6 +36,7 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
     setRuntimeStatus(processes);
     setGatewayHealthy(Array.isArray(payload) || !payload ? null : payload.gatewayHealthy ?? null);
     setUnavailableAgents(Array.isArray(payload)||!payload?[]:(payload.agents??[]).filter(agent=>!agent.available).map(agent=>agent.executionContext));
+    setConfigurationAvailable(Array.isArray(payload)||!payload||payload.configurationAvailable!==false);
     }catch(error){
       setStatusError(error instanceof Error?error.message:'Native runtime unavailable');
     }
@@ -116,6 +118,7 @@ const NativeRuntimeSecretsPanel: React.FC = () => {
           User agent unavailable{context.kind==='interactive'?` · Windows session ${context.sessionId}`:''}
         </p>
       ))}
+      {!configurationAvailable&&<p className="mt-2 text-sm text-amber-600">Server settings unavailable. Showing Windows service processes only.</p>}
       {runtimeStatus && runtimeStatus.length > 0 && (
         <div className="mt-3 space-y-2">
           {runtimeStatus.map((process) => (

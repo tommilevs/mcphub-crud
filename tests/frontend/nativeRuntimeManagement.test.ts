@@ -19,7 +19,7 @@ it('restarts the selected row in its own agent rather than the machine service',
 it('requests merged status and exposes unavailable agents without dropping healthy processes',async()=>{
  const apiGet=jest.fn().mockResolvedValue({data:{processes:[{id:'healthy'}],gatewayHealthy:true,agents:[{executionContext:{kind:'interactive',sessionId:7},available:false}]}});
  const setRuntimeStatus=jest.fn(),setUnavailableAgents=jest.fn();
- const refresh=callback('refreshStatus',{apiGet,setRuntimeStatus,setUnavailableAgents,setGatewayHealthy:jest.fn(),setStatusError:jest.fn()});
+ const refresh=callback('refreshStatus',{apiGet,setRuntimeStatus,setUnavailableAgents,setConfigurationAvailable:jest.fn(),setGatewayHealthy:jest.fn(),setStatusError:jest.fn()});
  await refresh();
  expect(apiGet).toHaveBeenCalledWith('/native-runtime/status?includeInteractive=true');
  expect(setRuntimeStatus).toHaveBeenCalledWith([{id:'healthy'}]);
