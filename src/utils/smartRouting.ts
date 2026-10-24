@@ -1,4 +1,5 @@
 import { expandEnvVars } from '../config/index.js';
+import type {ResultRetrievalConfig} from '../services/toolResultRetrievalPolicy.js';
 import { getSystemConfigDao } from '../dao/DaoFactory.js';
 import { migrateLegacySmartRoutingConfig } from '../dao/SystemConfigDao.js';
 import { logger } from './logger.js';
@@ -13,6 +14,7 @@ import {
  * Smart routing configuration interface
  */
 export interface SmartRoutingConfig {
+  resultRetrieval?:ResultRetrievalConfig;
   enabled: boolean;
   dbUrl: string;
   /**

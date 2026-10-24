@@ -33,8 +33,25 @@ saved result ID, and fit the requested estimated token budget including their
 metadata. Each fragment identifies its original `content` block and end-exclusive
 UTF-16 text offsets. Text is copied exactly, including line endings; it is not a
 summary. Read the complete stored MCP envelope with `get_tool_result` or ranges.
-These provisional thresholds still require workload benchmarks and per-tool
-policies; this lexical path does not claim complete hybrid retrieval.
+These provisional thresholds still require workload benchmarks; this lexical
+path does not claim complete hybrid retrieval.
+
+Administrators can set `smartRouting.resultRetrieval` through the existing
+system-config API, without a database schema migration:
+
+```json
+{"smartRouting":{"resultRetrieval":{"minTokens":8000,"maxOutputTokens":3000,
+ "policies":{"desktop-commander/*":{"minTokens":12000},
+ "basic-memory/read_content":{"mode":"passthrough"}}}}}
+```
+
+Defaults, `server/*`, bare tool name, then `server/tool` are merged in that order.
+Rules accept `mode` (`fragments` or `passthrough`), `minTokens` (512–1,000,000)
+and `maxOutputTokens` (512–4,096). A configured budget caps the caller's budget;
+`passthrough` overrides caller opt-in. Unknown or unreadable policies preserve
+the full response. Policies do not automatically enable retrieval: the call
+must still opt in. Sending an empty object clears configured defaults and rules.
+The policy editor in the dashboard remains pending.
 
 When database history is available, `$smart` routes expose these additional tools:
 

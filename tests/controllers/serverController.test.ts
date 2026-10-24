@@ -852,6 +852,16 @@ describe('serverController - updateSystemConfig', () => {
     }));
   });
 
+  it.each([{minTokens:12000,policies:{'memory/read_content':{mode:'passthrough'}}},{}])('persists or clears result retrieval policies',async resultRetrieval=>{
+    mockRequest.body={smartRouting:{resultRetrieval}};
+    await updateSystemConfig(mockRequest as Request,mockResponse as Response);
+    expect(mockSystemConfigDao.update).toHaveBeenCalledWith(expect.objectContaining({smartRouting:expect.objectContaining({resultRetrieval})}));
+  });
+  it('rejects an invalid result retrieval policy before saving configuration',async()=>{
+    mockRequest.body={smartRouting:{resultRetrieval:{maxOutputTokens:99999}}};
+    await updateSystemConfig(mockRequest as Request,mockResponse as Response);
+    expect(mockStatus).toHaveBeenCalledWith(400);expect(mockSystemConfigDao.update).not.toHaveBeenCalled();
+  });
   it.each([{ 'demo/inspect': 8 }, {}])('persists or clears per-tool LoopGuard budgets %s', async (loopGuardToolBudgets) => {
     mockRequest.body = { smartRouting: { loopGuardToolBudgets } };
     await updateSystemConfig(mockRequest as Request, mockResponse as Response);

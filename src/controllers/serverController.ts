@@ -1,4 +1,5 @@
 import { validateAllowedCidrs } from '../utils/ssrf.js';
+import {parseResultRetrievalPolicy} from '../services/toolResultRetrievalPolicy.js';
 import { parseLoopGuardToolBudgets } from '../utils/loopGuardPolicy.js';
 import {
   copyCredentialBindings,
@@ -2030,6 +2031,7 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
         typeof smartRouting.azureOpenaiApiVersion === 'string' ||
         typeof smartRouting.azureOpenaiEmbeddingDeployment === 'string' ||
         typeof smartRouting.progressiveDisclosure === 'boolean' ||
+        smartRouting.resultRetrieval !== undefined ||
         typeof smartRouting.mcpZeroEnabled === 'boolean' ||
         smartRouting.attributionMode !== undefined ||
         smartRouting.loopGuardEnabled !== undefined ||
@@ -2449,6 +2451,10 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
 
       if (typeof smartRouting.progressiveDisclosure === 'boolean') {
         systemConfig.smartRouting.progressiveDisclosure = smartRouting.progressiveDisclosure;
+      }
+      if(smartRouting.resultRetrieval!==undefined){
+        try{systemConfig.smartRouting.resultRetrieval=parseResultRetrievalPolicy(smartRouting.resultRetrieval);}
+        catch(error){res.status(400).json({success:false,message:error instanceof Error?error.message:'Invalid result retrieval policy'});return;}
       }
 
       if (typeof smartRouting.mcpZeroEnabled === 'boolean') {

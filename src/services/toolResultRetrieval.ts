@@ -1,6 +1,6 @@
 import {countTokens} from '../utils/tokenCost.js';
 export interface OriginalResultFragment {start:number;end:number;text:string;score:number;}
-export interface ResultRetrievalOptions {objective:string;maxOutputTokens:number;}
+export interface ResultRetrievalOptions {objective:string;maxOutputTokens:number;minTokens?:number;}
 const savedResults=new WeakMap<object,{resultId:string;payloadAvailable:boolean}>();
 /** In-process capture proof. Upstream JSON cannot manufacture this association. */
 export function rememberSavedResult(result:object,resultId:string,payloadAvailable:boolean){savedResults.set(result,{resultId,payloadAvailable});}
@@ -19,7 +19,7 @@ export async function retrieveOriginalResult<T extends Record<string,any>>(resul
  const saved=savedResults.get(result);
  if(!options||!saved?.payloadAvailable||!Array.isArray(result.content))return result;
  try{
-  if(await countTokens(JSON.stringify(result))<=8000)return result;
+  if(await countTokens(JSON.stringify(result))<=(options.minTokens??8000))return result;
   const fragments:Array<OriginalResultFragment&{block:number}>=[];
   result.content.forEach((block:any,index:number)=>{
    if(block?.type==='text'&&typeof block.text==='string')fragments.push(...selectResultFragments(block.text,options.objective,options.maxOutputTokens*2).map(hit=>({...hit,block:index})));
