@@ -9,6 +9,7 @@ pub struct Options {
     pub data_dir: Option<PathBuf>,
     pub runtime_dir: Option<PathBuf>,
     pub show_initial_password: bool,
+    pub user_agent: bool,
 }
 impl Options {
     pub fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self, String> {
@@ -21,12 +22,14 @@ impl Options {
             data_dir: None,
             runtime_dir: None,
             show_initial_password: false,
+            user_agent: false,
         };
         let mut args = arguments.into_iter();
         while let Some(flag) = args.next() {
             match flag.as_str() {
                 "--no-gateway" => options.no_gateway = true,
                 "--show-initial-password" => options.show_initial_password = true,
+                "--user-agent" => options.user_agent = true,
                 "--service-name" | "--pipe-name" => {
                     let value = args
                         .next()
@@ -72,6 +75,18 @@ impl Options {
                 _ => return Err(format!("unknown runtime option: {flag}")),
             }
         }
+        if options.user_agent {
+            if options.secret_dir.is_some() || options.show_initial_password {
+                return Err("user agent cannot access machine credentials".into());
+            }
+            options.no_gateway = true;
+            if options.pipe_name == "mcphub-runtime" {
+                options.pipe_name = "mcphub-user-session".into();
+            }
+            if !options.pipe_name.starts_with("mcphub-user-") {
+                return Err("user agent pipe must start with mcphub-user-".into());
+            }
+        }
         Ok(options)
     }
 }
@@ -91,6 +106,20 @@ mod tests {
         assert_eq!(options.gateway_port, 3000);
         assert!(options.data_dir.is_none());
         assert!(options.runtime_dir.is_none());
+        assert!(!options.user_agent);
+    }
+    #[test]
+    fn user_agent_is_separate_from_machine_credentials_and_service_pipe() {
+        let agent = parse(&["--user-agent"]).unwrap();
+        assert!(agent.user_agent && agent.no_gateway);
+        assert_eq!(agent.pipe_name, "mcphub-user-session");
+        for args in [
+            &["--user-agent", "--secret-dir", "C:\\secrets"][..],
+            &["--user-agent", "--show-initial-password"],
+            &["--user-agent", "--pipe-name", "another-pipe"],
+        ] {
+            assert!(parse(args).is_err());
+        }
     }
     #[test]
     fn isolated_gateway_options_validate_port_and_absolute_data_path() {

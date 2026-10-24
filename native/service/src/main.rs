@@ -206,6 +206,8 @@ fn handle_request(
                 serde_json::json!({
                     "processes": processes,
                     "gatewayHealthy": !options().no_gateway && gateway_healthy(),
+                    "executionContext": if options().user_agent { "interactive" } else { "service" },
+                    "sessionId": pipe_access::current_session_id()?,
                 })
             }
             #[cfg(not(windows))]
@@ -225,7 +227,7 @@ fn handle_request(
 #[cfg(windows)]
 fn handle_request_with_secrets(
     supervisor: &mut RuntimeSupervisor,
-    secrets: &SecretStore,
+    secrets: Option<&SecretStore>,
     line: &str,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let mut request: serde_json::Value = serde_json::from_str(line)?;
@@ -233,11 +235,15 @@ fn handle_request_with_secrets(
         Some("secret_put") => {
             let id = request["id"].as_str().unwrap_or_default();
             let value = request["value"].as_str().unwrap_or_default();
-            secrets.put(id, value.as_bytes())?;
+            secrets
+                .ok_or("credentials unavailable in user agent")?
+                .put(id, value.as_bytes())?;
             return Ok(serde_json::json!({"ok": true, "id": id}).to_string());
         }
         Some("secret_delete") => {
-            secrets.delete(request["id"].as_str().unwrap_or_default())?;
+            secrets
+                .ok_or("credentials unavailable in user agent")?
+                .delete(request["id"].as_str().unwrap_or_default())?;
             return Ok(serde_json::json!({"ok": true}).to_string());
         }
         Some("start") => {
@@ -256,7 +262,11 @@ fn handle_request_with_secrets(
                     let secret_id = secret_id
                         .as_str()
                         .ok_or("secret_env values must be strings")?;
-                    let value = String::from_utf8(secrets.get(secret_id)?)?;
+                    let value = String::from_utf8(
+                        secrets
+                            .ok_or("credentials unavailable in user agent")?
+                            .get(secret_id)?,
+                    )?;
                     env.insert(key.clone(), serde_json::Value::String(value));
                 }
             }
@@ -292,7 +302,7 @@ fn write_control(writer: &Arc<Mutex<pipe_io::Pipe>>, value: &serde_json::Value) 
 fn serve_named_pipe_client(
     pipe: usize,
     supervisor: Arc<Mutex<RuntimeSupervisor>>,
-    secrets: Arc<SecretStore>,
+    secrets: Arc<Option<SecretStore>>,
 ) {
     let channel = unsafe { pipe_io::Pipe::from_raw(pipe as *mut _) };
     let writer = channel.clone();
@@ -318,7 +328,11 @@ fn serve_named_pipe_client(
                         return Err("one stream lease per connection".into());
                     }
                     let mut guard = supervisor.lock().map_err(|_| "supervisor unavailable")?;
-                    let response = handle_request_with_secrets(&mut guard, &secrets, line.trim())?;
+                    let response = handle_request_with_secrets(
+                        &mut guard,
+                        secrets.as_ref().as_ref(),
+                        line.trim(),
+                    )?;
                     let id = request["spec"]["id"]
                         .as_str()
                         .ok_or("missing process id")?
@@ -369,7 +383,7 @@ fn serve_named_pipe_client(
                     let mut guard = supervisor.lock().map_err(|_| "supervisor unavailable")?;
                     Ok(serde_json::from_str(&handle_request_with_secrets(
                         &mut guard,
-                        &secrets,
+                        secrets.as_ref().as_ref(),
                         line.trim(),
                     )?)?)
                 }
@@ -444,10 +458,12 @@ fn run_named_pipe(
     // The installed gateway is service-hosted (SYSTEM); elevated administrators
     // may also operate it. An interactive logon alone is not authorization.
     // Ordinary dashboard clients use the gateway's authenticated HTTP API.
-    let sddl: Vec<u16> = pipe_access::CONTROL_PIPE_SDDL
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
+    let access = if options().user_agent {
+        pipe_access::user_agent_sddl()?
+    } else {
+        pipe_access::CONTROL_PIPE_SDDL.to_string()
+    };
+    let sddl: Vec<u16> = access.encode_utf16().chain(std::iter::once(0)).collect();
     let mut security_descriptor: PSECURITY_DESCRIPTOR = std::ptr::null_mut();
     let mut _descriptor_size = 0u32;
     let converted = unsafe {
@@ -466,15 +482,27 @@ fn run_named_pipe(
         lpSecurityDescriptor: security_descriptor,
         bInheritHandle: 0,
     };
-    let secrets = std::sync::Arc::new(match &options().secret_dir {
-        Some(path) => SecretStore::new(path)?,
-        None => SecretStore::machine_default()?,
+    let secrets = std::sync::Arc::new(if options().user_agent {
+        None
+    } else {
+        Some(match &options().secret_dir {
+            Some(path) => SecretStore::new(path)?,
+            None => SecretStore::machine_default()?,
+        })
     });
+    let mut first_instance = true;
     loop {
+        let flags = PIPE_ACCESS_DUPLEX
+            | FILE_FLAG_OVERLAPPED
+            | if options().user_agent && first_instance {
+                windows_sys::Win32::Storage::FileSystem::FILE_FLAG_FIRST_PIPE_INSTANCE
+            } else {
+                0
+            };
         let pipe = unsafe {
             CreateNamedPipeW(
                 name.as_ptr(),
-                PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
+                flags,
                 PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
                 PIPE_UNLIMITED_INSTANCES,
                 64 * 1024,
@@ -486,6 +514,7 @@ fn run_named_pipe(
         if pipe == INVALID_HANDLE_VALUE {
             return Err(Box::new(io::Error::last_os_error()));
         }
+        first_instance = false;
         let connected = pipe_io::connect(pipe).is_ok();
         if !connected {
             unsafe {
@@ -597,9 +626,30 @@ fn service_main(_arguments: Vec<OsString>) {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(windows)]
     {
+        let mut parsed = options::Options::parse(std::env::args().skip(1))?;
+        if parsed.user_agent {
+            let session = pipe_access::current_session_id()?;
+            if session == 0 {
+                return Err("user agent requires a signed-in interactive Windows session".into());
+            }
+            if parsed.pipe_name == "mcphub-user-session" {
+                parsed.pipe_name = format!("mcphub-user-session-{session}");
+            }
+        }
         OPTIONS
-            .set(options::Options::parse(std::env::args().skip(1))?)
+            .set(parsed)
             .map_err(|_| "runtime options already initialized")?;
+        if options().user_agent {
+            let supervisor = Arc::new(Mutex::new(RuntimeSupervisor::new()));
+            let poll = Arc::clone(&supervisor);
+            std::thread::spawn(move || loop {
+                if let Ok(mut guard) = poll.lock() {
+                    let _ = guard.poll();
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            });
+            return run_named_pipe(supervisor);
+        }
         if options().show_initial_password {
             let store = match &options().secret_dir {
                 Some(path) => SecretStore::new(path)?,

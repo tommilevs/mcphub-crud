@@ -1,5 +1,68 @@
 pub const CONTROL_PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)";
 
+pub fn current_session_id() -> std::io::Result<u32> {
+    let mut session = 0;
+    if unsafe {
+        windows_sys::Win32::System::RemoteDesktop::ProcessIdToSessionId(
+            std::process::id(),
+            &mut session,
+        )
+    } == 0
+    {
+        return Err(std::io::Error::last_os_error());
+    }
+    Ok(session)
+}
+
+pub fn user_agent_sddl() -> std::io::Result<String> {
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, LocalFree},
+        Security::{
+            Authorization::ConvertSidToStringSidW, GetTokenInformation, TokenUser, TOKEN_QUERY,
+            TOKEN_USER,
+        },
+        System::Threading::{GetCurrentProcess, OpenProcessToken},
+    };
+    let mut token = std::ptr::null_mut();
+    if unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    let result = (|| unsafe {
+        let mut needed = 0;
+        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        if needed == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut buffer = vec![0usize; (needed as usize).div_ceil(std::mem::size_of::<usize>())];
+        if GetTokenInformation(
+            token,
+            TokenUser,
+            buffer.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        ) == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+        let user = &*(buffer.as_ptr() as *const TOKEN_USER);
+        let mut text = std::ptr::null_mut();
+        if ConvertSidToStringSidW(user.User.Sid, &mut text) == 0 {
+            return Err(std::io::Error::last_os_error());
+        }
+        let mut len = 0;
+        while *text.add(len) != 0 {
+            len += 1;
+        }
+        let sid = String::from_utf16_lossy(std::slice::from_raw_parts(text, len));
+        LocalFree(text.cast());
+        Ok(format!("{CONTROL_PIPE_SDDL}(A;;GA;;;{sid})"))
+    })();
+    unsafe {
+        CloseHandle(token);
+    }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::CONTROL_PIPE_SDDL;
@@ -66,8 +129,11 @@ mod tests {
         Token(client)
     }
     fn can_control(token: &Token) -> bool {
+        can_control_with_sddl(token, CONTROL_PIPE_SDDL)
+    }
+    fn can_control_with_sddl(token: &Token, sddl: &str) -> bool {
         // Object creation supplies the service owner/group. AccessCheck needs them explicit in this standalone descriptor.
-        let descriptor = wide(&format!("O:SYG:SY{CONTROL_PIPE_SDDL}"));
+        let descriptor = wide(&format!("O:SYG:SY{sddl}"));
         let mut security = std::ptr::null_mut();
         assert_ne!(
             unsafe {
@@ -130,6 +196,42 @@ mod tests {
         allowed != 0
     }
     #[test]
+    fn user_agent_allows_its_creator_without_granting_machine_pipe_access() {
+        let descriptor = super::user_agent_sddl().unwrap();
+        let user_sid = descriptor
+            .split(";;;")
+            .last()
+            .unwrap()
+            .trim_end_matches(')');
+        let user = sid(user_sid);
+        let restriction = SID_AND_ATTRIBUTES {
+            Sid: user.0,
+            Attributes: 0,
+        };
+        let mut restricted = std::ptr::null_mut();
+        let token = process_token();
+        assert_ne!(
+            unsafe {
+                CreateRestrictedToken(
+                    token.0,
+                    0,
+                    0,
+                    std::ptr::null(),
+                    0,
+                    std::ptr::null(),
+                    1,
+                    &restriction,
+                    &mut restricted,
+                )
+            },
+            0
+        );
+        let token = impersonation_token(&Token(restricted));
+        assert!(can_control_with_sddl(&token, &descriptor));
+        assert!(!can_control(&token));
+        assert!(!descriptor.contains(";;;IU)"));
+    }
+    #[test]
     fn interactive_membership_alone_cannot_control_system_processes_or_secrets() {
         let client = process_token();
         let interactive = sid("S-1-5-4");
@@ -179,11 +281,11 @@ mod tests {
     fn real_pipe_rejects_an_interactive_restricted_client() {
         use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
         use windows_sys::Win32::Security::{RevertToSelf, SECURITY_ATTRIBUTES};
-        use windows_sys::Win32::System::Threading::SetThreadToken;
         use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
         use windows_sys::Win32::System::Pipes::{
             CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT,
         };
+        use windows_sys::Win32::System::Threading::SetThreadToken;
         let mut security = std::ptr::null_mut();
         let sddl = wide(CONTROL_PIPE_SDDL);
         assert_ne!(

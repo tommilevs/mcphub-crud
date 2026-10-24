@@ -163,8 +163,21 @@ preserved and can be edited in the dashboard.
 
 The service executes MCP children in its own Windows session (normally SYSTEM
 Session 0). This is suitable for background tools, but does not provide access to
-the signed-in user's desktop. Interactive tools such as Windows Computer Use
-still require a user-session host; that hosting path is not implemented yet.
+the signed-in user's desktop. The same executable supports a manual user-session
+host: `mcphub-runtime-service.exe --user-agent`. It rejects Session 0, uses
+`mcphub-user-session-<sessionId>` by default, and accepts a separate
+`--pipe-name mcphub-user-...` for isolated instances. That pipe grants access to
+its creating user, SYSTEM and elevated administrators. It runs the existing
+streaming supervisor in the user's session, with no gateway or machine secret
+store; credential enrollment, deletion and unresolved secret references fail.
+Run `native/test-user-agent-windows.ps1` to verify real SDK calls, child session
+identity, connection cleanup and crash supervision. Agent launch from tray,
+per-server routing and privileged credential delegation are not connected yet;
+existing gateway servers still use their configured service transport.
+The first user-agent pipe instance is exclusive: a duplicate agent using that
+pipe fails without replacing the original host. For service/agent-only changes,
+`native/build-windows.ps1 -Action service` builds that executable without
+rebuilding the tray or repacking the installer.
 The installer requests service shutdown before replacing runtime files and
 aborts that upgrade if shutdown fails. Development and host-managed deployments can
 run the Node gateway separately (`pnpm backend:dev` or `pnpm backend:build`
