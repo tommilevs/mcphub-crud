@@ -16,6 +16,7 @@ $secrets=Join-Path $testRoot 'secrets'
 $binary=(Resolve-Path -LiteralPath $ServiceBinary).Path
 $created=$false
 $desktop=$null
+$desktopAgentPipe="mcphub-user-desktop-$guid"
 $oldPipe=$env:MCPHUB_NATIVE_TEST_PIPE
 $oldSecrets=$env:MCPHUB_NATIVE_TEST_SECRET_DIR
 $oldRestartService=$env:MCPHUB_RESTART_TEST_SERVICE
@@ -87,7 +88,7 @@ try {
     if($page.Content -notmatch '<div id="root"'){throw 'Bundled dashboard was not served.'}
     Write-Output 'Bundled gateway HTTP health/login/native status passed.'
     if($WithDesktop){
-      $desktop=Start-Process -FilePath (Join-Path $PSScriptRoot 'target\release\mcphub-tray.exe') -ArgumentList '--open-dashboard' -Environment @{MCPHUB_DESKTOP_PORT="$port"} -WindowStyle Hidden -PassThru
+      $desktop=Start-Process -FilePath (Join-Path $PSScriptRoot 'target\release\mcphub-tray.exe') -ArgumentList '--open-dashboard' -Environment @{MCPHUB_DESKTOP_PORT="$port";MCPHUB_USER_AGENT_PIPE=$desktopAgentPipe} -WindowStyle Hidden -PassThru
       Write-Output "DESKTOP_ACCEPTANCE_READY port=$port pid=$($desktop.Id)"
       Read-Host 'After checking login and closing the dashboard window, press Enter' | Out-Null
       if($desktop.HasExited){throw 'Closing the dashboard exited the tray.'}
@@ -136,6 +137,7 @@ try {
 }
 finally {
   if($desktop){if(-not $desktop.HasExited){$desktop.Kill();$desktop.WaitForExit()};$desktop.Dispose()}
+  if($WithDesktop){Get-CimInstance Win32_Process -Filter "Name='mcphub-runtime-service.exe'" | Where-Object {$_.CommandLine -and $_.CommandLine.Contains($desktopAgentPipe)} | ForEach-Object {Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue}}
   $env:MCPHUB_NATIVE_TEST_PIPE=$oldPipe;$env:MCPHUB_NATIVE_TEST_SECRET_DIR=$oldSecrets
   $env:MCPHUB_RESTART_TEST_SERVICE=$oldRestartService
   if($created){

@@ -170,10 +170,16 @@ host: `mcphub-runtime-service.exe --user-agent`. It rejects Session 0, uses
 its creating user, SYSTEM and elevated administrators. It runs the existing
 streaming supervisor in the user's session, with no gateway or machine secret
 store; credential enrollment, deletion and unresolved secret references fail.
+The tray launches the agent silently and supervises its pipe while the tray is
+running (up to five launch attempts). It reuses an existing host in the same
+Windows session. Closing the tray leaves the agent independent; reopening the
+tray resumes monitoring. `MCPHUB_USER_AGENT_PIPE` can select a separate
+`mcphub-user-...` pipe for isolated testing.
 Run `native/test-user-agent-windows.ps1` to verify real SDK calls, child session
-identity, connection cleanup and crash supervision. Agent launch from tray,
-per-server routing and privileged credential delegation are not connected yet;
-existing gateway servers still use their configured service transport.
+identity, connection cleanup, crash supervision, agent reuse and survival after
+the tray watchdog stops. Per-server routing and privileged credential delegation
+are not connected yet; existing gateway servers still use their configured
+service transport.
 The first user-agent pipe instance is exclusive: a duplicate agent using that
 pipe fails without replacing the original host. For service/agent-only changes,
 `native/build-windows.ps1 -Action service` builds that executable without

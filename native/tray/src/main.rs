@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#[cfg(windows)]
+mod agent_lifecycle;
 mod gateway_start;
 
 use gateway_start::background_command;
@@ -168,6 +170,25 @@ fn main() {
             let port = gateway_start::desktop_port(configured_port.as_deref())
                 .map_err(std::io::Error::other)?;
             start_gateway(app.handle(), port);
+            #[cfg(windows)]
+            {
+                let session = agent_lifecycle::current_session()?;
+                let override_pipe = std::env::var("MCPHUB_USER_AGENT_PIPE").ok();
+                let pipe = agent_lifecycle::agent_pipe(session, override_pipe.as_deref())?;
+                let binary = app
+                    .path()
+                    .resource_dir()?
+                    .join("mcphub-runtime-service.exe");
+                if binary.is_file() {
+                    std::thread::spawn(move || {
+                        let _ = agent_lifecycle::supervise_agent(
+                            binary,
+                            pipe,
+                            std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+                        );
+                    });
+                }
+            }
             tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
