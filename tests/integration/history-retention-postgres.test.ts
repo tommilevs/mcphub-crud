@@ -27,19 +27,29 @@ suite('production history schema on disposable PostgreSQL',()=>{
   expect(reopened).toMatchObject({raw:saved.raw,rawSha256:saved.rawSha256,pinned:true,useCount:1});
  });
  it('keeps 10000 recent owner results plus pins and cascades expired indexes without affecting another owner',async()=>{
-  const pinned=(await capture('alice'))!;await repository.setPinned(pinned.resultId,true);
   const other=(await capture('bob'))!;
+  const pinned=await repository.create({...other,resultId:randomUUID(),timestamp:new Date('2000-01-01T00:00:00Z'),username:'alice',pinned:false,useCount:0});
+  await repository.setPinned(pinned.resultId,true);
   const raw='{"content":[{"type":"text","text":"evidence"}]}';
   await db.query(`WITH inserted AS (
    INSERT INTO tool_results(result_id,timestamp,server,tool,duration_ms,status,username,raw,raw_text,raw_bytes,raw_sha256)
    SELECT md5('history-alice-'||i)::uuid,'2026-10-24'::timestamptz+i*INTERVAL '1 second','fixture','read',1,'success','alice',$1,'evidence',$2,$3 FROM generate_series(1,10005) i RETURNING result_id
   ) INSERT INTO tool_result_state(result_id) SELECT result_id FROM inserted`,[raw,Buffer.byteLength(raw),createHash('sha256').update(raw).digest('hex')]);
   const oldest=(await db.query("SELECT md5('history-alice-1')::uuid AS id")).rows[0].id;
-  await repository.indexContent(oldest,'evidence',[1,0,0]);
+  await db.query(`INSERT INTO tool_result_chunks(result_id,chunk_index,chunk_version,content,embedding)
+    SELECT result_id,0,1,raw_text,'[1,0,0]'::vector FROM tool_results WHERE username='alice' AND raw_text='evidence'`);
   const start=Date.now();expect(await repository.enforceRetention(10000,'alice')).toBe(5);
   expect((await db.query("SELECT count(*)::int AS count FROM tool_results result JOIN tool_result_state state USING(result_id) WHERE username='alice' AND NOT pinned")).rows[0].count).toBe(10000);
   expect((await repository.findById(pinned.resultId))?.pinned).toBe(true);expect(await repository.findById(other.resultId)).not.toBeNull();
   expect((await db.query('SELECT 1 FROM tool_result_chunks WHERE result_id=$1',[oldest])).rowCount).toBe(0);
   console.info('10k retention elapsed milliseconds:',Date.now()-start);
+  const queryStart=Date.now();
+  const hits=await repository.hybridSearch('evidence',[1,0,0],20,{username:'alice'});
+  expect(hits).toHaveLength(20);expect(new Set(hits.map(hit=>hit.resultId)).size).toBe(20);
+  expect(hits.every(hit=>hit.username==='alice'&&hit.raw===raw)).toBe(true);
+  console.info('10k indexed hybrid search elapsed milliseconds:',Date.now()-queryStart);
+  const finalPage=await repository.findPaginated(501,20,{username:'alice'});
+  expect(finalPage).toMatchObject({total:10001,totalPages:501});
+  expect(finalPage.data.map(result=>result.resultId)).toEqual([pinned.resultId]);
  });
 });
