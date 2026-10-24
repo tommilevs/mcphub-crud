@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useState, useRef } from 'react';
+import {locateRawChunk} from '@/utils/rawChunkLocation';
 import { ArrowLeft, Clock3, Copy, Download, Pin, PinOff, Search } from 'lucide-react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -76,9 +77,24 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const [chunkError, setChunkError] = useState('');
   const [chunks, setChunks] = useState<ToolResultChunk[]>([]);
   const [chunksError, setChunksError] = useState('');
+  const chunkRequestRef=useRef(0);
+  const [rawSelection,setRawSelection]=useState<{start:number;end:number}|null>(null);
+  const rawMarkRef=useRef<HTMLElement>(null);
+  useEffect(()=>{rawMarkRef.current?.scrollIntoView({block:'center'});},[rawSelection]);
+  const openRawChunk=(chunk:ToolResultChunk|ToolResultChunkHit)=>{
+    if(!detail||chunk.resultId!==detail.resultId)return;
+    setRawSelection(null);
+    const location=locateRawChunk(raw,detail,chunk,chunks);
+    if(!location){setChunkError(t('toolResults.rawLocationUnavailable','Cannot locate this indexed fragment unambiguously in RAW. The index may be stale.'));return;}
+    setChunkError('');setRawSelection(location);
+  };
 
   useEffect(() => {
+    let active=true;
+    chunkRequestRef.current++;
+    setDetail(null);setRaw('');setChunks([]);setChunkHits([]);setChunkLoading(false);setRawSelection(null);setLineage(null);setError('');setChunkError('');setChunksError('');
     Promise.allSettled([getToolResult(resultId), getToolResultRaw(resultId), getToolResultLineage(resultId), getToolResultChunks(resultId)]).then(([metadata, payload, related, indexed]) => {
+      if(!active)return;
       if (metadata.status === 'fulfilled' && metadata.value.success && metadata.value.data) {
         setDetail(metadata.value.data);
       } else {
@@ -91,6 +107,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
       else if (indexed.status === 'rejected') setChunksError(indexed.reason instanceof Error ? indexed.reason.message : t('toolResults.fetchError'));
       else if (indexed.status === 'fulfilled' && !indexed.value.success) setChunksError(indexed.value.message || t('toolResults.fetchError'));
     });
+    return ()=>{active=false;chunkRequestRef.current++;};
   }, [resultId, t]);
 
   const togglePin = async () => {
@@ -118,16 +135,18 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
   const searchChunks = async () => {
     const search = chunkQuery.trim();
     if (!search) return;
+    const request=++chunkRequestRef.current;
     setChunkLoading(true);
     setChunkError('');
     try {
       const response = await searchToolResultChunks(resultId, search);
+      if(request!==chunkRequestRef.current)return;
       if (response.success && response.data) setChunkHits(response.data);
       else setChunkError(response.message || t('toolResults.fetchError'));
     } catch (cause) {
-      setChunkError(cause instanceof Error ? cause.message : t('toolResults.fetchError'));
+      if(request===chunkRequestRef.current)setChunkError(cause instanceof Error ? cause.message : t('toolResults.fetchError'));
     } finally {
-      setChunkLoading(false);
+      if(request===chunkRequestRef.current)setChunkLoading(false);
     }
   };
 
@@ -256,7 +275,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
         </div>
         {chunksError && <div className="mt-2 text-sm text-red-500">{chunksError}</div>}
         {!chunksError && chunks.length === 0 && <div className="mt-2 text-sm text-[var(--hub-ink-3)]">{t('toolResults.noChunks')}</div>}
-        {chunks.length > 0 && <div className="mt-3 space-y-2">{chunks.map((chunk) => <div key={`${chunk.chunkIndex}-${chunk.chunkVersion}`} className="rounded border border-[var(--hub-line)] p-2"><div className="flex items-center justify-between gap-2 text-xs text-[var(--hub-ink-3)]"><span>{t('toolResults.chunk')} #{chunk.chunkIndex} · v{chunk.chunkVersion} · {bytes(chunk.contentBytes)}</span><span>{chunk.hasEmbedding ? `${t('toolResults.embedded')} ${chunk.embeddingDimensions || ''}` : t('toolResults.noEmbedding')}</span></div><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs hub-mono">{chunk.content}</pre></div>)}</div>}
+        {chunks.length > 0 && <div className="mt-3 space-y-2">{chunks.map((chunk) => <div key={`${chunk.chunkIndex}-${chunk.chunkVersion}`} className="rounded border border-[var(--hub-line)] p-2"><div className="flex items-center justify-between gap-2 text-xs text-[var(--hub-ink-3)]"><span>{t('toolResults.chunk')} #{chunk.chunkIndex} · v{chunk.chunkVersion} · {bytes(chunk.contentBytes)}</span><span>{chunk.hasEmbedding ? `${t('toolResults.embedded')} ${chunk.embeddingDimensions || ''}` : t('toolResults.noEmbedding')}</span></div><button type="button" className="hub-btn mt-2 text-xs" disabled={!raw} onClick={()=>openRawChunk(chunk)}>{t('toolResults.openRawHere','Open RAW here')}</button><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs hub-mono">{chunk.content}</pre></div>)}</div>}
       </div>
       <div className="hub-card p-3">
         <div className="text-sm font-medium">{t('toolResults.searchInside')}</div>
@@ -266,7 +285,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
         </form>
         {chunkError && <div className="mt-2 text-sm text-red-500">{chunkError}</div>}
         {!chunkLoading && chunkHits.length === 0 && chunkQuery && !chunkError && <div className="mt-2 text-sm text-[var(--hub-ink-3)]">{t('toolResults.noChunkMatches')}</div>}
-        {chunkHits.length > 0 && <div className="mt-3 space-y-2">{chunkHits.map((hit) => <div key={`${hit.chunkIndex}-${hit.chunkVersion}`} className="rounded border border-[var(--hub-line)] p-2"><div className="flex items-center justify-between gap-2 text-xs text-[var(--hub-ink-3)]"><span>{t('toolResults.chunk')} #{hit.chunkIndex}</span><span>{hit.retrievalScore.toFixed(4)}</span></div><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs hub-mono">{hit.content}</pre></div>)}</div>}
+        {chunkHits.length > 0 && <div className="mt-3 space-y-2">{chunkHits.map((hit) => <div key={`${hit.chunkIndex}-${hit.chunkVersion}`} className="rounded border border-[var(--hub-line)] p-2"><div className="flex items-center justify-between gap-2 text-xs text-[var(--hub-ink-3)]"><span>{t('toolResults.chunk')} #{hit.chunkIndex}</span><span>{hit.retrievalScore.toFixed(4)}</span></div><button type="button" className="hub-btn mt-2 text-xs" disabled={!raw} onClick={()=>openRawChunk(hit)}>{t('toolResults.openRawHere','Open RAW here')}</button><pre className="mt-2 max-h-48 overflow-auto whitespace-pre-wrap break-words text-xs hub-mono">{hit.content}</pre></div>)}</div>}
       </div>
       <div className="hub-card overflow-hidden">
         <div className="flex items-center justify-between border-b border-[var(--hub-line)] px-3 py-2">
@@ -280,7 +299,7 @@ const ToolResultDetailView: React.FC<{ resultId: string }> = ({ resultId }) => {
             }} aria-label={t('toolResults.download')}><Download size={15} /></button>
           </div>}
         </div>
-        {raw ? <pre className="max-h-[60vh] overflow-auto p-4 text-xs hub-mono whitespace-pre-wrap break-words">{raw}</pre> : <div className="p-5 text-sm text-[var(--hub-ink-3)]">{detail.payloadOmissionReason || error || t('toolResults.noPayload')}</div>}
+        {raw ? <pre className="max-h-[60vh] overflow-auto p-4 text-xs hub-mono whitespace-pre-wrap break-words">{rawSelection?<>{raw.slice(0,rawSelection.start)}<mark ref={rawMarkRef} className="bg-amber-200 text-black">{raw.slice(rawSelection.start,rawSelection.end)}</mark>{raw.slice(rawSelection.end)}</>:raw}</pre> : <div className="p-5 text-sm text-[var(--hub-ink-3)]">{detail.payloadOmissionReason || error || t('toolResults.noPayload')}</div>}
       </div>
       <div className="hub-card p-3">
         <div className="text-sm font-medium">{t('toolResults.range')}</div>

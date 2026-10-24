@@ -114,6 +114,12 @@ The result-scoped search endpoint searches indexed original chunks and returns r
 Newly captured text includes structured MCP output as well as text blocks. Lexical chunks cover the complete result text; vector embedding input remains bounded to 64,000 UTF-16 units per result, so later chunks may be lexical-only. Chunk boundaries preserve line endings and Unicode characters.
 
 The chunks endpoint returns the exact indexed chunk text with chunk version, byte size, and embedding availability/dimensions. It does not mutate or rewrite immutable RAW.
+The result detail page provides **Open RAW here** on indexed chunks and search
+hits. It scrolls to and highlights the corresponding serialized RAW text,
+including JSON escapes. A chunk spanning several content blocks opens its first
+intersecting block. Complete matching indexes disambiguate repeated chunk text;
+stale or ambiguous mappings are reported instead of guessing a location. Copy
+and download continue to use the unmodified original RAW.
 The reindex endpoint accepts `{ "limit": 25, "onlyMissing": true }` and rebuilds derived chunk/vector rows from existing immutable RAW. It never updates or replaces the stored result payload. Chunk replacement is one atomic database statement: if a new chunk is rejected, the previous complete index remains intact. A pass returns `nextCursor` when more candidates remain. Send it as `afterResultId` on the next request with the same `onlyMissing` setting. This also permits full rebuilds (`onlyMissing: false`) to continue beyond the first batch. `remaining` counts eligible records after the cursor; concurrent new results are not a fixed snapshot, so start another pass if needed.
 
 ## Sessions, lineage, pinning, and comparison
