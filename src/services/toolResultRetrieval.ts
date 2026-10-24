@@ -2,9 +2,9 @@ import {countTokens} from '../utils/tokenCost.js';
 import {originalResultWindows} from './originalResultWindows.js';
 export interface OriginalResultFragment {start:number;end:number;text:string;score:number;}
 export interface ResultRetrievalOptions {objective:string;maxOutputTokens:number;minTokens?:number;}
-const savedResults=new WeakMap<object,{resultId:string;payloadAvailable:boolean}>();
+const savedResults=new WeakMap<object,{resultId:string;payloadAvailable:boolean;raw?:string|null}>();
 /** In-process capture proof. Upstream JSON cannot manufacture this association. */
-export function rememberSavedResult(result:object,resultId:string,payloadAvailable:boolean){savedResults.set(result,{resultId,payloadAvailable});}
+export function rememberSavedResult(result:object,resultId:string,payloadAvailable:boolean,raw?:string|null){savedResults.set(result,{resultId,payloadAvailable,raw});}
 export function parseResultRetrievalOptions(value:unknown,fallbackObjective?:unknown):ResultRetrievalOptions|undefined{
  if(value===undefined)return undefined;
  if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid smart result settings');
@@ -19,39 +19,44 @@ export function parseResultRetrievalOptions(value:unknown,fallbackObjective?:unk
 export type SemanticResultCandidates=(resultId:string,objective:string)=>Promise<Array<{resultId:string;content:string}>>;
 export async function retrieveOriginalResult<T extends Record<string,any>>(result:T,options?:ResultRetrievalOptions,semantic?:SemanticResultCandidates):Promise<T>{
  const saved=savedResults.get(result);
- if(!options||!saved?.payloadAvailable||!Array.isArray(result.content))return result;
+ if(!options||!saved?.payloadAvailable)return result;
  try{
-  if(await countTokens(JSON.stringify(result))<=(options.minTokens??8000))return result;
-  const fragments:Array<OriginalResultFragment&{block:number}>=[];
-  result.content.forEach((block:any,index:number)=>{
-   if(block?.type==='text'&&typeof block.text==='string')fragments.push(...selectResultFragments(block.text,options.objective,options.maxOutputTokens*2).map(hit=>({...hit,block:index})));
+  const original=saved.raw?JSON.parse(saved.raw):result;
+  if(await countTokens(saved.raw??JSON.stringify(result))<=(options.minTokens??8000))return result;
+  type Source={source:'content'|'structuredContent';block?:number;text:string};
+  type Fragment=OriginalResultFragment&Pick<Source,'source'|'block'>;
+  const sources:Source[]=[];
+  if(Array.isArray(original.content))original.content.forEach((block:any,index:number)=>{
+   if(block?.type==='text'&&typeof block.text==='string')sources.push({source:'content',block:index,text:block.text});
   });
-  fragments.sort((a,b)=>b.score-a.score||a.block-b.block||a.start-b.start);
+  if(original.structuredContent!==undefined)sources.push({source:'structuredContent',text:JSON.stringify(original.structuredContent)});
+  const order=(a:Fragment,b:Fragment)=>(a.source==='structuredContent'?Number.MAX_SAFE_INTEGER:a.block!)-(b.source==='structuredContent'?Number.MAX_SAFE_INTEGER:b.block!)||a.start-b.start;
+  const fragments:Fragment[]=sources.flatMap(({text,...reference})=>selectResultFragments(text,options.objective,options.maxOutputTokens*2).map(hit=>({...reference,...hit})));
+  fragments.sort((a,b)=>b.score-a.score||order(a,b));
   let hybrid=false;
   if(semantic){
    const candidates=await semantic(saved.resultId,options.objective).catch(()=>[]);
-   const semanticFragments:Array<OriginalResultFragment&{block:number}>=[];
+   const semanticFragments:Fragment[]=[];
    for(const hit of candidates){
     if(hit.resultId!==saved.resultId||!hit.content)continue;
-    result.content.forEach((block:any,index:number)=>{
-     if(block?.type!=='text'||typeof block.text!=='string')return;
-     let content=hit.content,start=block.text.indexOf(content);
+    sources.forEach(({text,...reference})=>{
+     let content=hit.content,start=text.indexOf(content);
      if(start<0){
       // The first indexed chunk can contain server/tool/objective metadata.
-      const prefix=content.indexOf(block.text.slice(0,128));
+      const prefix=content.indexOf(text.slice(0,128));
       if(prefix<0)return;
-      content=content.slice(prefix);if(!block.text.startsWith(content))return;start=0;
+      content=content.slice(prefix);if(!text.startsWith(content))return;start=0;
      }
-     semanticFragments.push({block:index,start,end:start+content.length,text:content,score:0});
+     semanticFragments.push({...reference,start,end:start+content.length,text:content,score:0});
     });
    }
    if(semanticFragments.length){
     hybrid=true;
-    const fused=new Map<string,OriginalResultFragment&{block:number}>();
+    const fused=new Map<string,Fragment>();
     for(const source of [fragments,semanticFragments]){
      const seen=new Set<string>();let rank=0;
      for(const fragment of source){
-      const key=`${fragment.block}:${fragment.start}:${fragment.end}`;
+      const key=`${fragment.source}:${fragment.block??0}:${fragment.start}:${fragment.end}`;
       if(seen.has(key))continue;seen.add(key);rank++;
       const previous=fused.get(key);fused.set(key,{...fragment,score:(previous?.score??0)+1/(60+rank)});
      }
@@ -61,11 +66,11 @@ export async function retrieveOriginalResult<T extends Record<string,any>>(resul
   }
   if(!fragments.length)return result;
   const selected:typeof fragments=[];
-  for(const fragment of fragments)if(!selected.some(hit=>hit.block===fragment.block&&hit.start<fragment.end&&fragment.start<hit.end))selected.push(fragment);
+  for(const fragment of fragments)if(!selected.some(hit=>hit.text===fragment.text||(hit.source===fragment.source&&hit.block===fragment.block&&hit.start<fragment.end&&fragment.start<hit.end)))selected.push(fragment);
   fragments.splice(0,fragments.length,...selected);
   const makeReply=()=>({
-   content:[{type:'text',text:JSON.stringify({representation:'original-fragments',result_id:saved.resultId,offset_units:'UTF-16 code units; end exclusive',fragments:[...fragments].sort((a,b)=>a.block-b.block||a.start-b.start).map(({score:_score,...hit})=>hit),full_result_tool:'get_tool_result'})}],
-   ...(result.isError!==undefined?{isError:result.isError}:{}),
+   content:[{type:'text',text:JSON.stringify({representation:'original-fragments',format_version:1,result_id:saved.resultId,offset_units:'UTF-16 code units; end exclusive',fragments:[...fragments].sort(order).map(({score:_score,...hit})=>hit),full_result_tool:'get_tool_result'})}],
+   ...(original.isError!==undefined?{isError:original.isError}:{}),
    _meta:{...result._meta,'mcphub/result_id':saved.resultId,'dev.mcphub/retrieval':{algorithm:hybrid?'bm25-vector-rrf':'bm25-exact',partial:true,maxOutputTokens:options.maxOutputTokens}},
   });
   while(fragments.length){const reply=makeReply();if(await countTokens(JSON.stringify(reply))<=options.maxOutputTokens)return reply as unknown as T;fragments.pop();}

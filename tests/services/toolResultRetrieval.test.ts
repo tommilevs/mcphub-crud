@@ -64,3 +64,23 @@ it('keeps lexical retrieval when the semantic provider fails',async()=>{
  const reply=await retrieveOriginalResult(result,{objective:'Xid 79',maxOutputTokens:512},async()=>{throw Error('provider failure');});
  expect(reply).not.toBe(result);expect(JSON.stringify(reply)).toContain('Xid 79');
 });
+it('retrieves diagnostics from structured-only output with explicit source offsets',async()=>{
+ const structuredContent={rows:Array(10000).fill({status:'routine'}),stderr:'CUDA Xid 79 fatal error'};
+ const result={structuredContent};rememberSavedResult(result,'saved',true,JSON.stringify(result));
+ const reply=await retrieveOriginalResult(result,{objective:'CUDA Xid 79',maxOutputTokens:512});
+ expect(reply===result).toBe(false);
+ const body=JSON.parse((reply as any).content[0].text);
+ expect(body.format_version).toBe(1);
+ expect(body.fragments.some((hit:any)=>hit.source==='structuredContent'&&hit.text.includes('Xid 79'))).toBe(true);
+ for(const hit of body.fragments)expect(JSON.stringify(structuredContent).slice(hit.start,hit.end)).toBe(hit.text);
+ expect(await countTokens(JSON.stringify(reply))).toBeLessThanOrEqual(512);
+});
+it('uses retained structured evidence rather than a later-mutated object',async()=>{
+ const result={content:[{type:'text',text:'routine\n'.repeat(20000)}],structuredContent:{stderr:'Xid 79 saved diagnostic'},isError:true};
+ rememberSavedResult(result,'saved',true,JSON.stringify(result));
+ result.structuredContent.stderr='invented after capture';
+ result.isError=false;
+ const reply=await retrieveOriginalResult(result,{objective:'Xid 79',maxOutputTokens:512});
+ expect(JSON.stringify(reply).includes('saved diagnostic')).toBe(true);expect(JSON.stringify(reply).includes('invented after capture')).toBe(false);
+ expect(reply.isError).toBe(true);
+});

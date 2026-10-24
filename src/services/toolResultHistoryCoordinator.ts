@@ -203,7 +203,7 @@ export class ToolResultHistoryCoordinator {
           ...(loopGuardAdvice ? { 'dev.mcphub/loopguard': loopGuardAdvice } : {}),
         },
       };
-      rememberSavedResult(annotated,saved.resultId,saved.payloadAvailable);
+      rememberSavedResult(annotated,saved.resultId,saved.payloadAvailable,saved.raw);
       return annotated;
     } catch (error) {
       logger.error('Failed to persist tool result history:', error);

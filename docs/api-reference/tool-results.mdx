@@ -35,10 +35,14 @@ Results at or below 8,000 estimated tokens, missing useful
 hits, metadata-only capture, failed storage or retrieval failures retain the
 original response. Explicit retrieval bypasses legacy lossy compression.
 
-Fragment responses are labeled `original-fragments`, preserve `isError` and the
-saved result ID, and fit the requested estimated token budget including their
-metadata. Each fragment identifies its original `content` block and end-exclusive
-UTF-16 text offsets. Text is copied exactly, including line endings; it is not a
+Fragment responses are labeled `original-fragments` with `format_version: 1`,
+preserve `isError` and the saved result ID, and fit the requested estimated token
+budget including metadata. `source: "content"` identifies the numeric `block`
+and end-exclusive UTF-16 offsets within its original text. For
+`source: "structuredContent"`, offsets apply to `JSON.stringify` of the retained
+structured value and `block` is absent. This also supports structured-only MCP
+outputs. Retrieval reads the retained RAW snapshot, not a subsequently mutated
+response object. Text is copied exactly from the identified source; it is not a
 summary. Read the complete stored MCP envelope with `get_tool_result` or ranges.
 These provisional thresholds still require deployment workload benchmarks.
 An offline single-pass smoke benchmark on October 24 used roughly 1 MB each of
