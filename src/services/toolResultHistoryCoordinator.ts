@@ -1,5 +1,6 @@
 import { getAppDataSource } from '../db/connection.js';
 import {rememberSavedResult} from './toolResultRetrieval.js';
+import {originalResultWindows} from './originalResultWindows.js';
 import { observeLoopGuard } from './loopGuardCoordinator.js';
 import { ToolResultRepositoryDb } from '../db/repositories/ToolResultRepository.js';
 import type { ToolResultStatus } from '../types/toolResult.js';
@@ -26,6 +27,7 @@ export interface ToolResultHistoryCapture {
 }
 
 export const TOOL_RESULT_CHUNK_CHARS = 12_000;
+export const TOOL_RESULT_CHUNK_VERSION = 2;
 
 export interface ToolResultReindexSummary {
   nextCursor?: string;
@@ -42,24 +44,12 @@ let reindexInFlight = false;
 export const chunkToolResultText = (
   text: string,
   maxChars = TOOL_RESULT_CHUNK_CHARS,
+  bodyStart=0,
 ): string[] => {
   if (!Number.isInteger(maxChars) || maxChars < 2) {
     throw new RangeError('Chunk size must be an integer of at least two UTF-16 code units');
   }
-  const chunks: string[] = [];
-  for (let offset = 0; offset < text.length;) {
-    let end = Math.min(offset + maxChars, text.length);
-    if (end < text.length) {
-      const newline = text.lastIndexOf('\n', end - 1);
-      if (newline >= offset) end = newline + 1;
-      const previous = text.charCodeAt(end - 1);
-      const next = text.charCodeAt(end);
-      if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end -= 1;
-    }
-    chunks.push(text.slice(offset, end));
-    offset = end;
-  }
-  return chunks;
+  return originalResultWindows(text,maxChars,bodyStart).map(window=>window.text);
 };
 
 export const reindexToolResultHistory = async (
@@ -97,7 +87,7 @@ export const reindexToolResultHistory = async (
       const searchable = [record.server, record.tool, record.objective, text]
         .filter(Boolean)
         .join('\n');
-      const chunks = chunkToolResultText(searchable);
+      const chunks = chunkToolResultText(searchable,TOOL_RESULT_CHUNK_CHARS,searchable.length-text.length);
       if (chunks.length === 0) {
         summary.skipped += 1;
         continue;
@@ -117,7 +107,7 @@ export const reindexToolResultHistory = async (
             recordToolResultIndexFailure();
             logger.warn('Failed to generate tool result reindex embedding:', error);
           }
-          indexed.push({ chunkIndex, chunkVersion: 1, content: chunks[chunkIndex], embedding });
+          indexed.push({ chunkIndex, chunkVersion: TOOL_RESULT_CHUNK_VERSION, content: chunks[chunkIndex], embedding });
         }
         await repository.indexChunks(record.resultId, indexed);
       } else {
@@ -172,7 +162,7 @@ export class ToolResultHistoryCoordinator {
         void (async () => {
           const repository = getToolResultRepository();
           if (!repository) return;
-          const chunks = chunkToolResultText(searchable);
+          const chunks = chunkToolResultText(searchable,TOOL_RESULT_CHUNK_CHARS,searchable.length-saved.rawText!.length);
           if (repository.indexChunks) {
             const indexed = [];
             let embeddingBudget = 64_000;
@@ -187,7 +177,7 @@ export class ToolResultHistoryCoordinator {
                 recordToolResultIndexFailure();
                 logger.warn('Failed to generate tool result chunk embedding:', error);
               }
-              indexed.push({ chunkIndex, chunkVersion: 1, content: chunks[chunkIndex], embedding });
+              indexed.push({ chunkIndex, chunkVersion: TOOL_RESULT_CHUNK_VERSION, content: chunks[chunkIndex], embedding });
             }
             await repository.indexChunks(saved.resultId, indexed);
             return;

@@ -1,4 +1,5 @@
 import {countTokens} from '../utils/tokenCost.js';
+import {originalResultWindows} from './originalResultWindows.js';
 export interface OriginalResultFragment {start:number;end:number;text:string;score:number;}
 export interface ResultRetrievalOptions {objective:string;maxOutputTokens:number;minTokens?:number;}
 const savedResults=new WeakMap<object,{resultId:string;payloadAvailable:boolean}>();
@@ -83,18 +84,11 @@ export function selectResultFragments(text:string,objective:string,maxChars:numb
  const chunks:Array<OriginalResultFragment&{terms:Map<string,number>;length:number}>=[];
  const frequencies=new Map<string,number>();
  const width=Math.min(1200,maxChars);
- for(let start=0;start<text.length;){
-  let end=Math.min(text.length,start+width);
-  if(end<text.length){
-   const newline=text.lastIndexOf('\n',end-1);
-   if(newline>=start)end=newline+1;
-   if(/[\uD800-\uDBFF]/.test(text[end-1])&&/[\uDC00-\uDFFF]/.test(text[end]))end--;
-  }
-  const content=text.slice(start,end),words=tokens(content),counts=new Map<string,number>();
+ for(const {start,end,text:content} of originalResultWindows(text,width)){
+  const words=tokens(content),counts=new Map<string,number>();
   for(const word of words)counts.set(word,(counts.get(word)??0)+1);
   for(const term of terms)if(counts.has(term))frequencies.set(term,(frequencies.get(term)??0)+1);
   chunks.push({start,end,text:content,score:0,terms:counts,length:words.length});
-  start=end;
  }
  const average=chunks.reduce((sum,chunk)=>sum+chunk.length,0)/chunks.length||1;
  for(const chunk of chunks){

@@ -114,6 +114,15 @@ The result-scoped search endpoint searches indexed original chunks and returns r
 Newly captured text includes structured MCP output as well as text blocks. Lexical chunks cover the complete result text; vector embedding input remains bounded to 64,000 UTF-16 units per result, so later chunks may be lexical-only. Chunk boundaries preserve line endings and Unicode characters.
 
 The chunks endpoint returns the exact indexed chunk text with chunk version, byte size, and embedding availability/dimensions. It does not mutate or rewrite immutable RAW.
+New capture and reindex passes produce chunk version 2. Valid JSON prefers
+commas between sibling elements or properties rather than commas inside strings;
+diff text prefers file/hunk boundaries. Metadata prefixes are identified
+separately, so they do not prevent JSON detection. Oversized elements/hunks still
+split to the configured character bound, preserving original text, CRLF and
+Unicode pairs. Concatenating the chunks reconstructs the indexed text exactly.
+Malformed JSON falls back to line-aware text windows. Version 1 records remain
+readable; a full reindex (`onlyMissing: false`) optionally upgrades old indexes
+without modifying RAW.
 The result detail page provides **Open RAW here** on indexed chunks and search
 hits. It scrolls to and highlights the corresponding serialized RAW text,
 including JSON escapes. A chunk spanning several content blocks opens its first

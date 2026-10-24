@@ -1,9 +1,9 @@
 import {locateRawChunk} from '../../frontend/src/utils/rawChunkLocation';
-it('maps an indexed text chunk through JSON escaping without rewriting RAW',()=>{
+it.each([1,2])('maps chunk version %s through JSON escaping without rewriting RAW',chunkVersion=>{
  const text='first\r\nGPU "Xid 79" 😀\r\nlast';
  const raw=JSON.stringify({content:[{type:'text',text}]});
  const prefix='srv\nread\nobjective\n',content=prefix+text;
- const hit=locateRawChunk(raw,{server:'srv',tool:'read',objective:'objective'},{chunkIndex:0,chunkVersion:1,content},[{chunkIndex:0,chunkVersion:1,content}]);
+ const hit=locateRawChunk(raw,{server:'srv',tool:'read',objective:'objective'},{chunkIndex:0,chunkVersion,content},[{chunkIndex:0,chunkVersion,content}]);
  expect(hit).not.toBeNull();
  expect(raw.slice(hit!.start,hit!.end)).toBe(JSON.stringify(text).slice(1,-1));
 });
