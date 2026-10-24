@@ -122,6 +122,19 @@ not test fresh-install password enrollment or the installer/tray UI.
 Add `-WithGeneratedPassword` to verify first login using the service-generated
 DPAPI credential and repeat login after SCM recovery, without a supplied password.
 
+`native/test-installer-runtime-windows.ps1` exercises the installer's actual
+`windows/runtime-install.ps1` lifecycle in a unique directory containing spaces,
+with a separate service, pipe, gateway port and data directory. It checks fresh
+installation/login, stopping the old installed user agent before replacing its
+executable, preserving another installation's agent, in-place SCM update,
+existing settings and initial-password retention, and uninstall without deleting
+user data. The NSIS hooks invoke that script and abort on an unsuccessful exit.
+This functional lifecycle test does not exercise the complete NSIS wizard,
+bootstrap-password dialog, shortcuts or per-user tray autostart UI.
+The script also runs under 32-bit Windows PowerShell 5.1, as used by a 32-bit
+installer on 64-bit Windows. Process identity checks use CIM with a held process
+handle rather than cross-architecture `MainModule` inspection.
+
 For a new installation without `ADMIN_PASSWORD`, the service creates a random
 256-bit initial administrator password in its existing machine DPAPI secret
 store and supplies it to the backend through the child environment. It is not

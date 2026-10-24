@@ -1,19 +1,27 @@
-; Tauri NSIS lifecycle hooks for the managed MCPHub runtime service.
-; The service binary is bundled beside the tray executable.
+; The same service lifecycle script is exercised by native acceptance.
+!define MCPHUB_INSTALL_HELPER "${__FILEDIR__}\runtime-install.ps1"
 
-!macro NSIS_HOOK_PREINSTALL
-  ; Stop before NSIS replaces the running service executable and runtime files.
+!macro MCPHUB_RUNTIME_LIFECYCLE ACTION SCRIPT
   Push $R0
   Push $R1
-  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-Service -Name MCPHub -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction Stop"'
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "${SCRIPT}" -Action ${ACTION} -InstallDirectory "$INSTDIR"'
   Pop $R0
   Pop $R1
-  StrCmp $R0 "0" mcphub_preinstall_stopped
-  MessageBox MB_ICONSTOP "MCPHub service could not be stopped. Close it before retrying installation."
+  StrCmp $R0 "0" mcphub_lifecycle_${ACTION}_done
+  MessageBox MB_ICONSTOP|MB_OK "MCPHub ${ACTION} failed. Installation cannot continue.$\r$\n$R1" /SD IDOK
+  Pop $R1
+  Pop $R0
+  SetErrorLevel 1
   Abort
-  mcphub_preinstall_stopped:
+  mcphub_lifecycle_${ACTION}_done:
   Pop $R1
   Pop $R0
+!macroend
+
+!macro NSIS_HOOK_PREINSTALL
+  InitPluginsDir
+  File /oname=$PLUGINSDIR\mcphub-runtime-install.ps1 "${MCPHUB_INSTALL_HELPER}"
+  !insertmacro MCPHUB_RUNTIME_LIFECYCLE Prepare "$PLUGINSDIR\mcphub-runtime-install.ps1"
 !macroend
 
 !macro NSIS_HOOK_POSTINSTALL
@@ -23,13 +31,7 @@
   StrCpy $R9 "0"
   IfFileExists "$R8\MCPHub\secrets\bootstrap-admin.dpapi" +2 0
   StrCpy $R9 "1"
-  ; Replace an older registration during upgrades.
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" stop MCPHub'
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" delete MCPHub'
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" create MCPHub binPath= "$INSTDIR\mcphub-runtime-service.exe" start= auto DisplayName= "MCPHub Runtime Service"'
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" failure MCPHub reset= 86400 actions= restart/5000/restart/15000/restart/60000'
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" description MCPHub "MCPHub managed stdio MCP runtime and watchdog"'
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" start MCPHub'
+  !insertmacro MCPHUB_RUNTIME_LIFECYCLE Install "$INSTDIR\runtime-install.ps1"
   IfSilent +3 0
   StrCmp $R9 "1" 0 +2
   ExecWait '"$INSTDIR\mcphub-runtime-service.exe" --show-initial-password'
@@ -38,6 +40,5 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" stop MCPHub'
-  nsExec::ExecToLog '"$SYSDIR\sc.exe" delete MCPHub'
+  !insertmacro MCPHUB_RUNTIME_LIFECYCLE Uninstall "$INSTDIR\runtime-install.ps1"
 !macroend
