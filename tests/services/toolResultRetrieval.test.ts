@@ -50,3 +50,17 @@ it('validates opt-in options and bounds before execution',()=>{
  expect(()=>parseResultRetrievalOptions({retrieve:true,objective:'x',maxOutputTokens:50000})).toThrow();
  expect(()=>parseResultRetrievalOptions({retrieve:true,objective:''})).toThrow();
 });
+it('uses a semantic-only candidate after verifying its exact source text',async()=>{
+ const evidence='The accelerator vanished from the bus after a link reset.\n';
+ const result={content:[{type:'text',text:'routine\n'.repeat(20000)+evidence}]};rememberSavedResult(result,'saved',true);
+ const semantic=jest.fn().mockResolvedValue([{resultId:'saved',content:evidence},{resultId:'foreign',content:'invented evidence'}]);
+ const reply=await retrieveOriginalResult(result,{objective:'GPU fault',maxOutputTokens:512},semantic);
+ expect(semantic).toHaveBeenCalledWith('saved','GPU fault');
+ expect(JSON.stringify(reply)).toContain(evidence.trim());expect(JSON.stringify(reply)).not.toContain('invented evidence');
+ expect(reply).not.toBe(result);
+});
+it('keeps lexical retrieval when the semantic provider fails',async()=>{
+ const result={content:[{type:'text',text:'routine\n'.repeat(20000)+'Xid 79 failure\n'}]};rememberSavedResult(result,'saved',true);
+ const reply=await retrieveOriginalResult(result,{objective:'Xid 79',maxOutputTokens:512},async()=>{throw Error('provider failure');});
+ expect(reply).not.toBe(result);expect(JSON.stringify(reply)).toContain('Xid 79');
+});

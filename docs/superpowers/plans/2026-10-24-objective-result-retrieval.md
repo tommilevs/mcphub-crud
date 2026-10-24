@@ -21,4 +21,8 @@ and 23. An objective must affect large-result retrieval, not only history metada
 Current status: steps 1–3 implemented, opt-in only. Capture proof is kept in an
 in-process WeakMap, so upstream metadata cannot forge retention. Unit and actual
 Smart dispatcher tests cover preservation, budgets and forwarding boundaries.
-Steps 4–5 remain: per-tool policies, semantic fusion and workload benchmarks.
+Step 4 now has configured policies and retained-index vector fusion, with local
+fallback and exact-text verification. Step 5 has a local synthetic smoke benchmark
+for logs/JSON/diff near 1 MB, all retaining the target diagnostic within the token
+budget. Real PostgreSQL/provider integration and deployment-scale acceptance
+remain pending; no production latency guarantee is implied.

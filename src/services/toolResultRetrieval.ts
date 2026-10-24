@@ -15,7 +15,8 @@ export function parseResultRetrievalOptions(value:unknown,fallbackObjective?:unk
  if(typeof objective!=='string'||!objective.trim()||objective.length>2000||typeof budget!=='number'||!Number.isInteger(budget)||budget<512||budget>4096)throw Error('Smart retrieval requires an objective (1–2000 characters) and token budget 512–4096');
  return {objective:objective.trim(),maxOutputTokens:budget};
 }
-export async function retrieveOriginalResult<T extends Record<string,any>>(result:T,options?:ResultRetrievalOptions):Promise<T>{
+export type SemanticResultCandidates=(resultId:string,objective:string)=>Promise<Array<{resultId:string;content:string}>>;
+export async function retrieveOriginalResult<T extends Record<string,any>>(result:T,options?:ResultRetrievalOptions,semantic?:SemanticResultCandidates):Promise<T>{
  const saved=savedResults.get(result);
  if(!options||!saved?.payloadAvailable||!Array.isArray(result.content))return result;
  try{
@@ -24,12 +25,47 @@ export async function retrieveOriginalResult<T extends Record<string,any>>(resul
   result.content.forEach((block:any,index:number)=>{
    if(block?.type==='text'&&typeof block.text==='string')fragments.push(...selectResultFragments(block.text,options.objective,options.maxOutputTokens*2).map(hit=>({...hit,block:index})));
   });
-  if(!fragments.length)return result;
   fragments.sort((a,b)=>b.score-a.score||a.block-b.block||a.start-b.start);
+  let hybrid=false;
+  if(semantic){
+   const candidates=await semantic(saved.resultId,options.objective).catch(()=>[]);
+   const semanticFragments:Array<OriginalResultFragment&{block:number}>=[];
+   for(const hit of candidates){
+    if(hit.resultId!==saved.resultId||!hit.content)continue;
+    result.content.forEach((block:any,index:number)=>{
+     if(block?.type!=='text'||typeof block.text!=='string')return;
+     let content=hit.content,start=block.text.indexOf(content);
+     if(start<0){
+      // The first indexed chunk can contain server/tool/objective metadata.
+      const prefix=content.indexOf(block.text.slice(0,128));
+      if(prefix<0)return;
+      content=content.slice(prefix);if(!block.text.startsWith(content))return;start=0;
+     }
+     semanticFragments.push({block:index,start,end:start+content.length,text:content,score:0});
+    });
+   }
+   if(semanticFragments.length){
+    hybrid=true;
+    const fused=new Map<string,OriginalResultFragment&{block:number}>();
+    for(const source of [fragments,semanticFragments]){
+     const seen=new Set<string>();let rank=0;
+     for(const fragment of source){
+      const key=`${fragment.block}:${fragment.start}:${fragment.end}`;
+      if(seen.has(key))continue;seen.add(key);rank++;
+      const previous=fused.get(key);fused.set(key,{...fragment,score:(previous?.score??0)+1/(60+rank)});
+     }
+    }
+    fragments.splice(0,fragments.length,...[...fused.values()].sort((a,b)=>b.score-a.score));
+   }
+  }
+  if(!fragments.length)return result;
+  const selected:typeof fragments=[];
+  for(const fragment of fragments)if(!selected.some(hit=>hit.block===fragment.block&&hit.start<fragment.end&&fragment.start<hit.end))selected.push(fragment);
+  fragments.splice(0,fragments.length,...selected);
   const makeReply=()=>({
    content:[{type:'text',text:JSON.stringify({representation:'original-fragments',result_id:saved.resultId,offset_units:'UTF-16 code units; end exclusive',fragments:[...fragments].sort((a,b)=>a.block-b.block||a.start-b.start).map(({score:_score,...hit})=>hit),full_result_tool:'get_tool_result'})}],
    ...(result.isError!==undefined?{isError:result.isError}:{}),
-   _meta:{...result._meta,'mcphub/result_id':saved.resultId,'dev.mcphub/retrieval':{algorithm:'bm25-exact',partial:true,maxOutputTokens:options.maxOutputTokens}},
+   _meta:{...result._meta,'mcphub/result_id':saved.resultId,'dev.mcphub/retrieval':{algorithm:hybrid?'bm25-vector-rrf':'bm25-exact',partial:true,maxOutputTokens:options.maxOutputTokens}},
   });
   while(fragments.length){const reply=makeReply();if(await countTokens(JSON.stringify(reply))<=options.maxOutputTokens)return reply as unknown as T;fragments.pop();}
  }catch{/* Retrieval failure must not lose the original successful tool response. */}

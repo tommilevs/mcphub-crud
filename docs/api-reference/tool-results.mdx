@@ -18,8 +18,15 @@ Tool Result History is available in database mode. Dashboard history endpoints a
 
 The objective may fall back to the existing top-level `objective` field. It is
 limited to 2,000 characters; output budget is 512–4,096 estimated cl100k tokens.
-The default remains disabled. The initial execution path uses BM25 lexical
-windows and exact diagnostic identifiers, not semantic vector reranking.
+The default remains disabled. The execution path uses BM25 lexical windows and
+exact diagnostic identifiers. When retained chunks already have embeddings, it
+embeds the objective once and fuses vector candidates with lexical candidates
+using reciprocal ranks. Duplicate candidates receive one vote per source and
+overlapping fragments are removed. Semantic text must match the original content
+before it can be returned; unrelated or stale candidate text is discarded.
+
+No query embedding is requested while the asynchronous result index is pending.
+Missing vectors or provider/index failures keep lexical retrieval available.
 
 RAW capture happens first. Only a successfully captured, retained payload can
 produce a fragment response; a result ID supplied by an upstream is insufficient.
@@ -33,8 +40,13 @@ saved result ID, and fit the requested estimated token budget including their
 metadata. Each fragment identifies its original `content` block and end-exclusive
 UTF-16 text offsets. Text is copied exactly, including line endings; it is not a
 summary. Read the complete stored MCP envelope with `get_tool_result` or ranges.
-These provisional thresholds still require workload benchmarks; this lexical
-path does not claim complete hybrid retrieval.
+These provisional thresholds still require deployment workload benchmarks.
+An offline single-pass smoke benchmark on October 24 used roughly 1 MB each of
+logs, JSON and diff text with a diagnostic at the tail. Retrieval retained the
+diagnostic in all three cases, returned 308/1,120/144 estimated tokens, and took
+292/114/49 ms respectively (the first case includes cold tokenizer loading).
+These are local synthetic measurements, not database-scale or provider latency
+guarantees. Live PostgreSQL/vector integration acceptance remains pending.
 
 Administrators can set `smartRouting.resultRetrieval` through the existing
 system-config API, without a database schema migration:

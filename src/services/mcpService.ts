@@ -116,6 +116,7 @@ import { getActivityLoggingService } from './activityLoggingService.js';
 import { maybeCompressToolResult } from './toolResultCompressionService.js';
 import {parseResultRetrievalOptions,retrieveOriginalResult} from './toolResultRetrieval.js';
 import {configuredResultRetrievalOptions} from './toolResultRetrievalPolicy.js';
+import {loadResultSemanticCandidates} from './toolResultSemanticCandidates.js';
 import { getToolResultHistoryCoordinator } from './toolResultHistoryCoordinator.js';
 import {
   assertHostedToolAllowed,
@@ -4455,7 +4456,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
           sensitive: hasPersonalAuthentication(targetServerInfo.config),
         });
 
-        if(retrievalOptions)return await retrieveOriginalResult(resultWithHistory,await configuredResultRetrievalOptions(retrievalOptions,targetServerInfo.name,cleanToolName));
+        if(retrievalOptions)return await retrieveOriginalResult(resultWithHistory,await configuredResultRetrievalOptions(retrievalOptions,targetServerInfo.name,cleanToolName),loadResultSemanticCandidates);
         return await maybeCompressToolResult(
           resultWithHistory,
           {
@@ -4557,7 +4558,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         sensitive: hasPersonalAuthentication(targetServerInfo.config),
       });
 
-      if(retrievalOptions)return await retrieveOriginalResult(resultWithHistory,await configuredResultRetrievalOptions(retrievalOptions,targetServerInfo.name,cleanToolName));
+      if(retrievalOptions)return await retrieveOriginalResult(resultWithHistory,await configuredResultRetrievalOptions(retrievalOptions,targetServerInfo.name,cleanToolName),loadResultSemanticCandidates);
       return await maybeCompressToolResult(resultWithHistory, {
         serverName: targetServerInfo.name,
         toolName: cleanToolName,
