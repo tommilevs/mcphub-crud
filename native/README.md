@@ -144,7 +144,13 @@ external gateway is not adopted into this job. Core Windows tests verify both
 normal owner drop and a hard-killed owner without Rust destructor execution.
 The tray
 reuses an already listening gateway and only starts a fallback process when
-the service resources are absent. Development and host-managed deployments can
+SCM confirms that no MCPHub service is registered. An installed service that is
+starting, stopped or inaccessible never causes a second user-profile gateway.
+The desktop window loads the service dashboard at `http://127.0.0.1:3000`, so
+runtime configuration and API requests share its origin. Closing that window
+hides it; Exit tray remains the explicit tray exit action.
+The installer requests service shutdown before replacing runtime files and
+aborts that upgrade if shutdown fails. Development and host-managed deployments can
 run the Node gateway separately (`pnpm backend:dev` or `pnpm backend:build`
 followed by `dist/index.js`).
 `native/build-windows.ps1 -Action bundle` builds the service and NSIS installer

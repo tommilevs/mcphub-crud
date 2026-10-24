@@ -5,7 +5,7 @@
   "identifier": "com.mcphub.desktop",
   "build": { "frontendDist": "../../frontend/dist", "devUrl": "http://localhost:5173" },
   "app": {
-    "windows": [{ "title": "MCPHub", "width": 1280, "height": 800, "visible": false }],
+    "windows": [{ "title": "MCPHub", "url": "http://127.0.0.1:3000", "width": 1280, "height": 800, "visible": false }],
     "security": { "csp": null },
     "trayIcon": { "iconPath": "icons/icon.ico", "tooltip": "MCPHub" }
   },

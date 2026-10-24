@@ -1,4 +1,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+mod gateway_start;
 
 use std::{
     io::{Read, Write},
@@ -30,6 +31,12 @@ fn start_gateway(app: &AppHandle) {
         })
         .unwrap_or(false);
     if gateway_healthy {
+        return;
+    }
+    #[cfg(windows)]
+    if !gateway_start::service_absent("MCPHub") {
+        // Wait for the service-owned gateway instead of creating another
+        // account/settings profile while SCM is starting or recovering it.
         return;
     }
     let Ok(resource_dir) = app.path().resource_dir() else {
@@ -67,6 +74,14 @@ fn start_gateway(app: &AppHandle) {
 
 fn open_dashboard(app: &AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
+        if !window.is_visible().unwrap_or(false) {
+            // Retry navigation when reopened after a slow gateway startup.
+            let _ = window.navigate(
+                "http://127.0.0.1:3000"
+                    .parse()
+                    .expect("static dashboard URL"),
+            );
+        }
         let _ = window.show();
         let _ = window.set_focus();
         return;
@@ -149,6 +164,12 @@ fn set_tray_autostart(_enabled: bool) -> bool {
 
 fn main() {
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+        })
         .setup(|app| {
             start_gateway(app.handle());
             let dashboard = MenuItemBuilder::with_id("dashboard", "Open Dashboard").build(app)?;

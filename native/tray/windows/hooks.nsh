@@ -1,6 +1,21 @@
 ; Tauri NSIS lifecycle hooks for the managed MCPHub runtime service.
 ; The service binary is bundled beside the tray executable.
 
+!macro NSIS_HOOK_PREINSTALL
+  ; Stop before NSIS replaces the running service executable and runtime files.
+  Push $R0
+  Push $R1
+  nsExec::ExecToStack '"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -NonInteractive -Command "Get-Service -Name MCPHub -ErrorAction SilentlyContinue | Stop-Service -Force -ErrorAction Stop"'
+  Pop $R0
+  Pop $R1
+  StrCmp $R0 "0" mcphub_preinstall_stopped
+  MessageBox MB_ICONSTOP "MCPHub service could not be stopped. Close it before retrying installation."
+  Abort
+  mcphub_preinstall_stopped:
+  Pop $R1
+  Pop $R0
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
   Push $R8
   Push $R9
