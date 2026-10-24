@@ -41,29 +41,22 @@ export const chunkToolResultText = (
   text: string,
   maxChars = TOOL_RESULT_CHUNK_CHARS,
 ): string[] => {
-  if (!text) return [];
-  const chunks: string[] = [];
-  let current = '';
-  for (const line of text.split('\n')) {
-    if (line.length > maxChars) {
-      if (current) {
-        chunks.push(current);
-        current = '';
-      }
-      for (let offset = 0; offset < line.length; offset += maxChars) {
-        chunks.push(line.slice(offset, offset + maxChars));
-      }
-      continue;
-    }
-    const candidate = current ? `${current}\n${line}` : line;
-    if (current && candidate.length > maxChars) {
-      chunks.push(current);
-      current = line;
-    } else {
-      current = candidate;
-    }
+  if (!Number.isInteger(maxChars) || maxChars < 2) {
+    throw new RangeError('Chunk size must be an integer of at least two UTF-16 code units');
   }
-  if (current) chunks.push(current);
+  const chunks: string[] = [];
+  for (let offset = 0; offset < text.length;) {
+    let end = Math.min(offset + maxChars, text.length);
+    if (end < text.length) {
+      const newline = text.lastIndexOf('\n', end - 1);
+      if (newline >= offset) end = newline + 1;
+      const previous = text.charCodeAt(end - 1);
+      const next = text.charCodeAt(end);
+      if (previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff) end -= 1;
+    }
+    chunks.push(text.slice(offset, end));
+    offset = end;
+  }
   return chunks;
 };
 

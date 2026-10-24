@@ -16,6 +16,20 @@ describe('ToolResultHistoryCoordinator', () => {
     expect(chunks.every((chunk) => chunk.length <= TOOL_RESULT_CHUNK_CHARS)).toBe(true);
   });
 
+  it('preserves blank lines, line endings and Unicode at chunk boundaries', () => {
+    const source = '\n\nalpha\r\n\n12345\u{1F600}tail\n';
+    const chunks = chunkToolResultText(source, 6);
+    expect(chunks.join('')).toBe(source);
+    expect(chunks.every(chunk => chunk.length <= 6)).toBe(true);
+    for (const chunk of chunks) {
+      expect(Buffer.from(chunk, 'utf8').toString('utf8')).toBe(chunk);
+    }
+  });
+
+  it.each([0, 1, -1, 1.5, NaN, Infinity])('rejects invalid chunk size %s', size => {
+    expect(() => chunkToolResultText('evidence', size)).toThrow(RangeError);
+  });
+
   it('adds a namespaced result id while preserving existing MCP metadata', async () => {
     const history = {
       capture: jest.fn().mockResolvedValue({ resultId: '165a2c4c-3ad6-46ab-b547-8e4bf10d934d' }),
