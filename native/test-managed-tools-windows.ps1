@@ -2,7 +2,8 @@ param(
   [Parameter(Mandatory=$true)][string]$ComputerUseExecutable,
   [Parameter(Mandatory=$true)][string]$DesktopCommanderEntry,
   [string]$PlaywrightEntry,
-  [string]$PlaywrightWorkingDirectory
+  [string]$PlaywrightWorkingDirectory,
+  [switch]$VerifyPlaywrightConnection
 )
 $ErrorActionPreference='Stop'
 $repo=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
@@ -15,12 +16,20 @@ if($PlaywrightEntry){
 }
 $pipe='mcphub-user-managed-acceptance-'+[Guid]::NewGuid().ToString('N')
 $previous=@{}
-foreach($key in @('MCPHUB_MANAGED_ACCEPTANCE_PIPE','MCPHUB_MANAGED_ACCEPTANCE_COMPUTER','MCPHUB_MANAGED_ACCEPTANCE_COMMANDER','MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT','MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT_CWD')){
+foreach($key in @('MCPHUB_MANAGED_ACCEPTANCE_PIPE','MCPHUB_MANAGED_ACCEPTANCE_COMPUTER','MCPHUB_MANAGED_ACCEPTANCE_COMMANDER','MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT','MCPHUB_MANAGED_ACCEPTANCE_PLAYWRIGHT_CWD','MCPHUB_MANAGED_ACCEPTANCE_VERIFY_BROWSER','PLAYWRIGHT_MCP_EXTENSION_TOKEN')){
   $previous[$key]=[Environment]::GetEnvironmentVariable($key,'Process')
 }
 $agent=$null
 Push-Location $repo
 try {
+  $env:MCPHUB_MANAGED_ACCEPTANCE_VERIFY_BROWSER=$null
+  if($VerifyPlaywrightConnection){
+    if(-not $PlaywrightEntry){throw 'Playwright entry is required for browser connection verification.'}
+    $extensionToken=[Environment]::GetEnvironmentVariable('PLAYWRIGHT_MCP_EXTENSION_TOKEN','User')
+    if(-not $extensionToken){throw 'Existing user Playwright extension credential is unavailable.'}
+    $env:PLAYWRIGHT_MCP_EXTENSION_TOKEN=$extensionToken
+    $env:MCPHUB_MANAGED_ACCEPTANCE_VERIFY_BROWSER='1'
+  }
   $agent=Start-Process -FilePath $runtime -ArgumentList @('--user-agent','--pipe-name',$pipe) -WindowStyle Hidden -PassThru
   $ready=[IO.Pipes.NamedPipeClientStream]::new('.',$pipe,[IO.Pipes.PipeDirection]::InOut)
   try{$ready.Connect(10000)}finally{$ready.Dispose()}
@@ -50,7 +59,13 @@ for(const definition of definitions){
     console.log(JSON.stringify({server:definition.id,toolCount:listed.tools.length,toolNames:listed.tools.map(t=>t.name)}));
     if(definition.id==='actual-playwright-extension'){
       if(!listed.tools.some(t=>t.name==='browser_tabs'))throw new Error('Playwright browser_tabs tool unavailable');
-      console.log(JSON.stringify({server:definition.id,stdioDiscoverySucceeded:true,browserConnectionVerified:false}));
+      let browserConnectionVerified=false;
+      if(process.env.MCPHUB_MANAGED_ACCEPTANCE_VERIFY_BROWSER==='1'){
+        const tabs=await client.callTool({name:'browser_tabs',arguments:{action:'list'}},undefined,{timeout:30000});
+        if(tabs.isError||!tabs.content?.some(c=>c.type==='text'&&c.text?.length))throw new Error('Playwright extension connection failed; browser content was not logged');
+        browserConnectionVerified=true;
+      }
+      console.log(JSON.stringify({server:definition.id,stdioDiscoverySucceeded:true,browserConnectionVerified}));
       continue;
     }
     const metadataTool=definition.id==='actual-windows-computer-use'?'GuardrailStatus':'get_config';
@@ -69,6 +84,7 @@ for(const definition of definitions){
   & (Join-Path ${env:ProgramFiles} 'nodejs\node.exe') --input-type=module -e $javascript
   if($LASTEXITCODE -ne 0){throw 'Actual managed stdio server acceptance failed.'}
 }finally{
+  $extensionToken=$null
   if($agent){try{if(-not $agent.HasExited){$agent.Kill();$agent.WaitForExit()}}finally{$agent.Dispose()}}
   foreach($key in $previous.Keys){[Environment]::SetEnvironmentVariable($key,$previous[$key],'Process')}
   Pop-Location
