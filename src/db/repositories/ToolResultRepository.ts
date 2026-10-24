@@ -350,18 +350,28 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     const limitParam = params.length + 3;
     const vector = embedding ? `[${embedding.join(',')}]` : null;
     const rows = await this.dataSource.query<ToolResultRow[]>(
-      `WITH lexical AS (
-         SELECT result_id, ROW_NUMBER() OVER (
-           ORDER BY ts_rank_cd(to_tsvector('simple', content), websearch_to_tsquery('simple', $${queryParam})) DESC
-         ) AS lexical_rank
-         FROM tool_result_chunks
+      `WITH scoped_results AS MATERIALIZED (
+         SELECT result.result_id FROM tool_results result
+         JOIN tool_result_state state ON state.result_id = result.result_id
+         ${clause}
+       ), lexical_scores AS (
+         SELECT chunks.result_id,
+           MAX(ts_rank_cd(to_tsvector('simple', content), websearch_to_tsquery('simple', $${queryParam}))) AS score
+         FROM tool_result_chunks chunks JOIN scoped_results USING (result_id)
          WHERE to_tsvector('simple', content) @@ websearch_to_tsquery('simple', $${queryParam})
-         LIMIT 100
-       ), semantic AS (
-         SELECT result_id, ROW_NUMBER() OVER (ORDER BY embedding <=> $${vectorParam}::vector) AS vector_rank
-         FROM tool_result_chunks
+         GROUP BY chunks.result_id
+       ), lexical AS (
+         SELECT result_id, ROW_NUMBER() OVER (ORDER BY score DESC, result_id) AS lexical_rank
+         FROM lexical_scores ORDER BY score DESC, result_id LIMIT 100
+       ), semantic_distances AS (
+         SELECT chunks.result_id, MIN(embedding <=> $${vectorParam}::vector) AS distance
+         FROM tool_result_chunks chunks JOIN scoped_results USING (result_id)
          WHERE $${vectorParam}::vector IS NOT NULL AND embedding IS NOT NULL
-         LIMIT 100
+           AND vector_dims(embedding) = vector_dims($${vectorParam}::vector)
+         GROUP BY chunks.result_id
+       ), semantic AS (
+         SELECT result_id, ROW_NUMBER() OVER (ORDER BY distance, result_id) AS vector_rank
+         FROM semantic_distances ORDER BY distance, result_id LIMIT 100
        ), ranked AS (
          SELECT ids.result_id, lexical.lexical_rank, semantic.vector_rank,
            COALESCE(1.0 / (60 + lexical.lexical_rank), 0) +
