@@ -21,7 +21,7 @@ export class NativeRuntimeTransport implements Transport {
   onclose?:()=>void;
   onerror?:(error:Error)=>void;
   onmessage?:(message:JSONRPCMessage)=>void;
-  constructor(private readonly spec:ManagedProcessSpec,private readonly pipeName='\\\\.\\pipe\\mcphub-runtime'){
+  constructor(private readonly spec:ManagedProcessSpec,private readonly pipeName=process.env.MCPHUB_NATIVE_PIPE||'\\\\.\\pipe\\mcphub-runtime'){
     this.processId=spec.streaming?`${spec.id.replace(/[^A-Za-z0-9_.-]/g,'_').slice(0,80)||'server'}-${randomUUID().replace(/-/g,'')}`:spec.id;
   }
   async start():Promise<void>{

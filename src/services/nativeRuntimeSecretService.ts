@@ -2,7 +2,6 @@ import net from 'node:net';
 
 type RuntimeResponse = { ok?: boolean; error?: string; id?: string } & Record<string, unknown>;
 
-const PIPE = '\\\\.\\pipe\\mcphub-runtime';
 
 /** Send one administrative control request to the installed Windows runtime service. */
 const callRuntime = (request: Record<string, unknown>): Promise<RuntimeResponse> => {
@@ -10,7 +9,7 @@ const callRuntime = (request: Record<string, unknown>): Promise<RuntimeResponse>
     throw new Error('Native runtime service is available only on Windows');
   }
   return new Promise((resolve, reject) => {
-    const socket = net.createConnection(PIPE);
+    const socket = net.createConnection(process.env.MCPHUB_NATIVE_PIPE || '\\\\.\\pipe\\mcphub-runtime');
     let buffer = '';
     const timer = setTimeout(() => {
       socket.destroy();

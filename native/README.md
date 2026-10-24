@@ -92,6 +92,11 @@ The tray opens the HTTP dashboard and does not need direct pipe access.
 The service also accepts explicit diagnostic arguments `--service-name NAME`,
 `--pipe-name NAME`, `--secret-dir ABSOLUTE_PATH` and `--no-gateway`. Defaults stay
 `MCPHub`, `mcphub-runtime`, the machine secret store and gateway watchdog enabled.
+`--gateway-port PORT` (1–65535, default 3000) and `--data-dir ABSOLUTE_PATH`
+allow a separate gateway instance with its own settings file. The service passes
+its pipe name as `MCPHUB_NATIVE_PIPE`; both gateway transports and administrative
+requests use that pipe. These options do not provision a separate PostgreSQL
+database or isolate inherited provider configuration.
 Names allow only letters, digits, dots, underscores and hyphens. These arguments
 let acceptance tests use a separate SCM registration and credential directory
 without touching an existing gateway or production secrets.

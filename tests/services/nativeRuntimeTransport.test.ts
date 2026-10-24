@@ -1,6 +1,7 @@
 import net from 'node:net';
 import {randomUUID} from 'node:crypto';
 import {NativeRuntimeTransport} from '../../src/services/nativeRuntimeTransport.js';
+import {getNativeRuntimeStatus} from '../../src/services/nativeRuntimeSecretService.js';
 const suite=process.platform==='win32'?describe:describe.skip;
 suite('native transport over a real isolated Windows named pipe',()=>{
   let server:net.Server,pipe:string,sockets:net.Socket[],requests:any[],handler:(request:any,socket:net.Socket)=>void;
@@ -17,6 +18,20 @@ suite('native transport over a real isolated Windows named pipe',()=>{
   });
   afterEach(async()=>{for(const socket of sockets)socket.destroy();await new Promise<void>(resolve=>server.close(()=>resolve()));});
   const transport=()=>new NativeRuntimeTransport({id:'fixture',command:'unused.exe',args:[],env:{},request_timeout_ms:100},pipe);
+  test('configured service pipe is shared by transports and administrative requests',async()=>{
+    const previous=process.env.MCPHUB_NATIVE_PIPE;
+    process.env.MCPHUB_NATIVE_PIPE=pipe;
+    const client=new NativeRuntimeTransport({id:'configured',command:'unused.exe',args:[],env:{}});
+    try {
+      await client.start();
+      await expect(getNativeRuntimeStatus()).resolves.toMatchObject({ok:true});
+      await client.close();
+      expect(requests.map(request=>request.op)).toEqual(['start','status','stop']);
+    } finally {
+      await client.close();
+      if(previous===undefined)delete process.env.MCPHUB_NATIVE_PIPE;else process.env.MCPHUB_NATIVE_PIPE=previous;
+    }
+  });
   test('receives a fragmented reply without polling and forwards matching MCP frames',async()=>{
     handler=(request,socket)=>{
       if(request.op!=='stdio'){socket.write('{"ok":true}\n');return;}

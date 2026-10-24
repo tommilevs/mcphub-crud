@@ -5,6 +5,8 @@ pub struct Options {
     pub pipe_name: String,
     pub secret_dir: Option<PathBuf>,
     pub no_gateway: bool,
+    pub gateway_port: u16,
+    pub data_dir: Option<PathBuf>,
 }
 impl Options {
     pub fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self, String> {
@@ -13,6 +15,8 @@ impl Options {
             pipe_name: "mcphub-runtime".into(),
             secret_dir: None,
             no_gateway: false,
+            gateway_port: 3000,
+            data_dir: None,
         };
         let mut args = arguments.into_iter();
         while let Some(flag) = args.next() {
@@ -36,12 +40,27 @@ impl Options {
                         options.pipe_name = value;
                     }
                 }
-                "--secret-dir" => {
+                "--gateway-port" => {
+                    let port = args
+                        .next()
+                        .ok_or("missing gateway port")?
+                        .parse::<u16>()
+                        .map_err(|_| "invalid gateway port")?;
+                    if port == 0 {
+                        return Err("gateway port must be nonzero".into());
+                    }
+                    options.gateway_port = port;
+                }
+                "--secret-dir" | "--data-dir" => {
                     let path = PathBuf::from(args.next().ok_or("missing secret directory")?);
                     if !path.is_absolute() {
                         return Err("secret directory must be absolute".into());
                     }
-                    options.secret_dir = Some(path);
+                    if flag == "--secret-dir" {
+                        options.secret_dir = Some(path);
+                    } else {
+                        options.data_dir = Some(path);
+                    }
                 }
                 _ => return Err(format!("unknown runtime option: {flag}")),
             }
@@ -62,6 +81,27 @@ mod tests {
         assert_eq!(options.pipe_name, "mcphub-runtime");
         assert!(options.secret_dir.is_none());
         assert!(!options.no_gateway);
+        assert_eq!(options.gateway_port, 3000);
+        assert!(options.data_dir.is_none());
+    }
+    #[test]
+    fn isolated_gateway_options_validate_port_and_absolute_data_path() {
+        let options = parse(&["--gateway-port", "31337", "--data-dir", "C:\\MCPHub-test"]).unwrap();
+        assert_eq!(options.gateway_port, 31337);
+        assert_eq!(
+            options.data_dir.unwrap(),
+            std::path::PathBuf::from("C:\\MCPHub-test")
+        );
+        for args in [
+            &["--gateway-port", "0"][..],
+            &["--gateway-port", "65536"],
+            &["--gateway-port", "abc"],
+            &["--gateway-port"],
+            &["--data-dir", "relative"],
+            &["--data-dir"],
+        ] {
+            assert!(parse(args).is_err());
+        }
     }
     #[test]
     fn diagnostic_instances_are_explicit_and_validate_identifiers() {

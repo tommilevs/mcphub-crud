@@ -45,7 +45,7 @@ use windows_service::{define_windows_service, service_dispatcher};
 #[cfg(windows)]
 fn gateway_healthy() -> bool {
     let Ok(mut stream) = TcpStream::connect_timeout(
-        &SocketAddr::from(([127, 0, 0, 1], 3000)),
+        &SocketAddr::from(([127, 0, 0, 1], options().gateway_port)),
         Duration::from_millis(250),
     ) else {
         return false;
@@ -79,10 +79,12 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
         .find(|dir| dir.join("node.exe").exists() && dir.join("dist").join("index.js").exists())?;
     let node = resource_dir.join("node.exe");
     let backend = resource_dir.join("dist").join("index.js");
-    let data_dir = std::env::var_os("ProgramData")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| install_dir.to_path_buf())
-        .join("MCPHub");
+    let data_dir = options().data_dir.clone().unwrap_or_else(|| {
+        std::env::var_os("ProgramData")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| install_dir.to_path_buf())
+            .join("MCPHub")
+    });
     std::fs::create_dir_all(&data_dir).ok()?;
     let settings = data_dir.join("mcp_settings.json");
     if !settings.exists() {
@@ -95,9 +97,13 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .env("PORT", "3000")
+        .env("PORT", options().gateway_port.to_string())
         .env("DISABLE_WEB", "false")
         .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
+        .env(
+            "MCPHUB_NATIVE_PIPE",
+            format!(r"\\.\pipe\{}", options().pipe_name),
+        )
         .env("MCPHUB_SETTING_PATH", settings);
     let child = Child::spawn(&mut command).ok()?;
     Some((child, Instant::now()))
