@@ -149,6 +149,14 @@ starting, stopped or inaccessible never causes a second user-profile gateway.
 The desktop window loads the service dashboard at `http://127.0.0.1:3000`, so
 runtime configuration and API requests share its origin. Closing that window
 hides it; Exit tray remains the explicit tray exit action.
+`MCPHUB_DESKTOP_PORT` selects another loopback gateway port (default 3000);
+`--open-dashboard` opens the window immediately. The webview is created with
+that endpoint before navigation, so isolated tests do not contact port 3000.
+`native/test-service-windows.ps1 -WithDesktop` runs the gateway fixture and
+desktop on the same temporary port, then waits for interactive checks of closing
+the window and Exit tray while verifying the gateway remains available.
+New service settings advertise their configured port; existing settings are
+preserved and can be edited in the dashboard.
 The installer requests service shutdown before replacing runtime files and
 aborts that upgrade if shutdown fails. Development and host-managed deployments can
 run the Node gateway separately (`pnpm backend:dev` or `pnpm backend:build`

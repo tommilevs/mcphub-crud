@@ -90,7 +90,11 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
     std::fs::create_dir_all(&data_dir).ok()?;
     let settings = data_dir.join("mcp_settings.json");
     if !settings.exists() {
-        std::fs::write(&settings, b"{\"mcpServers\":{}}\n").ok()?;
+        let initial = serde_json::json!({
+            "mcpServers": {},
+            "systemConfig": {"install": {"baseUrl": format!("http://127.0.0.1:{}", options().gateway_port)}}
+        });
+        std::fs::write(&settings, serde_json::to_vec(&initial).ok()?).ok()?;
     }
     let mut command = Command::new(node);
     command

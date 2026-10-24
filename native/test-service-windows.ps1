@@ -1,8 +1,10 @@
 param([string]$ServiceBinary=(Join-Path $PSScriptRoot 'target\release\mcphub-runtime-service.exe'),
   [switch]$WithGateway,
   [switch]$WithGeneratedPassword,
+  [switch]$WithDesktop,
   [string]$RuntimeDirectory=(Join-Path $PSScriptRoot 'staging'))
 $ErrorActionPreference='Stop'
+if($WithDesktop){$WithGateway=$true}
 if (-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {throw 'SCM acceptance requires an elevated Windows administrator.'}
 $repo=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 $workRoot=(Resolve-Path -LiteralPath (Join-Path $repo '..')).Path
@@ -13,6 +15,7 @@ $testRoot=[IO.Path]::GetFullPath((Join-Path $workRoot "mcphub-service-acceptance
 $secrets=Join-Path $testRoot 'secrets'
 $binary=(Resolve-Path -LiteralPath $ServiceBinary).Path
 $created=$false
+$desktop=$null
 $oldPipe=$env:MCPHUB_NATIVE_TEST_PIPE
 $oldSecrets=$env:MCPHUB_NATIVE_TEST_SECRET_DIR
 Push-Location $repo
@@ -63,9 +66,21 @@ try {
     $status=Invoke-RestMethod "$base/api/native-runtime/status" -Headers @{'x-auth-token'=$login.token}
     if(-not $status.data -or $null -eq $status.data.processes){throw 'Gateway could not query its isolated service pipe.'}
     if(-not (Test-Path -LiteralPath (Join-Path $testRoot 'mcp_settings.json'))){throw 'Gateway did not use isolated settings.'}
+    $settings=Get-Content -LiteralPath (Join-Path $testRoot 'mcp_settings.json') -Raw | ConvertFrom-Json
+    if($settings.systemConfig.install.baseUrl -ne $base){throw 'New installation advertises the wrong gateway port.'}
     $page=Invoke-WebRequest "$base/" -TimeoutSec 5
     if($page.Content -notmatch '<div id="root"'){throw 'Bundled dashboard was not served.'}
     Write-Output 'Bundled gateway HTTP health/login/native status passed.'
+    if($WithDesktop){
+      $desktop=Start-Process -FilePath (Join-Path $PSScriptRoot 'target\release\mcphub-tray.exe') -ArgumentList '--open-dashboard' -Environment @{MCPHUB_DESKTOP_PORT="$port"} -WindowStyle Hidden -PassThru
+      Write-Output "DESKTOP_ACCEPTANCE_READY port=$port pid=$($desktop.Id)"
+      Read-Host 'After checking login and closing the dashboard window, press Enter' | Out-Null
+      if($desktop.HasExited){throw 'Closing the dashboard exited the tray.'}
+      Invoke-RestMethod "$base/health" -TimeoutSec 2 | Out-Null
+      Read-Host 'After Exit tray, press Enter' | Out-Null
+      if(-not $desktop.WaitForExit(5000)){throw 'Exit tray did not terminate the desktop app.'}
+      Invoke-RestMethod "$base/health" -TimeoutSec 2 | Out-Null
+    }
   }
   # Verify SCM recovery independently of the child-process watchdog.
   sc.exe failure $name reset= 60 actions= restart/1000 | Out-Null
@@ -105,6 +120,7 @@ try {
   if($after.State -ne 'Stopped'){throw 'Intentional stop triggered SCM recovery.'}
 }
 finally {
+  if($desktop){if(-not $desktop.HasExited){$desktop.Kill();$desktop.WaitForExit()};$desktop.Dispose()}
   $env:MCPHUB_NATIVE_TEST_PIPE=$oldPipe;$env:MCPHUB_NATIVE_TEST_SECRET_DIR=$oldSecrets
   if($created){
     Stop-Service -Name $name -ErrorAction SilentlyContinue

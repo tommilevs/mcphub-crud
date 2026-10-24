@@ -13,11 +13,11 @@ use tauri::{
     AppHandle, Manager,
 };
 
-fn start_gateway(app: &AppHandle) {
+fn start_gateway(app: &AppHandle, port: u16) {
     // Autostart and manual launches can overlap. Reuse an already listening
     // gateway instead of creating a second process that will lose the port
     // race and leave the tray pointing at an unhealthy instance.
-    let gateway_addr = SocketAddr::from(([127, 0, 0, 1], 3000));
+    let gateway_addr = SocketAddr::from(([127, 0, 0, 1], port));
     let gateway_healthy = TcpStream::connect_timeout(&gateway_addr, Duration::from_millis(250))
         .ok()
         .and_then(|mut stream| {
@@ -65,19 +65,19 @@ fn start_gateway(app: &AppHandle) {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .env("PORT", "3000")
+        .env("PORT", port.to_string())
         .env("DISABLE_WEB", "false")
         .env("MCPHUB_NATIVE_RUNTIME_ENABLED", "true")
         .env("MCPHUB_SETTING_PATH", settings)
         .spawn();
 }
 
-fn open_dashboard(app: &AppHandle) {
+fn open_dashboard(app: &AppHandle, port: u16) {
     if let Some(window) = app.get_webview_window("main") {
         if !window.is_visible().unwrap_or(false) {
             // Retry navigation when reopened after a slow gateway startup.
             let _ = window.navigate(
-                "http://127.0.0.1:3000"
+                format!("http://127.0.0.1:{port}")
                     .parse()
                     .expect("static dashboard URL"),
             );
@@ -91,11 +91,11 @@ fn open_dashboard(app: &AppHandle) {
     // second dashboard window.
     #[cfg(windows)]
     let _ = Command::new("cmd")
-        .args(["/C", "start", "", "http://127.0.0.1:3000"])
+        .args(["/C", "start", "", &format!("http://127.0.0.1:{port}")])
         .spawn();
     #[cfg(not(windows))]
     let _ = Command::new("xdg-open")
-        .arg("http://127.0.0.1:3000")
+        .arg(format!("http://127.0.0.1:{port}"))
         .spawn();
 }
 
@@ -171,7 +171,19 @@ fn main() {
             }
         })
         .setup(|app| {
-            start_gateway(app.handle());
+            let configured_port = std::env::var("MCPHUB_DESKTOP_PORT").ok();
+            let port = gateway_start::desktop_port(configured_port.as_deref())
+                .map_err(std::io::Error::other)?;
+            start_gateway(app.handle(), port);
+            tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::External(format!("http://127.0.0.1:{port}").parse()?),
+            )
+            .title("MCPHub")
+            .inner_size(1280.0, 800.0)
+            .visible(std::env::args().any(|arg| arg == "--open-dashboard"))
+            .build()?;
             let dashboard = MenuItemBuilder::with_id("dashboard", "Open Dashboard").build(app)?;
             let restart =
                 MenuItemBuilder::with_id("restart", "Restart MCPHub service").build(app)?;
@@ -183,9 +195,15 @@ fn main() {
                 .items(&[&dashboard, &restart, &autostart, &quit])
                 .build()?;
             TrayIconBuilder::new()
+                .icon(
+                    app.default_window_icon()
+                        .cloned()
+                        .ok_or_else(|| std::io::Error::other("MCPHub tray icon is missing"))?,
+                )
+                .tooltip("MCPHub")
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
-                    "dashboard" => open_dashboard(app),
+                    "dashboard" => open_dashboard(app, port),
                     "restart" => restart_service(),
                     "autostart" => {
                         let enabled = !autostart.is_checked().unwrap_or(false);

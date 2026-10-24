@@ -1,5 +1,16 @@
 /// A slow, stopped or inaccessible installed service still owns the gateway.
 /// Only an explicit SCM "service does not exist" permits standalone fallback.
+pub fn desktop_port(value: Option<&str>) -> Result<u16, &'static str> {
+    match value {
+        None => Ok(3000),
+        Some(value) => value
+            .parse::<u16>()
+            .ok()
+            .filter(|port| *port != 0)
+            .ok_or("MCPHUB_DESKTOP_PORT must be an integer between 1 and 65535"),
+    }
+}
+
 #[cfg(windows)]
 pub fn service_absent(name: &str) -> bool {
     use std::os::windows::process::CommandExt;
@@ -15,6 +26,14 @@ pub fn service_absent(name: &str) -> bool {
 
 #[cfg(all(test, windows))]
 mod tests {
+    #[test]
+    fn desktop_endpoint_has_a_stable_default_and_rejects_invalid_ports() {
+        assert_eq!(super::desktop_port(None), Ok(3000));
+        assert_eq!(super::desktop_port(Some("31337")), Ok(31337));
+        for value in ["0", "65536", "http://other", ""] {
+            assert!(super::desktop_port(Some(value)).is_err());
+        }
+    }
     #[test]
     fn a_registered_windows_service_does_not_allow_fallback() {
         assert!(!super::service_absent("EventLog"));
