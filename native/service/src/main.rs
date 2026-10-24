@@ -107,6 +107,14 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
             format!(r"\\.\pipe\{}", options().pipe_name),
         )
         .env("MCPHUB_SETTING_PATH", settings);
+    if std::env::var_os("ADMIN_PASSWORD").is_none() {
+        let store = match &options().secret_dir {
+            Some(path) => SecretStore::new(path),
+            None => SecretStore::machine_default(),
+        }
+        .ok()?;
+        command.env("ADMIN_PASSWORD", store.initial_admin_password().ok()?);
+    }
     let child = Child::spawn(&mut command).ok()?;
     Some((child, Instant::now()))
 }
@@ -588,6 +596,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         OPTIONS
             .set(options::Options::parse(std::env::args().skip(1))?)
             .map_err(|_| "runtime options already initialized")?;
+        if options().show_initial_password {
+            let store = match &options().secret_dir {
+                Some(path) => SecretStore::new(path)?,
+                None => SecretStore::machine_default()?,
+            };
+            // Read only: viewing credentials must not create/reset an account.
+            let started = Instant::now();
+            let password = loop {
+                match store.get("bootstrap-admin") {
+                    Ok(value) => break String::from_utf8(value)?,
+                    Err(error)
+                        if error.kind() == io::ErrorKind::NotFound
+                            && started.elapsed() < Duration::from_secs(15) =>
+                    {
+                        std::thread::sleep(Duration::from_millis(250))
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+            };
+            let message: Vec<u16> = format!("MCPHub initial login\n\nUsername: admin\nPassword: {password}\n\nChange this password after signing in.\nThis does not reset an existing account.").encode_utf16().chain(Some(0)).collect();
+            let title: Vec<u16> = "MCPHub initial login"
+                .encode_utf16()
+                .chain(Some(0))
+                .collect();
+            unsafe {
+                windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
+                    std::ptr::null_mut(),
+                    message.as_ptr(),
+                    title.as_ptr(),
+                    0,
+                );
+            }
+            return Ok(());
+        }
         service_dispatcher::start(&options().service_name, ffi_service_main)?;
         return Ok(());
     }

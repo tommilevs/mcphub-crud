@@ -119,6 +119,19 @@ JSON storage and a synthetic test administrator configured only on the temporary
 service. It checks HTTP health, login, dashboard delivery, native status through
 the selected pipe and gateway termination after a hard service crash. This does
 not test fresh-install password enrollment or the installer/tray UI.
+Add `-WithGeneratedPassword` to verify first login using the service-generated
+DPAPI credential and repeat login after SCM recovery, without a supplied password.
+
+For a new installation without `ADMIN_PASSWORD`, the service creates a random
+256-bit initial administrator password in its existing machine DPAPI secret
+store and supplies it to the backend through the child environment. It is not
+written to settings or printed. The installer opens a local initial-login dialog
+when no bootstrap credential existed; an elevated administrator can reopen it
+with `mcphub-runtime-service.exe --show-initial-password`. The dialog reads the
+stored initial credential only; it does not reset an existing account and may
+show an obsolete password after the user changes it. An explicit `ADMIN_PASSWORD`
+continues to take precedence. DPAPI storage and directory permissions are the
+same as other runtime credentials.
 
 The Windows Tauri installer can include a self-contained gateway runtime. Run
 `native/package-windows.ps1` before `cargo tauri build` to stage portable
@@ -134,4 +147,6 @@ reuses an already listening gateway and only starts a fallback process when
 the service resources are absent. Development and host-managed deployments can
 run the Node gateway separately (`pnpm backend:dev` or `pnpm backend:build`
 followed by `dist/index.js`).
+`native/build-windows.ps1 -Action bundle` builds the service and NSIS installer
+using the configured Visual Studio/Windows SDK environment and existing staging.
 

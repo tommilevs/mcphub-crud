@@ -8,6 +8,7 @@ pub struct Options {
     pub gateway_port: u16,
     pub data_dir: Option<PathBuf>,
     pub runtime_dir: Option<PathBuf>,
+    pub show_initial_password: bool,
 }
 impl Options {
     pub fn parse(arguments: impl IntoIterator<Item = String>) -> Result<Self, String> {
@@ -19,11 +20,13 @@ impl Options {
             gateway_port: 3000,
             data_dir: None,
             runtime_dir: None,
+            show_initial_password: false,
         };
         let mut args = arguments.into_iter();
         while let Some(flag) = args.next() {
             match flag.as_str() {
                 "--no-gateway" => options.no_gateway = true,
+                "--show-initial-password" => options.show_initial_password = true,
                 "--service-name" | "--pipe-name" => {
                     let value = args
                         .next()

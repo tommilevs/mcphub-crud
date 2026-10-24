@@ -1,5 +1,5 @@
 param(
-  [ValidateSet('check', 'release', 'test')][string]$Action = 'release'
+  [ValidateSet('check', 'release', 'test', 'bundle')][string]$Action = 'release'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,6 +17,8 @@ $lib = "$($sdk.FullName)\um\x64;$($sdk.FullName)\ucrt\x64;$vc"
 $cargoAction = if ($Action -eq 'check') { 'check' } else { 'build --release' }
 
 $build = if ($Action -eq 'test') { "`"$cargo`" test -p mcphub-runtime-core -p mcphub-runtime-service" } else { "`"$cargo`" build -p mcphub-runtime-service --release && `"$cargo`" $cargoAction -p mcphub-tray" }
-$command = "cd /d `"$PSScriptRoot`" && call `"$devCmd`" -arch=x64 >nul && set `"LIB=$lib`" && $build"
+if ($Action -eq 'bundle') { $build = "`"$cargo`" build -p mcphub-runtime-service --release && cd tray && `"$cargo`" tauri build --bundles nsis" }
+$cargoDirectory = Split-Path -Parent $cargo
+$command = "cd /d `"$PSScriptRoot`" && call `"$devCmd`" -arch=x64 >nul && set `"LIB=$lib`" && set `"PATH=$cargoDirectory;%PATH%`" && $build"
 & cmd.exe /d /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native Windows build failed with exit code $LASTEXITCODE" }

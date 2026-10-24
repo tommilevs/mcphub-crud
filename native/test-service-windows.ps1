@@ -1,5 +1,6 @@
 param([string]$ServiceBinary=(Join-Path $PSScriptRoot 'target\release\mcphub-runtime-service.exe'),
   [switch]$WithGateway,
+  [switch]$WithGeneratedPassword,
   [string]$RuntimeDirectory=(Join-Path $PSScriptRoot 'staging'))
 $ErrorActionPreference='Stop'
 if (-not [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {throw 'SCM acceptance requires an elevated Windows administrator.'}
@@ -29,7 +30,9 @@ try {
   $created=$true;$registration.Dispose()
   if($WithGateway){
     # Synthetic acceptance credential only; the service key is deleted in finally.
-    New-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name Environment -PropertyType MultiString -Value @('USE_DB=false','NODE_ENV=production','ADMIN_PASSWORD=MCPHub-Acceptance-Only-42!') | Out-Null
+    $serviceEnvironment=@('USE_DB=false','NODE_ENV=production')
+    if(-not $WithGeneratedPassword){$serviceEnvironment+='ADMIN_PASSWORD=MCPHub-Acceptance-Only-42!'}
+    New-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name Environment -PropertyType MultiString -Value $serviceEnvironment | Out-Null
   }
   Start-Service -Name $name
   $service=Get-Service -Name $name
@@ -45,7 +48,17 @@ try {
       try{$health=Invoke-RestMethod "$base/health" -TimeoutSec 2;break}catch{Start-Sleep -Milliseconds 500}
     } while([DateTime]::UtcNow -lt $deadline)
     if(-not $health){throw 'Bundled gateway never became healthy.'}
-    $login=Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' -Body '{"username":"admin","password":"MCPHub-Acceptance-Only-42!"}'
+    $password='MCPHub-Acceptance-Only-42!'
+    if($WithGeneratedPassword){
+      $encrypted=[IO.File]::ReadAllBytes((Join-Path $secrets 'bootstrap-admin.dpapi'))
+      $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::LocalMachine)
+      $password=[Text.Encoding]::UTF8.GetString($plain)
+      if($password.Length -ne 64){throw 'Invalid generated bootstrap password.'}
+      [Array]::Clear($plain,0,$plain.Length)
+    }
+    $loginBody=@{username='admin';password=$password}|ConvertTo-Json -Compress
+    $login=Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' -Body $loginBody
+    $password=$null
     if(-not $login.token){throw 'Bundled gateway login failed.'}
     $status=Invoke-RestMethod "$base/api/native-runtime/status" -Headers @{'x-auth-token'=$login.token}
     if(-not $status.data -or $null -eq $status.data.processes){throw 'Gateway could not query its isolated service pipe.'}
@@ -75,6 +88,17 @@ try {
     $after=Get-CimInstance Win32_Service -Filter "Name='$name'"
   } until(($after.State -eq 'Running' -and $after.ProcessId -ne $before.ProcessId) -or [DateTime]::UtcNow -ge $deadline)
   if($after.State -ne 'Running' -or $after.ProcessId -eq $before.ProcessId){throw 'SCM did not recover the crashed service.'}
+  if($WithGateway){
+    $recovered=$false;$deadline=[DateTime]::UtcNow.AddSeconds(30)
+    do {
+      try {
+        $again=Invoke-RestMethod "$base/api/auth/login" -Method Post -ContentType 'application/json' -Body $loginBody -TimeoutSec 2
+        $recovered=[bool]$again.token
+      }catch{Start-Sleep -Milliseconds 500}
+    }until($recovered -or [DateTime]::UtcNow -ge $deadline)
+    $loginBody=$null
+    if(-not $recovered){throw 'Gateway login did not survive service recovery.'}
+  }
   Stop-Service -Name $name
   Start-Sleep -Seconds 3
   $after=Get-CimInstance Win32_Service -Filter "Name='$name'"
