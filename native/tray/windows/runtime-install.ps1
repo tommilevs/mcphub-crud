@@ -11,6 +11,29 @@ $ErrorActionPreference='Stop'
 foreach($name in @($ServiceName,$PipeName)) {
   if($name -notmatch '^[A-Za-z0-9_.-]{1,128}$'){throw 'Invalid runtime service or pipe name.'}
 }
+# An ordinary NSIS upgrade only supplies InstallDirectory. Preserve previously
+# selected service endpoints and data location unless explicitly overridden.
+$registered=Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
+if($registered){
+  foreach($entry in @(
+    @{Parameter='DataDirectory';Flag='data-dir'},
+    @{Parameter='RuntimeDirectory';Flag='runtime-dir'},
+    @{Parameter='PipeName';Flag='pipe-name'}
+  )){
+    if(-not $PSBoundParameters.ContainsKey($entry.Parameter)){
+      $match=[regex]::Match($registered.PathName,'(?:^|\s)--'+$entry.Flag+'\s+"([^"\r\n]+)"')
+      if($match.Success){Set-Variable -Name $entry.Parameter -Value $match.Groups[1].Value}
+    }
+  }
+  if(-not $PSBoundParameters.ContainsKey('GatewayPort')){
+    $match=[regex]::Match($registered.PathName,'(?:^|\s)--gateway-port\s+([0-9]+)(?:\s|$)')
+    if($match.Success){
+      $GatewayPort=[int]$match.Groups[1].Value
+      if($GatewayPort -lt 1 -or $GatewayPort -gt 65535){throw 'Invalid registered gateway port.'}
+    }
+  }
+  if($PipeName -notmatch '^[A-Za-z0-9_.-]{1,128}$'){throw 'Invalid registered runtime pipe.'}
+}
 foreach($path in @($InstallDirectory,$DataDirectory)) {
   if(-not [IO.Path]::IsPathRooted($path) -or $path.Contains('"')){throw 'Runtime directories must be absolute Windows paths.'}
 }

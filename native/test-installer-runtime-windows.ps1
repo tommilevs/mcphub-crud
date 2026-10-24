@@ -61,7 +61,17 @@ try {
   if((Get-Service -Name $service).Status -ne 'Stopped'){throw 'Preinstall did not wait for the service to stop.'}
   # A real replacement in a directory containing spaces must no longer hit an executable lock.
   Copy-Item -LiteralPath $source -Destination $binary -Force
-  & $lifecycle -Action Install @arguments
+  # NSIS upgrades supply the install directory, not the previous custom data path.
+  # Intercept before mutation so a regression cannot touch ProgramData or port 3000.
+  function Invoke-CimMethod {
+    param($InputObject,$MethodName,$Arguments)
+    if($Arguments.PathName -notlike ('*--data-dir "'+$data+'"*')){throw 'Upgrade would discard the existing data directory.'}
+    if($Arguments.PathName -notlike ('*--gateway-port '+$port+' *')){throw 'Upgrade would discard the existing gateway port.'}
+    if($Arguments.PathName -notlike ('*--pipe-name "'+$pipe+'"*')){throw 'Upgrade would discard the existing pipe.'}
+    CimCmdlets\Invoke-CimMethod -InputObject $InputObject -MethodName $MethodName -Arguments $Arguments
+  }
+  try { & $lifecycle -Action Install -InstallDirectory $install -ServiceName $service }
+  finally { Remove-Item Function:\Invoke-CimMethod }
   Wait-Gateway
   Assert-Login $password
   $password=$null

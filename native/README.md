@@ -243,3 +243,6 @@ followed by `dist/index.js`).
 `native/build-windows.ps1 -Action bundle` builds the service and NSIS installer
 using the configured Visual Studio/Windows SDK environment and existing staging.
 
+
+Installer upgrades preserve the registered data directory, gateway port, pipe name and runtime directory when those parameters are omitted. Explicit lifecycle arguments still override the existing registration. The acceptance test upgrades with only the install directory and isolated service name to exercise the same defaulting behavior as NSIS.
+
