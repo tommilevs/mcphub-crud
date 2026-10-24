@@ -1,5 +1,15 @@
 import type { NativeExecution } from '../types/index.js';
 
+/** The agent supplies the Windows user's inherited environment, not the service gateway. */
+export function interactiveNativeEnvironment(
+  configured: Record<string,string> | undefined,
+  resolved: Record<string,string>,
+  injectedKeys: readonly string[],
+): Record<string,string> {
+  const keys=new Set([...Object.keys(configured??{}),...injectedKeys]);
+  return Object.fromEntries([...keys].filter(key=>typeof resolved[key]==='string').map(key=>[key,resolved[key]]));
+}
+
 export function normalizeNativeExecution(value: unknown): NativeExecution | undefined {
   if (value === undefined) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid native execution policy');

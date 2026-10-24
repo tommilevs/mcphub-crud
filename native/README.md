@@ -205,8 +205,20 @@ executable path and token user against the session's WTS user token, then resolv
 `nativeSecretRefs` and forwards the streaming connection over that same handle.
 The agent never reads the machine DPAPI store. The broker requires the installed
 LocalSystem service; a standalone elevated gateway cannot replace WTS token access.
+Interactive children inherit the user agent's environment. The gateway forwards
+only explicit server environment entries and configured installation registry
+overrides, rather than its complete SYSTEM environment. An explicit per-server
+PATH is preserved. Existing service hosting keeps its previous environment behavior.
 Disconnect closes the remote process lease. Service status lists service processes;
 agent processes remain in the agent's own status, without a merged management view yet.
+
+`native/test-managed-tools-windows.ps1 -ComputerUseExecutable <installed-exe>
+-DesktopCommanderEntry <installed-index.js>` checks real installed desktop-tool
+servers through a separate native user agent: initialize, tools/list,
+Windows `GuardrailStatus` (same device and admission, without resetting policy),
+and Desktop Commander `get_config`. It uses the Windows server's
+`stdio --toolsets default,testing` mode, does not capture/control the desktop,
+and removes only its temporary host. Existing gateways and scheduled tasks stay running.
 The first user-agent pipe instance is exclusive: a duplicate agent using that
 pipe fails without replacing the original host. For service/agent-only changes,
 `native/build-windows.ps1 -Action service` builds that executable without

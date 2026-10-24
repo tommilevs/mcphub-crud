@@ -37,7 +37,7 @@ try {
   $created=$true;$registration.Dispose()
   if($WithGateway){
     # Synthetic acceptance credential only; the service key is deleted in finally.
-    $serviceEnvironment=@('USE_DB=false','NODE_ENV=production')
+    $serviceEnvironment=@('USE_DB=false','NODE_ENV=production','MCPHUB_ACCEPTANCE_GATEWAY_ONLY=synthetic-service-only')
     if(-not $WithGeneratedPassword){$serviceEnvironment+='ADMIN_PASSWORD=MCPHub-Acceptance-Only-42!'}
     New-ItemProperty -LiteralPath "HKLM:\SYSTEM\CurrentControlSet\Services\$name" -Name Environment -PropertyType MultiString -Value $serviceEnvironment | Out-Null
   }
@@ -112,6 +112,9 @@ try {
       if($called.isError -or $called.content[0].text -ne '{"secretMatches":true}'){
         throw ('Gateway user-session fixture call failed: '+($called|ConvertTo-Json -Depth 8 -Compress))
       }
+      $sessionEnvironment=Invoke-RestMethod "$base/api/tools/$desktopServer/session_environment" -Method Post -Headers $headers -ContentType 'application/json' -Body (@{expectedProfile=$env:USERPROFILE}|ConvertTo-Json -Compress)
+      $environmentResult=$sessionEnvironment.content[0].text|ConvertFrom-Json
+      if($sessionEnvironment.isError -or -not $environmentResult.profileMatches -or $environmentResult.gatewayMarkerPresent){throw 'Interactive child inherited the gateway profile or private gateway environment.'}
       $stored=Get-Content -LiteralPath (Join-Path $testRoot 'mcp_settings.json') -Raw | ConvertFrom-Json
       if($stored.mcpServers.$desktopServer.options.nativeExecution.sessionId -ne [int]$env:MCPHUB_NATIVE_TEST_AGENT_SESSION){throw 'Interactive execution configuration did not persist.'}
       Write-Output 'Bundled gateway HTTP create/config persistence/user-session tool call passed.'

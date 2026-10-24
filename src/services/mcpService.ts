@@ -48,7 +48,7 @@ import treeKill from 'tree-kill';
 import { isProcessTreeKillAvailable } from '../utils/processTree.js';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { NativeRuntimeTransport } from './nativeRuntimeTransport.js';
-import { interactiveExecutionRequest } from '../utils/nativeExecution.js';
+import { interactiveExecutionRequest, interactiveNativeEnvironment } from '../utils/nativeExecution.js';
 import {
   type Client,
   SSEClientTransport,
@@ -1748,7 +1748,9 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
     transport = new SSEClientTransport(new URL(conf.url), options);
   } else if (conf.command) {
     // Stdio transport
-    env['PATH'] = expandEnvVars(process.env.PATH as string) || '';
+    if(conf.options?.nativeExecution?.kind!=='interactive')
+      env['PATH'] = expandEnvVars(process.env.PATH as string) || '';
+    const injectedEnvironmentKeys: string[] = [];
 
     const systemConfigDao = getSystemConfigDao();
     const systemConfig = await systemConfigDao.get();
@@ -1758,6 +1760,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
       (conf.command === 'uvx' || conf.command === 'uv' || conf.command === 'python')
     ) {
       env['UV_DEFAULT_INDEX'] = systemConfig.install.pythonIndexUrl;
+      injectedEnvironmentKeys.push('UV_DEFAULT_INDEX');
     }
 
     if (
@@ -1769,6 +1772,7 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
         conf.command === 'node')
     ) {
       env['npm_config_registry'] = systemConfig.install.npmRegistry;
+      injectedEnvironmentKeys.push('npm_config_registry');
     }
 
     // Apply proxychains4 wrapper if proxy is configured (Linux/macOS only)
@@ -1799,7 +1803,9 @@ export const createTransportFromConfig = async (name: string, conf: ServerConfig
     const executionContext = interactiveExecutionRequest(conf.options?.nativeExecution, nativeRuntimeEligible);
     if (nativeRuntimeEligible) {
       const nativeSecretRefs = conf.nativeSecretRefs;
-      const nativeEnv = { ...env };
+      const nativeEnv = executionContext
+        ? interactiveNativeEnvironment(conf.env, env, injectedEnvironmentKeys)
+        : { ...env };
       for (const key of Object.keys(nativeSecretRefs ?? {})) delete nativeEnv[key];
       transport = new NativeRuntimeTransport({
         id: name,

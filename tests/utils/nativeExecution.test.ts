@@ -1,5 +1,11 @@
-import { normalizeNativeExecution, interactiveExecutionRequest } from '../../src/utils/nativeExecution.js';
+import { normalizeNativeExecution, interactiveExecutionRequest, interactiveNativeEnvironment } from '../../src/utils/nativeExecution.js';
 describe('native execution policy', () => {
+  test('interactive children inherit their user agent profile, with only configured overrides crossing the gateway boundary', () => {
+    const source={USERPROFILE:'system-profile',APPDATA:'system-appdata',ADMIN_PASSWORD:'gateway-only',PATH:'configured-path',API_URL:'configured-url',npm_config_registry:'configured-registry'};
+    expect(interactiveNativeEnvironment({PATH:'configured-path',API_URL:'configured-url'},source,['npm_config_registry']))
+      .toEqual({PATH:'configured-path',API_URL:'configured-url',npm_config_registry:'configured-registry'});
+    expect(interactiveNativeEnvironment(undefined,source,[])).toEqual({});
+  });
   test('legacy configuration remains service-hosted without new requirements', () => {
     expect(normalizeNativeExecution(undefined)).toBeUndefined();
     expect(interactiveExecutionRequest(undefined, false)).toBeUndefined();
