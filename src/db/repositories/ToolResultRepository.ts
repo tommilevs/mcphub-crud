@@ -236,15 +236,33 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     resultId: string,
     chunks: Array<{ chunkIndex: number; chunkVersion: number; content: string; embedding: number[] | null }>,
   ): Promise<void> {
-    await this.dataSource.query('DELETE FROM tool_result_chunks WHERE result_id = $1', [resultId]);
-    for (const chunk of chunks) {
-      const vector = chunk.embedding ? `[${chunk.embedding.join(',')}]` : null;
-      await this.dataSource.query(
-        `INSERT INTO tool_result_chunks (result_id, chunk_index, chunk_version, content, embedding)
-         VALUES ($1, $2, $3, $4, $5::vector)`,
-        [resultId, chunk.chunkIndex, chunk.chunkVersion, chunk.content, vector],
-      );
-    }
+    const incoming = chunks.map(chunk => ({
+      chunk_index: chunk.chunkIndex,
+      chunk_version: chunk.chunkVersion,
+      content: chunk.content,
+      embedding: chunk.embedding ? `[${chunk.embedding.join(',')}]` : null,
+    }));
+    // Upsert and removal affect disjoint keys in one statement. PostgreSQL rolls
+    // back the entire replacement if any new chunk cannot be stored.
+    await this.dataSource.query(
+      `WITH incoming AS MATERIALIZED (
+         SELECT chunk_index, chunk_version, content, embedding::vector AS embedding
+         FROM jsonb_to_recordset($2::jsonb)
+           AS chunk(chunk_index integer, chunk_version integer, content text, embedding text)
+       ), written AS (
+         INSERT INTO tool_result_chunks (result_id, chunk_index, chunk_version, content, embedding)
+         SELECT $1::uuid, chunk_index, chunk_version, content, embedding FROM incoming WHERE TRUE
+         ON CONFLICT (result_id, chunk_index, chunk_version) DO UPDATE
+         SET content = EXCLUDED.content, embedding = EXCLUDED.embedding
+         RETURNING chunk_index, chunk_version
+       )
+       DELETE FROM tool_result_chunks old
+       WHERE old.result_id = $1::uuid AND NOT EXISTS (
+         SELECT 1 FROM incoming
+         WHERE incoming.chunk_index = old.chunk_index AND incoming.chunk_version = old.chunk_version
+       )`,
+      [resultId, JSON.stringify(incoming)],
+    );
   }
 
   async searchChunks(

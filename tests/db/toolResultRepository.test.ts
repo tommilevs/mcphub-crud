@@ -100,8 +100,8 @@ describe('ToolResultRepositoryDb', () => {
     ]);
 
     expect(query.mock.calls[0][0]).toContain('DELETE FROM tool_result_chunks');
-    expect(query.mock.calls[1][0]).toContain('INSERT INTO tool_result_chunks');
-    expect(query.mock.calls[2][1]).toEqual(['result-1', 1, 1, 'second', '[0.1,0.2]']);
+    expect(query.mock.calls[0][0]).toContain('INSERT INTO tool_result_chunks');
+    expect(JSON.parse(query.mock.calls[0][1][1])[1]).toEqual({chunk_index:1,chunk_version:1,content:'second',embedding:'[0.1,0.2]'});
     expect(query.mock.calls.map(([sql]) => sql).join('\n')).not.toContain('UPDATE tool_results');
   });
 
@@ -166,6 +166,20 @@ describe('ToolResultRepositoryDb', () => {
     await repository.countForReindex(false,cursor);
     expect(query.mock.calls[1][0]).toContain('result.result_id > $2::uuid');
     expect(query.mock.calls[1][1]).toEqual([false,cursor]);
+  });
+
+  it('replaces a result index in one atomic database statement',async()=>{
+    const query=jest.fn().mockResolvedValue([]);
+    const repository=new ToolResultRepositoryDb({query} as never);
+    await repository.indexChunks('result-id',[
+      {chunkIndex:0,chunkVersion:1,content:'first',embedding:null},
+      {chunkIndex:1,chunkVersion:1,content:'second',embedding:[0.1,0.2]},
+    ]);
+    expect(query).toHaveBeenCalledTimes(1);
+    expect(query.mock.calls[0][0]).toContain('ON CONFLICT');
+    expect(query.mock.calls[0][0]).toContain('NOT EXISTS');
+    expect(query.mock.calls[0][1][0]).toBe('result-id');
+    expect(JSON.parse(query.mock.calls[0][1][1])).toHaveLength(2);
   });
 
 });
