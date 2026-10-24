@@ -69,6 +69,7 @@ jest.mock('../../src/services/upstreamOAuthDisconnectService.js', () => ({
 }));
 
 jest.mock('../../src/services/logService.js', () => ({
+  __esModule: true,
   default: {
     getLogs: jest.fn(),
     clearLogs: jest.fn(),
@@ -76,6 +77,7 @@ jest.mock('../../src/services/logService.js', () => ({
   },
 }));
 
+import logService from '../../src/services/logService.js';
 import { auth } from '../../src/middlewares/auth.js';
 import { authenticatedRouteRateLimiter } from '../../src/utils/rateLimit.js';
 import { updateSystemConfig } from '../../src/controllers/serverController.js';
@@ -156,4 +158,38 @@ describe('system configuration authorization', () => {
       });
     }
   });
+  it('streams initial and live log events over HTTP with skipAuth and rejects tokenless access after it is disabled', async () => {
+    mockGetSystemConfig.mockResolvedValue({routing:{skipAuth:true,enableBearerAuth:false}});
+    jest.mocked(logService.getLogs).mockReturnValue([]);
+    let emit!: Parameters<typeof logService.subscribeToStream>[0];
+    const unsubscribe=jest.fn();
+    jest.mocked(logService.subscribeToStream).mockImplementation(callback=>{emit=callback;return unsubscribe;});
+    const app=express();app.get('/api/logs/stream',auth,streamLogs);
+    const server=app.listen(0,'127.0.0.1');
+    await new Promise<void>(resolve=>server.once('listening',resolve));
+    const port=(server.address() as {port:number}).port;
+    const controller=new AbortController();
+    const timeout=setTimeout(()=>controller.abort(),4000);
+    try {
+      const response=await fetch(`http://127.0.0.1:${port}/api/logs/stream`,{signal:controller.signal});
+      expect(response.status).toBe(200);
+      expect(response.headers.get('content-type')).toContain('text/event-stream');
+      const reader=response.body!.getReader();
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('"type":"initial"');
+      emit({type:'log',log:{timestamp:1,type:'info',source:'fixture',message:'live-stream-marker'}});
+      expect(new TextDecoder().decode((await reader.read()).value)).toContain('live-stream-marker');
+      await reader.cancel();controller.abort();
+      await new Promise(resolve=>setImmediate(resolve));
+      mockGetSystemConfig.mockResolvedValue({routing:{skipAuth:false,enableBearerAuth:false}});
+      const denied=await fetch(`http://127.0.0.1:${port}/api/logs/stream`,{signal:AbortSignal.timeout(3000)});
+      expect(denied.status).toBe(401);
+      await denied.text();
+    } finally {
+      clearTimeout(timeout);controller.abort();
+      server.closeAllConnections();
+      await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+    }
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
 });
