@@ -134,6 +134,7 @@ export const auth = async (req: Request, res: Response, next: NextFunction): Pro
       isAdmin: forwardAuthResult.user.isAdmin || false,
     };
     (req as any).forwardAuthUser = forwardAuthResult.user;
+    (req as any).authMethod = 'forward';
     next();
     return;
   }
@@ -154,6 +155,7 @@ export const auth = async (req: Request, res: Response, next: NextFunction): Pro
       credentialEligible: false,
     };
     (req as any).bearerKey = matchingBearerKey;
+    (req as any).authMethod = 'bearer';
     next();
     return;
   }
@@ -166,6 +168,7 @@ export const auth = async (req: Request, res: Response, next: NextFunction): Pro
         username: betterAuthUser.username,
         isAdmin: betterAuthUser.isAdmin || false,
       };
+      (req as any).authMethod = 'session';
       next();
       return;
     }
@@ -178,6 +181,7 @@ export const auth = async (req: Request, res: Response, next: NextFunction): Pro
 
   if (!token && routingConfig.skipAuth && isDashboardApiRequest(req)) {
     (req as any).user = createSkipAuthUser();
+    (req as any).authMethod = 'skip';
     next();
     return;
   }
@@ -196,6 +200,7 @@ export const auth = async (req: Request, res: Response, next: NextFunction): Pro
       return;
     }
     (req as any).user = { username: user.username, isAdmin: user.isAdmin || false };
+    (req as any).authMethod = 'jwt';
     next();
   } catch (error) {
     res.status(401).json({ success: false, message: 'Token is not valid' });

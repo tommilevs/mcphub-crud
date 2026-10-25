@@ -1,6 +1,6 @@
 import express from 'express';
 import request from 'supertest';
-import { proposeMcpAcquisition, createMcpAcquisitionPlan, getMcpAcquisitionPlan } from '../../src/controllers/mcpAcquisitionController.js';
+import { proposeMcpAcquisition, createMcpAcquisitionPlan, getMcpAcquisitionPlan, authorizeMcpAcquisitionPlan } from '../../src/controllers/mcpAcquisitionController.js';
 import { loadSettings } from '../../src/config/configManager.js';
 import { getMarketServers } from '../../src/services/marketService.js';
 import { requireAdminMiddleware } from '../../src/utils/requireAdmin.js';
@@ -12,12 +12,14 @@ jest.mock('../../src/services/marketService.js', () => ({ getMarketServers: jest
 
 const app = express();
 let username: string | undefined;
+let authMethod: string | undefined;
 app.use(express.json());
-app.use((req, _res, next) => { (req as any).user = username ? { username, isAdmin: true } : undefined; next(); });
+app.use((req, _res, next) => { (req as any).user = username ? { username, isAdmin: true } : undefined; (req as any).authMethod = authMethod; next(); });
 app.post('/proposals', proposeMcpAcquisition);
 app.post('/plans', createMcpAcquisitionPlan);
 app.get('/plans/:id', getMcpAcquisitionPlan);
-beforeEach(() => { jest.resetAllMocks(); username = undefined; });
+app.post('/plans/:id/authorize', authorizeMcpAcquisitionPlan);
+beforeEach(() => { jest.resetAllMocks(); username = undefined; authMethod = undefined; });
 
 test('shared admin gate denies requests without admin identity before catalog access', async () => {
   const guarded = express();
@@ -83,4 +85,22 @@ test('configured names cannot become duplicate plans and missing plans do not re
   mockQuery.mockResolvedValue([]);
   await request(app).get('/plans/00000000-0000-4000-8000-000000000000').expect(404);
   expect(mockQuery.mock.calls[0][1][1]).toBe('alice');
+});
+
+test('model approval flags cannot authorize through bearer/forward/skip authentication', async () => {
+  username = 'alice';
+  for (const method of ['bearer', 'forward', 'skip', undefined]) {
+    authMethod = method;
+    await request(app).post('/plans/00000000-0000-4000-8000-000000000000/authorize')
+      .send({ approved: true, authMethod: 'jwt' }).expect(403);
+  }
+  expect(mockQuery).not.toHaveBeenCalled();
+});
+
+test('dashboard approval requires an exact digest and rejects unavailable plans', async () => {
+  username = 'alice'; authMethod = 'jwt';
+  const endpoint = '/plans/00000000-0000-4000-8000-000000000000/authorize';
+  await request(app).post(endpoint).send({ approved: true }).expect(400);
+  mockQuery.mockResolvedValue([]);
+  await request(app).post(endpoint).send({ digest: 'a'.repeat(64), idempotencyKey: '00000000-0000-4000-8000-000000000001' }).expect(409);
 });

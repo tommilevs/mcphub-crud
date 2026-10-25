@@ -63,11 +63,35 @@ export async function getMcpAcquisitionPlan(req: Request, res: Response): Promis
   try {
     const plan = await new AcquisitionPlanRepository(getAppDataSource()).get(owner, req.params.id as string);
     if (!plan) { res.status(404).json({ success: false, message: 'Plan is unavailable or expired' }); return; }
-    res.json({ success: true, data: { ...plan, status: 'proposed', verification: 'catalog_only' } });
+    res.json({ success: true, data: { ...plan, status: plan.operation_state ?? 'proposed', verification: 'catalog_only' } });
   } catch (error) {
     if (error instanceof AcquisitionInputError) {
       res.status(400).json({ success: false, message: error.message }); return;
     }
     res.status(503).json({ success: false, message: 'Acquisition plan storage is unavailable' });
+  }
+}
+
+export async function authorizeMcpAcquisitionPlan(req: Request, res: Response): Promise<void> {
+  // Method is assigned by auth middleware, never supplied by headers/body.
+  if (!(req as any).user?.isAdmin || !['jwt', 'session'].includes((req as any).authMethod)) {
+    res.status(403).json({ success: false, message: 'Dashboard administrator authentication is required' }); return;
+  }
+  const owner = ownerOf(req);
+  if (!owner) { res.status(401).json({ success: false, message: 'Authenticated owner is required' }); return; }
+  const { digest, idempotencyKey } = req.body ?? {};
+  if (typeof digest !== 'string' || typeof idempotencyKey !== 'string') {
+    res.status(400).json({ success: false, message: 'Exact plan digest and idempotency key are required' }); return;
+  }
+  try {
+    const operation = await new AcquisitionPlanRepository(getAppDataSource())
+      .authorize(owner, req.params.id as string, digest, idempotencyKey);
+    if (!operation) { res.status(409).json({ success: false, message: 'Plan changed, expired or conflicts with an existing request' }); return; }
+    res.json({ success: true, data: operation });
+  } catch (error) {
+    if (error instanceof AcquisitionInputError) {
+      res.status(400).json({ success: false, message: error.message }); return;
+    }
+    res.status(503).json({ success: false, message: 'Acquisition authorization is unavailable' });
   }
 }

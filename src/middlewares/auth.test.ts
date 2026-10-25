@@ -94,6 +94,7 @@ describe('auth middleware', () => {
       },
       auth,
       (_req, res) => {
+        res.set('X-Test-Auth-Method', (_req as any).authMethod ?? 'none');
         res.status(200).json({ success: true });
       },
     );
@@ -119,6 +120,7 @@ describe('auth middleware', () => {
       .set('Authorization', 'Bearer test-key');
 
     expect(response.status).toBe(200);
+    expect(response.headers['x-test-auth-method']).toBe('bearer');
     expect(response.body).toEqual({ success: true });
   });
 
@@ -213,6 +215,7 @@ describe('auth middleware', () => {
 
     const app = createApp();
     const response = await request(app).get('/api/protected');
+    expect(response.headers['x-test-auth-method']).toBe('skip');
 
     expect(response.status).toBe(200);
     expect(response.body).toEqual({ success: true });
@@ -330,6 +333,7 @@ describe('auth middleware', () => {
         },
         auth,
         (req, res) => {
+          res.set('X-Test-Auth-Method', (req as any).authMethod ?? 'none');
           res.status(200).json({
             success: true,
             user: (req as any).user,
@@ -456,6 +460,7 @@ describe('auth middleware', () => {
         },
         auth,
         (req, res) => {
+          res.set('X-Test-Auth-Method', (req as any).authMethod ?? 'none');
           res.status(200).json({
             success: true,
             user: (req as any).user,
@@ -477,6 +482,7 @@ describe('auth middleware', () => {
       const response = await request(app).get('/api/protected').set('x-auth-token', token);
 
       expect(response.status).toBe(200);
+      expect(response.headers['x-test-auth-method']).toBe('jwt');
       expect(response.body.user).toEqual({
         username: 'jwt-user',
         isAdmin: false,

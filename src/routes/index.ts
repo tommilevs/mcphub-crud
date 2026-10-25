@@ -72,7 +72,7 @@ import {
   deleteExistingUser,
   getUserStats,
 } from '../controllers/userController.js';
-import { proposeMcpAcquisition, createMcpAcquisitionPlan, getMcpAcquisitionPlan } from '../controllers/mcpAcquisitionController.js';
+import { proposeMcpAcquisition, createMcpAcquisitionPlan, getMcpAcquisitionPlan, authorizeMcpAcquisitionPlan } from '../controllers/mcpAcquisitionController.js';
 import {
   getAllMarketServers,
   getMarketServer,
@@ -506,6 +506,7 @@ export const initRoutes = async (app: express.Application): Promise<void> => {
   authenticatedRouter.post('/market/acquisition/proposals', requireAdminMiddleware, proposeMcpAcquisition);
   authenticatedRouter.post('/market/acquisition/plans', requireAdminMiddleware, createMcpAcquisitionPlan);
   authenticatedRouter.get('/market/acquisition/plans/:id', requireAdminMiddleware, getMcpAcquisitionPlan);
+  authenticatedRouter.post('/market/acquisition/plans/:id/authorize', requireAdminMiddleware, authorizeMcpAcquisitionPlan);
   authenticatedRouter.get('/market/servers', getAllMarketServers);
   authenticatedRouter.get('/market/servers/search', searchMarketServersByQuery);
   authenticatedRouter.get('/market/servers/:name', getMarketServer);

@@ -71,12 +71,36 @@ export class AcquisitionPlanRepository {
     if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(planId)) {
       throw new AcquisitionInputError('Invalid plan identifier');
     }
-    const rows = await this.db.query(`SELECT plan_id,manifest,manifest_digest,created_at,expires_at
-      FROM mcp_acquisition_plans WHERE plan_id=$1 AND owner=$2 AND expires_at>NOW()`, [planId, owner]);
+    const rows = await this.db.query(`SELECT p.plan_id,p.manifest,p.manifest_digest,p.created_at,p.expires_at,
+      o.operation_id,o.state AS operation_state
+      FROM mcp_acquisition_plans p LEFT JOIN mcp_acquisition_operations o ON o.plan_id=p.plan_id AND o.owner=p.owner
+      WHERE p.plan_id=$1 AND p.owner=$2 AND p.expires_at>NOW()`, [planId, owner]);
     if (!rows.length) return null;
     if (acquisitionManifestDigest(rows[0].manifest) !== rows[0].manifest_digest) {
       throw new Error('Acquisition plan integrity check failed');
     }
     return rows[0];
+  }
+
+  async authorize(owner: string, planId: string, digest: string, idempotencyKey: string) {
+    const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+    if (!uuid.test(planId) || !uuid.test(idempotencyKey) || !/^[a-f0-9]{64}$/.test(digest)) {
+      throw new AcquisitionInputError('Invalid plan approval');
+    }
+    const plan = await this.get(owner, planId);
+    if (!plan || plan.manifest_digest !== digest) return null;
+    // Eligibility is checked again inside INSERT to close the expiry race.
+    const rows = await this.db.query(`INSERT INTO mcp_acquisition_operations
+      (operation_id,plan_id,owner,manifest_digest,idempotency_key)
+      SELECT $1,p.plan_id,p.owner,p.manifest_digest,$5 FROM mcp_acquisition_plans p
+      WHERE p.plan_id=$2 AND p.owner=$3 AND p.manifest_digest=$4 AND p.expires_at>NOW()
+      ON CONFLICT DO NOTHING RETURNING operation_id,plan_id,manifest_digest,state,authorized_at`,
+    [randomUUID(), planId, owner, digest, idempotencyKey]);
+    if (rows.length) return rows[0];
+    // A new statement sees a concurrently committed winning insert.
+    const existing = await this.db.query(`SELECT o.operation_id,o.plan_id,o.manifest_digest,o.state,o.authorized_at
+      FROM mcp_acquisition_operations o JOIN mcp_acquisition_plans p ON p.plan_id=o.plan_id
+      WHERE o.plan_id=$1 AND o.owner=$2 AND o.manifest_digest=$3 AND p.expires_at>NOW()`, [planId, owner, digest]);
+    return existing[0] ?? null;
   }
 }

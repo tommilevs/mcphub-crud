@@ -65,4 +65,22 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     await expect(repository.get('alice', id)).rejects.toThrow('integrity');
     expect(await repository.get('bob', id)).toBeNull();
   });
+
+  test('concurrent authorization creates one operation and rejects wrong owner/digest or reused key', async () => {
+    const manifest = buildAcquisitionManifest({ name: 'synthetic', installations: {
+      npm: { type: 'npm', command: 'npx', args: ['-y', '@fixture/mcp'] },
+    }, arguments: {} } as unknown as MarketServer, '1.2.3', 'fixture-group');
+    const plan = await repository.create('alice', manifest);
+    const key = randomUUID();
+    expect(await repository.authorize('bob', plan.plan_id, plan.manifest_digest, key)).toBeNull();
+    expect(await repository.authorize('alice', plan.plan_id, 'b'.repeat(64), key)).toBeNull();
+    const operations = await Promise.all(Array.from({ length: 5 }, () =>
+      repository.authorize('alice', plan.plan_id, plan.manifest_digest, key)));
+    expect(new Set(operations.map(operation => operation.operation_id)).size).toBe(1);
+    expect(operations[0].state).toBe('authorized');
+    expect((await repository.get('alice', plan.plan_id))?.operation_state).toBe('authorized');
+    const other = await repository.create('alice', manifest);
+    expect(await repository.authorize('alice', other.plan_id, other.manifest_digest, key)).toBeNull();
+    expect((await pool.query('SELECT COUNT(*)::int AS count FROM mcp_acquisition_operations WHERE plan_id=$1', [plan.plan_id])).rows[0].count).toBe(1);
+  });
 });
