@@ -436,8 +436,9 @@ postgresTest('Dataset HTTP export honors current review, consent and authenticat
     const digest=createHash('sha256').update(raw).digest('hex');
     const attribution={taskId,traceId:randomUUID(),branchId:randomUUID(),modelSegmentId:randomUUID(),invokedToolName:'demo-read',
       identity:{modelId:'synthetic-observed',source:'gateway_observed',verified:true},provenance:{causalCorrelationVerified:true}};
-    await pool.query(`INSERT INTO tool_results(result_id,username,status,raw,raw_sha256,objective,arguments,attribution)
-      VALUES($1,'admin','success',$2,$3,'read a record','{}',$4),($5,$6,'success',$2,$3,'read a record','{}',$4)`,
+    await pool.query(`INSERT INTO tool_results(result_id,server,tool,duration_ms,username,status,raw,raw_sha256,objective,arguments,attribution,raw_bytes)
+      VALUES($1,'fixture','read',1,'admin','success',$2,$3,'read a record','{}',$4,octet_length($2::text)),
+      ($5,'fixture','read',1,$6,'success',$2,$3,'read a record','{}',$4,octet_length($2::text))`,
       [id,raw,digest,JSON.stringify(attribution),foreignId,alice]);
     await pool.query(`INSERT INTO tool_result_training_contexts(result_id,revision,discovery_call_id,objective,tool_catalogue,privacy_approved,reviewed_by)
       VALUES($1,1,$2,'read a record',$3,true,'fixture-reviewer')`,[id,randomUUID(),JSON.stringify([{name:'demo-read',inputSchema:{type:'object'}}])]);
