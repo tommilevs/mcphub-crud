@@ -42,6 +42,8 @@ import { generateEmbedding } from '../../src/services/vectorSearchService.js';
 import { previewDataset,exportDataset } from '../../src/controllers/datasetController.js';
 import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
 import { saveToolResultReview } from '../../src/controllers/toolResultReviewController.js';
+import {saveExperience,listExperiences,readExperience,reviewExperience} from '../../src/controllers/experienceController.js';
+import {previewSkillProposal,manageSkillProposals,getSkillVersions} from '../../src/controllers/skillsMinerController.js';
 
 let mockAttributionDb: {isInitialized?:boolean;query:(sql:string,parameters?:unknown[])=>Promise<any>;transaction?:(work:(db:any)=>Promise<any>)=>Promise<any>} | undefined;
 jest.mock('../../src/db/connection.js',()=>{
@@ -107,6 +109,15 @@ beforeAll(async () => {
   app.put('/api/attribution/tasks/:taskId/review',saveTaskReview);
   app.post('/api/datasets/preview',previewDataset);
   app.post('/api/datasets/export',exportDataset);
+  app.post('/api/experiences',saveExperience);
+  app.get('/api/experiences',listExperiences);
+  app.get('/api/experiences/:id',readExperience);
+  app.patch('/api/experiences/:id/status',reviewExperience);
+  app.post('/api/skills/preview',previewSkillProposal);
+  app.post('/api/skills',manageSkillProposals);
+  app.patch('/api/skills/:id',manageSkillProposals);
+  app.get('/api/skills/:id/versions',getSkillVersions);
+  app.post('/api/skills/:id/export',manageSkillProposals);
   const routes = ['/mcp', '/mcp/:group'];
   app.post(routes, sseUserContextMiddleware, handleMcpPostRequest);
   app.get(routes, sseUserContextMiddleware, handleMcpOtherRequest);
@@ -477,6 +488,76 @@ postgresTest('Dataset HTTP export honors current review, consent and authenticat
   }finally{
     mockAttributionDb=undefined;
     if(oldFlag===undefined)delete process.env.MCPHUB_DATASET_BUILDER_ENABLED;else process.env.MCPHUB_DATASET_BUILDER_ENABLED=oldFlag;
+    if(pool)await pool.end();await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);await admin.end();
+  }
+});
+
+postgresTest('Experience and Skills HTTP require current evidence and separate revision approval',async()=>{
+  const schema=`skills_http_${randomBytes(12).toString('hex')}`;
+  const config={host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST??'127.0.0.1',port:Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT??5432),
+    user:process.env.MCPHUB_ATTRIBUTION_TEST_USER,password:process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,
+    database:process.env.MCPHUB_ATTRIBUTION_TEST_DB??'postgres',connectionTimeoutMillis:5000};
+  const admin=new PgClient(config);let pool:Pool|undefined;
+  const oldExperience=process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED,oldSkills=process.env.MCPHUB_SKILLS_MINER_ENABLED;
+  try{
+    await admin.connect();await admin.query(`CREATE SCHEMA ${schema}`);
+    pool=new Pool({...config,options:`-c search_path=${schema},public`});
+    const db={query:async(sql:string,parameters?:unknown[])=>(await pool!.query(sql,parameters)).rows};
+    await ensureAttributionContextSchema(db);await ensureToolResultHistorySchema(db);mockAttributionDb=db;
+    process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED='true';process.env.MCPHUB_SKILLS_MINER_ENABLED='true';
+    const token=createUserToken('admin',true),repository=new ToolResultRepositoryDb(db),ids:string[]=[],digests:string[]=[];
+    for(let task=0;task<2;task++){
+      const taskId=randomUUID(),traceId=randomUUID(),branchId=randomUUID();
+      for(let step=0;step<2;step++){
+        const id=randomUUID(),raw=JSON.stringify({content:[{type:'text',text:`synthetic-private-raw-${task}-${step}`}]}),digest=createHash('sha256').update(raw).digest('hex');
+        ids.push(id);digests.push(digest);
+        await repository.create({resultId:id,timestamp:new Date(Date.UTC(2026,9,25,0,task,step)),server:'fixture',tool:step?'write':'read',durationMs:1,status:'success',username:'admin',
+          arguments:'{}',raw,rawText:'synthetic',rawBytes:Buffer.byteLength(raw),rawSha256:digest,payloadAvailable:true,pinned:false,useCount:0,
+          attribution:{callId:randomUUID(),contextId:null,taskId,traceId,branchId,modelSegmentId:randomUUID(),identity:{modelId:'synthetic-model',source:'self_reported',verified:false}}});
+        await request(app).put(`/api/tool-results/${id}/review`).set('x-auth-token',token).send({revision:0,quality:'correct',privacy:'approved',rawSha256:digest}).expect(200);
+      }
+      await request(app).put(`/api/attribution/tasks/${taskId}/review`).set('x-auth-token',token).send({revision:0,outcome:'success',trainingConsent:false}).expect(200);
+    }
+    const proposal={title:'Fixture workflow',summary:'Read then write after reviewing the input',evidenceIds:ids,approved:false,scope:{servers:['fixture'],tools:['read','write']}};
+    await request(app).post('/api/experiences').set('x-auth-token',createUserToken(alice,false)).send(proposal).expect(403);
+    const created=await request(app).post('/api/experiences').set('x-auth-token',token).send(proposal).expect(200);
+    const experienceId=created.body.data.experience_id;
+    expect(created.body.data.assessment).toMatchObject({usable:true,confidence:'supported',independentTasks:2});
+    await request(app).get(`/api/experiences/${experienceId}`).set('x-auth-token',token).expect(404);
+    await request(app).post('/api/skills/preview').set('x-auth-token',token).send({experienceId}).expect(409);
+    await request(app).patch(`/api/experiences/${experienceId}/status`).set('x-auth-token',token).send({revision:1,status:'approved'}).expect(200);
+    const read=await request(app).get(`/api/experiences/${experienceId}`).set('x-auth-token',token).expect(200);
+    expect(read.body.data.assessment.usable).toBe(true);
+    await request(app).get(`/api/experiences/${experienceId}`).set('x-auth-token',token).query({keyId:'other-key'}).expect(404);
+    const preview=await request(app).post('/api/skills/preview').set('x-auth-token',token).send({experienceId}).expect(200);
+    expect(preview.body.data.candidate.independentTasks).toBe(2);
+    const skill=await request(app).post('/api/skills').set('x-auth-token',token).send({experienceId}).expect(200);
+    const id=skill.body.data.proposal_id,url=`/api/skills/${id}`;
+    expect(skill.body.data.status).toBe('draft');
+    const exportSkill=()=>request(app).post(`${url}/export`).set('x-auth-token',token).send({});
+    await exportSkill().expect(409);
+    await request(app).patch(url).set('x-auth-token',token).send({revision:1,status:'approved'}).expect(200);
+    const download=await exportSkill().expect(200);
+    expect(download.headers['content-disposition']).toContain('SKILL.md');
+    expect(download.headers['cache-control']).toBe('no-store');
+    expect(download.text).not.toContain('synthetic-private-raw');
+    await request(app).patch(url).set('x-auth-token',token).send({revision:2,status:'approved',markdown:'Edited draft'}).expect(400);
+    await request(app).patch(url).set('x-auth-token',token).send({revision:2,status:'draft',markdown:'Edited draft'}).expect(200);
+    await exportSkill().expect(409);
+    await request(app).patch(url).set('x-auth-token',token).send({revision:2,status:'approved'}).expect(409);
+    await request(app).patch(url).set('x-auth-token',token).send({revision:3,status:'approved'}).expect(200);
+    expect((await exportSkill().expect(200)).text).toBe('Edited draft');
+    const versions=await request(app).get(`${url}/versions`).set('x-auth-token',token).expect(200);
+    expect(versions.body.data.versions.map((value:any)=>value.revision)).toEqual([4,3,2,1]);
+    await request(app).put(`/api/tool-results/${ids[0]}/review`).set('x-auth-token',token).send({revision:1,quality:'incorrect',privacy:'approved',rawSha256:digests[0]}).expect(200);
+    await request(app).get(`/api/experiences/${experienceId}`).set('x-auth-token',token).expect(404);
+    await exportSkill().expect(409);
+    await request(app).post(`${url}/export`).set('x-auth-token',createUserToken(alice,false)).send({}).expect(403);
+  }finally{
+    mockAttributionDb=undefined;
+    if(oldExperience===undefined)delete process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED;else process.env.MCPHUB_EXPERIENCE_MEMORY_ENABLED=oldExperience;
+    if(oldSkills===undefined)delete process.env.MCPHUB_SKILLS_MINER_ENABLED;else process.env.MCPHUB_SKILLS_MINER_ENABLED=oldSkills;
     if(pool)await pool.end();await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);await admin.end();
   }
