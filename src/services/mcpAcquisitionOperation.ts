@@ -135,6 +135,8 @@ export class AcquisitionOperationRepository {
 
   async claimPublicationRollback(owner: string, operationId: string) {
     if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
+    // The settings tables may have been initialized after the history schema.
+    await this.db.query('SELECT ensure_mcp_acquisition_rollback_guard()');
     const token = randomUUID();
     const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET rollback_claim_id=$3,updated_at=NOW()
       WHERE operation_id=$1 AND owner=$2 AND state IN ('verifying','failed')

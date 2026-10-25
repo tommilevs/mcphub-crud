@@ -71,5 +71,27 @@ export async function ensureMcpAcquisitionSchema(db: { query(sql: string): Promi
     DROP TRIGGER IF EXISTS mcp_acquisition_publication_immutable ON mcp_acquisition_operations;
     CREATE TRIGGER mcp_acquisition_publication_immutable BEFORE UPDATE ON mcp_acquisition_operations
       FOR EACH ROW EXECUTE FUNCTION protect_mcp_acquisition_publication();
+    CREATE OR REPLACE FUNCTION guard_mcp_acquisition_rollback_name() RETURNS trigger AS $$
+      BEGIN
+        IF EXISTS (SELECT 1 FROM mcp_acquisition_operations o
+          WHERE o.rollback_claim_id IS NOT NULL AND o.state IN ('verifying','failed')
+          AND o.publication->>'storage'='postgres'
+          AND lower(o.publication->'receipt'->>'serverName')=lower(NEW.name)) THEN
+          RAISE EXCEPTION 'Server name is reserved for acquisition rollback';
+        END IF;
+        RETURN NEW;
+      END;
+    $$ LANGUAGE plpgsql SET search_path FROM CURRENT;
+    CREATE OR REPLACE FUNCTION ensure_mcp_acquisition_rollback_guard() RETURNS void AS $$
+      BEGIN
+        PERFORM pg_advisory_xact_lock(hashtext('mcphub-acquisition-rollback-guard'),hashtext(current_schema()));
+        IF to_regclass('servers') IS NOT NULL AND NOT EXISTS (
+          SELECT 1 FROM pg_trigger WHERE tgrelid=to_regclass('servers') AND tgname='mcp_acquisition_rollback_name') THEN
+          EXECUTE 'CREATE TRIGGER mcp_acquisition_rollback_name BEFORE INSERT OR UPDATE OF name ON servers
+            FOR EACH ROW EXECUTE FUNCTION guard_mcp_acquisition_rollback_name()';
+        END IF;
+      END;
+    $$ LANGUAGE plpgsql SET search_path FROM CURRENT;
+    SELECT ensure_mcp_acquisition_rollback_guard();
   `);
 }

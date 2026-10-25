@@ -40,6 +40,21 @@ export async function withValidatedPostgresPublication<T>(db: Pick<DataSource, '
   });
 }
 
+export async function withRemovedPostgresPublication<T>(db: Pick<DataSource, 'transaction'>,
+  reservation: PostgresPublicationReservation, work: (manager: EntityManager) => Promise<T>) {
+  return db.transaction('SERIALIZABLE', async manager => {
+    await manager.query('LOCK TABLE "servers", "groups" IN SHARE ROW EXCLUSIVE MODE');
+    const receipt = reservation.receipt;
+    const remaining = await manager.getRepository(Server).findOne({ where: [{ id: reservation.serverId }, { name: receipt.serverName }] });
+    const groups = await manager.getRepository(Group).find({ select: { servers: true } });
+    if (remaining || groups.some(group => group.servers.some(entry =>
+      (typeof entry === 'string' ? entry : entry.name).toLowerCase() === receipt.serverName.toLowerCase()))) {
+      throw new Error('Removed publication was changed or adopted; rollback requires reconciliation');
+    }
+    return work(manager);
+  });
+}
+
 /** Remove only the unchanged row and owned membership. Runtime cleanup and lifecycle commit follow separately. */
 export async function rollbackPostgresAcquisition(db: Pick<DataSource, 'transaction'>,
   reservation: PostgresPublicationReservation) {

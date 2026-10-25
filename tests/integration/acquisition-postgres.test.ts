@@ -11,6 +11,7 @@ import { Server as StoredServer } from '../../src/db/entities/Server.js';
 import { Group as StoredGroup } from '../../src/db/entities/Group.js';
 import { publishPostgresAcquisition, rollbackPostgresAcquisition } from '../../src/services/mcpAcquisitionPostgresPublication.js';
 import { activatePostgresAcquisition } from '../../src/services/mcpAcquisitionActivationWorker.js';
+import { rollbackPublishedPostgresAcquisition } from '../../src/services/mcpAcquisitionRollback.js';
 
 const postgresDescribe = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
@@ -270,6 +271,18 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect(changed.status).toBe('reconciliation_required');
     expect((await operations.get('alice',conflict.operation_id)).requires_reconciliation).toBe(true);
     expect((await settingsDb.getRepository(StoredServer).findOneByOrFail({name:conflictManifest.serverName})).enabled).toBe(false);
+    await settingsDb.getRepository(StoredServer).update({name:conflictManifest.serverName},{enabled:true});
+    const rolledBack=await rollbackPublishedPostgresAcquisition('alice',conflict.operation_id,settingsDb,{repository:operations,
+      cleanup:async receipt=>{
+        expect(await settingsDb.getRepository(StoredServer).findOneBy({name:receipt.serverName})).toBeNull();
+        await expect(settingsDb.getRepository(StoredServer).save({name:receipt.serverName,command:'replacement.exe'}))
+          .rejects.toThrow('reserved for acquisition rollback');
+        await settingsDb.getRepository(StoredGroup).update({id:group.id},{description:'cleanup can read and write'});
+      }});
+    expect(rolledBack.status).toBe('rolled_back');
+    expect((await operations.get('alice',conflict.operation_id)).state).toBe('rolled_back');
+    const replacement=await settingsDb.getRepository(StoredServer).save({name:conflictManifest.serverName,command:'replacement.exe'});
+    expect(replacement.id).toBeTruthy();
   });
 
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
