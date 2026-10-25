@@ -276,13 +276,17 @@ is rejected, never deleted or overwritten.
 
 The `Windows installer acceptance` Actions workflow builds with Tauri CLI 2.12.4
 and exercises silent full NSIS install, bootstrap login, installed layout, Start
-Menu shortcut, upgrade, data retention and uninstall on a disposable Windows
+Menu shortcut, dashboard creation/hide without tray exit, upgrade, data retention
+and uninstall on a disposable Windows
 runner. It runs on manual dispatch or workflow-definition changes, not every
 source commit. Only the installer is uploaded after success; generated credentials
 and runtime data are never artifacts. `test-nsis-ci-windows.ps1` refuses local and
 self-hosted execution and refuses a runner with existing MCPHub data/service.
-Silent installer acceptance does not verify the interactive wizard, password
-dialog, tray UI or real user logon/reboot.
+The separate manual `Windows installed tray acceptance` workflow can reuse a
+retained installer by its successful run ID, without recompiling. Artifacts expire
+after three days; supply a newer successful run when necessary.
+These checks do not verify the interactive installer wizard, password dialog,
+tray menu interactions or real user logon/reboot.
 
 
 Installer upgrades preserve the registered data directory, gateway port, pipe name and runtime directory when those parameters are omitted. Explicit lifecycle arguments still override the existing registration. The acceptance test upgrades with only the install directory and isolated service name to exercise the same defaulting behavior as NSIS.

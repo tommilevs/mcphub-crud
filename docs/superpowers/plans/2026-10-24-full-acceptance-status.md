@@ -243,3 +243,18 @@ SHA-256 is `51575e40a34163e1482c4c400695a346586807d75281214052695f2a57dedda1`;
 this is the archive digest, not the embedded EXE digest. This closes clean silent
 installation acceptance, including the earlier packaging failure. Interactive
 wizard/tray, actual logon/reboot and production cutover remain separate gates.
+
+Installed tray testing exposed an implicit last-window exit (code 0) in the older
+package. Commit 0192d0c prevents code-less runtime exit while preserving explicit
+Exit tray. Run 40193083656 / job 121168064742 then passed full NSIS acceptance
+including an installed visible dashboard, closing its exact original HWND,
+retaining that hidden window and tray process, and continued gateway health/login.
+Upgrade and uninstall also passed. The new 56.54 MiB installer artifact is
+12598922956, expiring October 28; its ZIP digest is
+`ac8ad6957020f80020ae03cd3cafc08153477712cfed282dfe0ddbb477ecbe05`.
+This supersedes the older installer artifact for tray lifetime acceptance.
+The source release binary additionally passed a real cross-button click through
+Windows Computer Use against an isolated static HTTP fixture; the owned tray,
+agent and fixture server were stopped and verified absent afterward. That fixture
+does not prove real backend integration. Tray-menu reopen/exit, interactive wizard,
+real user logon/reboot and production migration remain unverified.

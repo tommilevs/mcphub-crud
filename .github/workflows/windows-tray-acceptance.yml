@@ -2,9 +2,12 @@ name: Windows installed tray acceptance
 
 on:
   workflow_dispatch:
-  push:
-    branches: [feat/tool-result-history]
-    paths: ['.github/workflows/windows-tray-acceptance.yml']
+    inputs:
+      installerRunId:
+        description: Successful Windows installer run containing the retained artifact
+        required: true
+        default: '40193083656'
+        type: string
 
 permissions:
   contents: read
@@ -20,7 +23,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: MCPHub-Windows-tested-installer
-          run-id: 40190705042
+          run-id: ${{ inputs.installerRunId }}
           github-token: ${{ github.token }}
           path: tested-installer
       - name: Verify exact installed dashboard window and close behavior
