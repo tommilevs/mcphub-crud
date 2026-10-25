@@ -195,3 +195,15 @@ approval. Changing key scope immediately removed the old entry; loading sent the
 new key and rendered an empty scope. No horizontal overflow occurred. API and
 translation/auth boundaries were fixtures, not integrated backend acceptance.
 The owned tab and in-memory server were closed; no fixture files were created.
+
+DatasetPreferencePanel and DatasetExportHistory were also exercised as actual
+children of DatasetBuilderPanel with actual service modules and controlled API
+responses. Creating a pair sent the chosen/rejected IDs and comparability consent;
+editing its rationale cleared approval and disabled approval until saved as draft
+revision 2. Separate approval sent revision 2 plus privacy/comparability consent,
+then rendered approved revision 3. The DPO shortcut selected the DPO format.
+An export receipt displayed split/count/bytes/hash and the correct result link.
+Changing key scope immediately cleared both old receipts and pairs; subsequent
+requests carried the new key and rendered empty history. No horizontal overflow
+occurred. This is controlled browser evidence, not integrated backend acceptance.
+The owned tab and in-memory server were closed without creating fixture files.
