@@ -81,6 +81,10 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect((await repository.get('alice', plan.plan_id))?.operation_state).toBe('authorized');
     const other = await repository.create('alice', manifest);
     expect(await repository.authorize('alice', other.plan_id, other.manifest_digest, key)).toBeNull();
+    const otherOperation = await repository.authorize('alice', other.plan_id, other.manifest_digest, randomUUID());
+    expect(otherOperation.state).toBe('authorized');
+    // A plan that already has its own operation must not swallow another plan's key.
+    expect(await repository.authorize('alice', other.plan_id, other.manifest_digest, key)).toBeNull();
     expect((await pool.query('SELECT COUNT(*)::int AS count FROM mcp_acquisition_operations WHERE plan_id=$1', [plan.plan_id])).rows[0].count).toBe(1);
   });
 });

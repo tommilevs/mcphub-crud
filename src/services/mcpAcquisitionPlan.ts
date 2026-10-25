@@ -100,7 +100,9 @@ export class AcquisitionPlanRepository {
     // A new statement sees a concurrently committed winning insert.
     const existing = await this.db.query(`SELECT o.operation_id,o.plan_id,o.manifest_digest,o.state,o.authorized_at
       FROM mcp_acquisition_operations o JOIN mcp_acquisition_plans p ON p.plan_id=o.plan_id
-      WHERE o.plan_id=$1 AND o.owner=$2 AND o.manifest_digest=$3 AND p.expires_at>NOW()`, [planId, owner, digest]);
+      WHERE o.plan_id=$1 AND o.owner=$2 AND o.manifest_digest=$3 AND p.expires_at>NOW()
+      AND NOT EXISTS(SELECT 1 FROM mcp_acquisition_operations other
+        WHERE other.owner=$2 AND other.idempotency_key=$4 AND other.plan_id<>$1)`, [planId, owner, digest, idempotencyKey]);
     return existing[0] ?? null;
   }
 }
