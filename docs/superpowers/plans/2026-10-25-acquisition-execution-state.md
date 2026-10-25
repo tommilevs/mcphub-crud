@@ -103,3 +103,26 @@ clearance after rollback. Hosted CI result pending for this source change.
 Remaining: installed package/bin resolution under the owned directory, native
 MCP connection with secret references, safe functional probe, group publication
 and rollback receipts, explicit execution trigger and restart reconciliation.
+
+Installed package resolution is now available as machine-only `install_resolve`.
+It requires a known successful native install outcome, then checks operation marker,
+exact installed package name/version, bounded JSON metadata and an unambiguous JS
+entrypoint. Canonical metadata/package/bin paths must remain under their owned
+directories. It returns a native spec with restart_limit0 and package_metadata
+verification, not tool readiness. Non-JS adapters and ambiguous bins fail explicitly.
+
+`inspectAcquiredMcp` uses that spec with NativeRuntimeTransport and the actual MCP
+SDK client for initialize and bounded/paginated tools/list. It accepts references
+only for reviewed required input names, closes its connection in finally and
+returns discovery_only. It does not infer permission to call a server's tools from
+readOnlyHint, install scripts or descriptions. An authorized functional probe and
+publication gate remain necessary; the coordinator is not auto-triggered yet.
+
+Evidence:33 Windows native tests pass, including exact-version/bin resolution,
+path escape and ambiguity rejection, with unique fixture cleanup asserted. Seven
+TypeScript tests pass including an actual SDK client over a real named pipe with
+controlled native/protocol responses; initialize/tools/list/stop observed, no
+tools/call, missing configuration rejected before any connection. Backend typecheck
+passes. This is not live-service or installed-package functional acceptance.
+Previous source537fc44 real-PG run40214375437/job121232228511 passed38tests across
+five suites, including reconciliation state blocking forward progress.

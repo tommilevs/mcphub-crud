@@ -68,3 +68,5 @@ export const startNativeNpmInstall = (id: string, packageName: string, version: 
 export const getNativeInstallStatus = (id: string): Promise<RuntimeResponse> => callRuntime({op:'install_status',id});
 export const cancelNativeInstall = (id: string): Promise<RuntimeResponse> => callRuntime({op:'install_cancel',id});
 export const forgetNativeInstall = (id: string): Promise<RuntimeResponse> => callRuntime({op:'install_forget',id});
+export const resolveNativeInstalledPackage = (id: string, packageName: string, version: string): Promise<RuntimeResponse> =>
+  callRuntime({op:'install_resolve',id,package:packageName,version});

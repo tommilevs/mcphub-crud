@@ -14,6 +14,8 @@ mod pipe_io;
 #[cfg(windows)]
 mod installer_jobs;
 #[cfg(windows)]
+mod installed_package;
+#[cfg(windows)]
 static INSTALLER_JOBS: std::sync::OnceLock<installer_jobs::InstallerJobs> = std::sync::OnceLock::new();
 #[cfg(windows)]
 static OPTIONS: std::sync::OnceLock<options::Options> = std::sync::OnceLock::new();
@@ -363,7 +365,7 @@ fn serve_named_pipe_client(
         let result = (|| -> Result<serde_json::Value, Box<dyn std::error::Error>> {
             let request = request?;
             match request["op"].as_str() {
-                Some(op @ ("install_start" | "install_status" | "install_cancel" | "install_forget")) => {
+                Some(op @ ("install_start" | "install_status" | "install_cancel" | "install_forget" | "install_resolve")) => {
                     if options().user_agent || owned.is_some() { return Err("installer jobs require the machine control connection".into()); }
                     let jobs = INSTALLER_JOBS.get_or_init(installer_jobs::InstallerJobs::default);
                     let id = request["id"].as_str().ok_or("missing installer operation id")?;
@@ -379,9 +381,17 @@ fn serve_named_pipe_client(
                                   .find(|path| path.join("node.exe").is_file())).ok_or("bundled runtime unavailable")?;
                             let data = options().data_dir.clone().unwrap_or_else(|| std::env::var_os("ProgramData")
                                 .map(std::path::PathBuf::from).unwrap_or_else(|| install.to_path_buf()).join("MCPHub"));
-                            Ok(installer_jobs::start_npm(jobs,id,
-                                request["package"].as_str().unwrap_or_default(),request["version"].as_str().unwrap_or_default(),
-                                &runtime,&data.join("acquisitions"))?)
+                            let package=request["package"].as_str().unwrap_or_default();
+                            let version=request["version"].as_str().unwrap_or_default();
+                            if op=="install_resolve" {
+                                let status=jobs.status(id)?;
+                                if status["state"]!="exited" || status["exitCode"]!=0 {
+                                    return Err("installer has no confirmed successful outcome".into());
+                                }
+                                Ok(installed_package::resolve(id,package,version,&runtime,&data.join("acquisitions"))?)
+                            } else {
+                                Ok(installer_jobs::start_npm(jobs,id,package,version,&runtime,&data.join("acquisitions"))?)
+                            }
                         }
                     }
                 }

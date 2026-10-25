@@ -21,14 +21,7 @@ pub struct InstallerJobs {
     jobs: Mutex<HashMap<String, Job>>,
 }
 
-pub fn start_npm(
-    jobs: &InstallerJobs,
-    id: &str,
-    package: &str,
-    version: &str,
-    runtime: &std::path::Path,
-    root: &std::path::Path,
-) -> Result<Value, &'static str> {
+pub(super) fn validate_request(id: &str, package: &str, version: &str) -> Result<(), &'static str> {
     let segment = |text: &str| {
         !text.is_empty()
             && text.as_bytes()[0].is_ascii_alphanumeric()
@@ -61,6 +54,18 @@ pub fn start_npm(
     if !valid_id || !valid_package || package.len() > 214 || !valid_version {
         return Err("invalid pinned npm installer request");
     }
+    Ok(())
+}
+
+pub fn start_npm(
+    jobs: &InstallerJobs,
+    id: &str,
+    package: &str,
+    version: &str,
+    runtime: &std::path::Path,
+    root: &std::path::Path,
+) -> Result<Value, &'static str> {
+    validate_request(id, package, version)?;
     let node = runtime.join("node.exe");
     let npm = runtime.join("npm").join("bin").join("npm-cli.js");
     if !node.is_file() || !npm.is_file() {
