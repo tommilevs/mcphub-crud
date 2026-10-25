@@ -19,6 +19,10 @@ pub mod dpapi;
 pub mod secret_store;
 mod stdio;
 pub use stdio::StdioSession;
+#[cfg(windows)]
+mod one_shot;
+#[cfg(windows)]
+pub use one_shot::{run_owned_command, OneShotOutcome};
 
 /// A non-stdio child whose complete process tree belongs to this host.
 /// Job ownership also survives abrupt host termination via kernel handle cleanup.

@@ -38,3 +38,21 @@ MCP start/status/secret operations. Add a bounded one-shot installer job boundar
 using OwnedChild rather than treating npm output as MCP initialization. Per-job
 cancellation, durable reconciliation and bounded/redacted diagnostics still need
 implementation before connecting the acquisition worker.
+
+Native core progress: `run_owned_command` now owns one-shot Windows installer
+commands through OwnedChild, with CREATE_NO_WINDOW and Job Object tree ownership.
+It applies a 1..900-second bounded timeout, cooperative cancellation, no restart,
+null stdin/stdout/stderr, and returns only exit code/timeout/cancel outcome. The
+service must still resolve a reviewed typed package request; this function is not
+an HTTP or arbitrary model command endpoint. No npm package was installed.
+
+Actual local Windows native tests: all30 passed (2 core,7 tree,6 one-shot,5 stdio,
+10 service). New tests cover error exit, deadline, pre-cancel/no spawn, active
+cancel, invalid timeout and successful parent exit with a detached descendant
+that must also terminate. The unique PID fixture file was removed and absence
+asserted. Test output did not expose synthetic stderr content.
+
+Next: asynchronous service IPC installer job registry with per-job cancellation
+and status, followed by the TypeScript worker adapter. Verify the distributed
+runtime includes an actual npm CLI before constructing npm execution paths;
+the managed MCP transport cannot substitute for a package installer.
