@@ -316,7 +316,7 @@ postgresTest('History HTTP returns exact RAW bytes and enforces administrator ac
   const admin=new PgClient(config);let pool:Pool|undefined;
   try{
     await admin.connect();await admin.query(`CREATE SCHEMA ${schema}`);
-    pool=new Pool({...config,options:`-c search_path=${schema}`});
+    pool=new Pool({...config,options:`-c search_path=${schema},public`});
     const db={isInitialized:true,query:async(sql:string,parameters?:unknown[])=>(await pool!.query(sql,parameters)).rows};
     await ensureAttributionContextSchema(db);await ensureToolResultHistorySchema(db);
     mockAttributionDb=db;
