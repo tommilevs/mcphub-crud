@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { AcquisitionPlanRepository, type AcquisitionPlanDb } from './mcpAcquisitionPlan.js';
 import { AcquisitionInputError } from './mcpAcquisitionService.js';
 import type { JsonPublicationReservation } from './mcpAcquisitionJsonPublication.js';
+import type { PostgresPublicationReservation } from './mcpAcquisitionPublicationSettings.js';
 
 const transitions: Record<string, readonly string[]> = {
   staging: ['starting', 'failed', 'rolled_back'],
@@ -40,10 +41,12 @@ export class AcquisitionOperationRepository {
   }
 
   /** One durable reservation only. A retry must reconcile the existing receipt, never apply again. */
-  async reservePublication(owner: string, operationId: string, claimId: string, reservation: JsonPublicationReservation) {
+  async reservePublication(owner: string, operationId: string, claimId: string, reservation: JsonPublicationReservation | PostgresPublicationReservation) {
     const receipt = reservation?.receipt;
-    if (!uuid.test(operationId) || !uuid.test(claimId) || reservation?.storage !== 'json' ||
-        !reservation.settingsPath || !/^[a-f0-9]{64}$/.test(reservation.baseDigest) ||
+    const validStorage = reservation?.storage === 'json'
+      ? !!reservation.settingsPath && /^[a-f0-9]{64}$/.test(reservation.baseDigest)
+      : reservation?.storage === 'postgres' && uuid.test(reservation.serverId) && /^[a-f0-9]{64}$/.test(reservation.storedServerDigest);
+    if (!uuid.test(operationId) || !uuid.test(claimId) || !validStorage ||
         receipt?.operationId !== operationId || receipt.server?.owner !== owner ||
         receipt.server?.options?.acquisitionOperationId !== operationId ||
         receipt.entry?.name !== receipt.serverName || !Array.isArray(receipt.entry?.tools) || !receipt.entry.tools.length) {

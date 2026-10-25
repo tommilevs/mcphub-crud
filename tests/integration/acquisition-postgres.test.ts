@@ -6,6 +6,10 @@ import type { MarketServer } from '../../src/types/index.js';
 import { AcquisitionOperationRepository } from '../../src/services/mcpAcquisitionOperation.js';
 import { ensureToolResultHistorySchema } from '../../src/db/toolResultHistorySchema.js';
 import { prepareAcquisitionPublication } from '../../src/services/mcpAcquisitionPublicationSettings.js';
+import { DataSource } from 'typeorm';
+import { Server as StoredServer } from '../../src/db/entities/Server.js';
+import { Group as StoredGroup } from '../../src/db/entities/Group.js';
+import { publishPostgresAcquisition } from '../../src/services/mcpAcquisitionPostgresPublication.js';
 
 const postgresDescribe = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
@@ -13,6 +17,7 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
   let admin: Client;
   let pool: Pool;
   let repository: AcquisitionPlanRepository;
+  let settingsDb: DataSource;
   beforeAll(async () => {
     const config = {
       host: process.env.MCPHUB_ATTRIBUTION_TEST_HOST ?? '127.0.0.1',
@@ -30,8 +35,12 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     await ensureMcpAcquisitionSchema(db); // startup/restart must preserve existing schema
     await ensureToolResultHistorySchema(db);
     repository = new AcquisitionPlanRepository(db);
+    settingsDb=new DataSource({type:'postgres',...config,schema,entities:[StoredServer,StoredGroup],synchronize:true,
+      extra:{options:`-c search_path=${schema},public`}});
+    await settingsDb.initialize();
   });
   afterAll(async () => {
+    if (settingsDb?.isInitialized) await settingsDb.destroy();
     if (pool) await pool.end();
     if (admin) {
       await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
@@ -202,6 +211,28 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect(await operations.completeActivation('alice',id,token,evidence)).toBe(true);
     expect((await operations.get('alice',id)).state).toBe('ready');
     expect(await operations.completeActivation('alice',id,token,evidence)).toBe(false);
+  });
+
+  test('database publication commits settings and journal together and rolls back a rejected journal',async()=>{
+    const operations=new AcquisitionOperationRepository({query:async(sql,args)=>(await pool.query(sql,args)).rows});
+    const group=await settingsDb.getRepository(StoredGroup).save({name:'Database target',servers:[],owner:'alice'});
+    const manifest=buildAcquisitionManifest({name:'database-fixture',installations:{npm:{type:'npm',command:'npx',args:['-y','fixture']}}} as unknown as MarketServer,'1.0.0',group.id);
+    const plan=await repository.create('alice',manifest);
+    const operation=await repository.authorize('alice',plan.plan_id,plan.manifest_digest,randomUUID());
+    const id=operation.operation_id,claim=await operations.claim('alice',id);
+    await operations.transition('alice',id,claim.claim_id,'staging','starting');await operations.beginVerification('alice',id);
+    await operations.recordInspection('alice',id,claim.claim_id,{verification:'discovery_only',tools:['ping']});
+    const input={manifest,operationId:id,owner:'alice',launch:{command:'node.exe',args:['fixture.js'],cwd:'owned'},verifiedTools:['ping']};
+    const applied=await publishPostgresAcquisition(settingsDb,input,claim.claim_id);
+    const stored=await settingsDb.getRepository(StoredServer).findOneByOrFail({name:manifest.serverName});
+    expect(stored.owner).toBe('alice');expect(stored.options?.startOnDemand).toBe(true);
+    expect((await settingsDb.getRepository(StoredGroup).findOneByOrFail({id:group.id})).servers).toEqual([{name:manifest.serverName,tools:['ping'],prompts:[],resources:[]}]);
+    expect((await operations.getPublication('alice',id)).publication).toMatchObject({storage:'postgres',serverId:stored.id});
+    expect((await operations.getPublication('alice',id)).publication_applied_digest).toBe(applied.digest);
+    const rejected={...input,manifest:{...manifest,serverName:'rejected-fixture'},operationId:randomUUID()};
+    await expect(publishPostgresAcquisition(settingsDb,rejected,randomUUID())).rejects.toThrow('reservation');
+    expect(await settingsDb.getRepository(StoredServer).findOneBy({name:'rejected-fixture'})).toBeNull();
+    expect((await settingsDb.getRepository(StoredGroup).findOneByOrFail({id:group.id})).servers).toHaveLength(1);
   });
 
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {

@@ -1,0 +1,55 @@
+import { createHash } from 'node:crypto';
+import type { DataSource } from 'typeorm';
+import { Server } from '../db/entities/Server.js';
+import { Group } from '../db/entities/Group.js';
+import type { McpSettings } from '../types/index.js';
+import { mirrorStartOnDemandIntoOptions } from '../utils/serverConfigPersistence.js';
+import { assertSmartRoutingNameAvailable } from '../utils/smartRoutingPath.js';
+import { AcquisitionOperationRepository } from './mcpAcquisitionOperation.js';
+import { prepareAcquisitionPublication, type PostgresPublicationReservation } from './mcpAcquisitionPublicationSettings.js';
+import type { JsonPublicationInput } from './mcpAcquisitionJsonPublication.js';
+
+/** Persisted row identity, including defaults and sync metadata, excluding timestamps. */
+export function acquisitionStoredServerDigest(server: Server): string {
+  const fields = Object.entries(server).filter(([key]) => !['createdAt', 'updatedAt'].includes(key))
+    .sort(([left], [right]) => left.localeCompare(right));
+  return createHash('sha256').update(JSON.stringify(Object.fromEntries(fields))).digest('hex');
+}
+
+/** Settings and the operation journal share one PostgreSQL transaction. No MCP process is started here. */
+export async function publishPostgresAcquisition(db: Pick<DataSource, 'transaction'>,
+  input: JsonPublicationInput, claimId: string) {
+  assertSmartRoutingNameAvailable(input.manifest.serverName);
+  return db.transaction('SERIALIZABLE', async manager => {
+    // Lock both collections to cover case-insensitive collisions and dangling references,
+    // including inserts that row locks on the target alone cannot exclude.
+    await manager.query('LOCK TABLE "servers", "groups" IN SHARE ROW EXCLUSIVE MODE');
+    const servers = manager.getRepository(Server), groups = manager.getRepository(Group);
+    const names = await servers.find({ select: { name: true } });
+    const currentGroups = await groups.find({ select: { id: true, name: true, servers: true } });
+    const current: McpSettings = { mcpServers: Object.fromEntries(names.map(server => [server.name, {}])),
+      groups: currentGroups.map(group => ({ id: group.id, name: group.name, servers: group.servers })) as McpSettings['groups'] };
+    const prepared = prepareAcquisitionPublication(current, input.manifest, input.operationId, input.owner,
+      input.launch, input.verifiedTools, input.secretReferences);
+    const config = prepared.receipt.server;
+    const created = await servers.save(servers.create({ name: input.manifest.serverName, type: config.type,
+      command: config.command, args: config.args, env: config.env, nativeSecretRefs: config.nativeSecretRefs,
+      enabled: config.enabled, owner: config.owner, visibility: config.visibility,
+      options: mirrorStartOnDemandIntoOptions(config.options, config.startOnDemand === true, config.idleTimeoutMs) }));
+    const stored = await servers.findOneByOrFail({ id: created.id });
+    const reservation: PostgresPublicationReservation = { storage: 'postgres', serverId: stored.id,
+      storedServerDigest: acquisitionStoredServerDigest(stored), receipt: prepared.receipt };
+    const operations = new AcquisitionOperationRepository({ query: (sql, args) => manager.query(sql, args) });
+    if (!await operations.reservePublication(input.owner, input.operationId, claimId, reservation)) {
+      throw new Error('Publication reservation could not be committed');
+    }
+    const target = prepared.settings.groups!.find(group => group.id === input.manifest.targetGroup)!;
+    await groups.update({ id: target.id }, { servers: target.servers });
+    const digest = createHash('sha256').update(JSON.stringify({ server: reservation.storedServerDigest,
+      groupId: target.id, entry: prepared.receipt.entry })).digest('hex');
+    if (!await operations.recordPublicationApplied(input.owner, input.operationId, claimId, digest)) {
+      throw new Error('Publication outcome could not be committed');
+    }
+    return { reservation, digest };
+  });
+}

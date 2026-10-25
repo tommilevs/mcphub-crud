@@ -7,6 +7,9 @@ export interface PublicationReceipt {
   server: ServerConfig; entry: IGroupServerConfig;
   legacyStrings: string[];
 }
+export interface PostgresPublicationReservation {
+  storage: 'postgres'; serverId: string; storedServerDigest: string; receipt: PublicationReceipt;
+}
 const nameOf = (entry: string | IGroupServerConfig) => typeof entry === 'string' ? entry : entry.name;
 // Receipts/configuration cross JSON storage and VM realms; compare their persisted representation.
 const equal = (left: unknown, right: unknown) => isDeepStrictEqual(
