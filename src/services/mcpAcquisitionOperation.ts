@@ -44,7 +44,7 @@ export class AcquisitionOperationRepository {
       AND o.publication IS NULL AND o.inspection IS NOT NULL AND p.plan_id=o.plan_id
       AND p.manifest_digest=o.manifest_digest
       AND p.manifest->>'serverName'=$5 AND p.manifest->>'targetGroup'=$6
-      AND o.inspection->'tools' @> $7::jsonb AND $7::jsonb @> o.inspection->'tools'
+      AND (o.inspection->'tools') @> $7::jsonb AND $7::jsonb @> (o.inspection->'tools')
       AND ((o.verification='discovery_only' AND NOT (p.manifest ? 'probe') AND o.probe_claim_id IS NULL)
         OR (o.verification='functional' AND o.inspection->>'resultId'=o.probe_result_id::text AND EXISTS(
           SELECT 1 FROM tool_results r WHERE r.result_id=o.probe_result_id AND r.username=$2 AND r.key_id IS NULL

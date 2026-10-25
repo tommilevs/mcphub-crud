@@ -211,7 +211,7 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     const prepared=prepareAcquisitionPublication({mcpServers:{},groups:[{id:'fixture-group',name:'Fixture',servers:[]}]},
       manifest,operation.operation_id,'alice',{command:'node.exe',args:['fixture.js'],cwd:'owned'},['fixture_ping']);
     const reservation={storage:'json' as const,settingsPath:'/synthetic/settings.json',baseDigest:'a'.repeat(64),receipt:prepared.receipt};
-    await pool.query('UPDATE tool_results SET payload_available=FALSE,raw=NULL WHERE result_id=$1',[resultId]);
+    await pool.query('DELETE FROM tool_results WHERE result_id=$1',[resultId]);
     expect(await operations.reservePublication('alice',operation.operation_id,claim.claim_id,reservation)).toBe(false);
   });
 });
