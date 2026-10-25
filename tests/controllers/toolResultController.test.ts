@@ -10,6 +10,7 @@ const repository = {
   incrementUseCount: jest.fn(),
   getStats: jest.fn(),
   searchChunks: jest.fn(),
+  hasChunkEmbeddings: jest.fn(),
 };
 
 jest.mock('../../src/services/toolResultHistoryRegistry.js', () => ({
@@ -32,6 +33,7 @@ import {
   searchToolResultChunks,
   reindexToolResults,
 } from '../../src/controllers/toolResultController.js';
+import * as vectorSearch from '../../src/services/vectorSearchService.js';
 
 const makeReq = (overrides: Record<string, unknown> = {}) =>
   ({
@@ -53,7 +55,34 @@ const makeRes = () =>
 describe('toolResultController', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    repository.hasChunkEmbeddings.mockResolvedValue(true);
     repository.findPaginated.mockResolvedValue({ data: [], total: 0, page: 1, limit: 20, totalPages: 0 });
+  });
+
+  it('does not request an embedding while the retained result has no vector chunks',async()=>{
+    const embedding=jest.spyOn(vectorSearch,'generateEmbedding').mockResolvedValue([1,0]);
+    try{
+      repository.findById.mockResolvedValue({resultId:'result-id',payloadAvailable:true});
+      repository.hasChunkEmbeddings.mockResolvedValue(false);
+      repository.searchChunks.mockResolvedValue([]);
+      const res=makeRes();
+      await searchToolResultChunks(makeReq({params:{id:'result-id'},query:{q:'Xid 79'}}),res);
+      expect(embedding).not.toHaveBeenCalled();
+      expect(repository.searchChunks).toHaveBeenCalledWith('result-id','Xid 79',null,10);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({meta:expect.objectContaining({mode:'lexical'})}));
+    }finally{embedding.mockRestore();}
+  });
+  it('keeps hybrid chunk search when vector chunks are present',async()=>{
+    const embedding=jest.spyOn(vectorSearch,'generateEmbedding').mockResolvedValue([1,0]);
+    try{
+      repository.findById.mockResolvedValue({resultId:'result-id',payloadAvailable:true});
+      repository.searchChunks.mockResolvedValue([]);
+      const res=makeRes();
+      await searchToolResultChunks(makeReq({params:{id:'result-id'},query:{q:'Xid 79'}}),res);
+      expect(embedding).toHaveBeenCalledTimes(1);
+      expect(repository.searchChunks).toHaveBeenCalledWith('result-id','Xid 79',[1,0],10);
+      expect(res.json).toHaveBeenCalledWith(expect.objectContaining({meta:expect.objectContaining({mode:'hybrid'})}));
+    }finally{embedding.mockRestore();}
   });
 
   it('lists filtered history with bounded pagination', async () => {

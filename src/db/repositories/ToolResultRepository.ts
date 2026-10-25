@@ -316,6 +316,14 @@ export class ToolResultRepositoryDb implements ToolResultRepository {
     }));
   }
 
+  async hasChunkEmbeddings(resultId: string): Promise<boolean> {
+    const rows = await this.dataSource.query<Array<{ available: boolean | string }>>(
+      `SELECT EXISTS (SELECT 1 FROM tool_result_chunks WHERE result_id = $1 AND embedding IS NOT NULL) AS available`,
+      [resultId],
+    );
+    return rows[0]?.available === true || rows[0]?.available === 't';
+  }
+
   async listChunks(resultId: string): Promise<ToolResultChunk[]> {
     const rows = await this.dataSource.query<ToolResultRow[]>(
       `SELECT result_id, chunk_index, chunk_version, content,

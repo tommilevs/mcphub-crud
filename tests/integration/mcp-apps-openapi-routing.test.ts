@@ -37,7 +37,8 @@ import { createGatewayProof } from '../../src/services/gatewayProvenance.js';
 import { ensureToolResultHistorySchema } from '../../src/db/toolResultHistorySchema.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { ToolResultHistoryService } from '../../src/services/toolResultHistoryService.js';
-import { getToolResults,getToolResultById,getToolResultRaw,getToolResultRange,pinToolResult } from '../../src/controllers/toolResultController.js';
+import { getToolResults,getToolResultById,getToolResultRaw,getToolResultRange,pinToolResult,getToolResultChunks,searchToolResultChunks } from '../../src/controllers/toolResultController.js';
+import { generateEmbedding } from '../../src/services/vectorSearchService.js';
 
 let mockAttributionDb: {isInitialized?:boolean;query:(sql:string,parameters?:unknown[])=>Promise<any>} | undefined;
 jest.mock('../../src/db/connection.js',()=>{
@@ -48,6 +49,7 @@ jest.mock('../../src/db/connection.js',()=>{
 jest.mock('../../src/services/oauthService.js', () => ({ initializeAllOAuthClients: jest.fn() }));
 jest.mock('../../src/services/mcpOAuthProvider.js', () => ({ createOAuthProvider: jest.fn() }));
 jest.mock('../../src/services/vectorSearchService.js', () => ({
+  generateEmbedding: jest.fn().mockRejectedValue(new Error('Synthetic fixture disables provider calls')),
   removeServerToolEmbeddings: jest.fn(),
   removeToolEmbeddings: jest.fn(),
   saveToolsAsVectorEmbeddings: jest.fn(),
@@ -91,6 +93,8 @@ beforeAll(async () => {
   app.get('/api/tool-results/:id/raw',getToolResultRaw);
   app.get('/api/tool-results/:id/range',getToolResultRange);
   app.patch('/api/tool-results/:id/pin',pinToolResult);
+  app.get('/api/tool-results/:id/chunks',getToolResultChunks);
+  app.get('/api/tool-results/:id/search',searchToolResultChunks);
   const routes = ['/mcp', '/mcp/:group'];
   app.post(routes, sseUserContextMiddleware, handleMcpPostRequest);
   app.get(routes, sseUserContextMiddleware, handleMcpOtherRequest);
@@ -329,6 +333,19 @@ postgresTest('History HTTP returns exact RAW bytes and enforces administrator ac
     await history.capture({server:'http-fixture',tool:'read',durationMs:1,status:'success',username:bob,result:{content:[]}});
     const token=createUserToken('admin',true);
     const url=`/api/tool-results/${saved.resultId}`;
+    expect(await repository.hasChunkEmbeddings(saved.resultId)).toBe(false);
+    await pool.query('INSERT INTO tool_result_chunks(result_id,chunk_index,chunk_version,content) VALUES($1,0,2,$2)',[saved.resultId,'immutable Xid 79']);
+    expect(await repository.hasChunkEmbeddings(saved.resultId)).toBe(false);
+    const searched=await request(app).get(`${url}/search`).set('x-auth-token',token).query({q:'Xid 79'}).expect(200);
+    expect(searched.body.data).toHaveLength(1);
+    expect(searched.body.meta.mode).toBe('lexical');
+    expect(generateEmbedding).not.toHaveBeenCalled();
+    await pool.query("UPDATE tool_result_chunks SET embedding='[1,0,0]'::vector WHERE result_id=$1",[saved.resultId]);
+    expect(await repository.hasChunkEmbeddings(saved.resultId)).toBe(true);
+    expect(await repository.hasChunkEmbeddings(metadata.resultId)).toBe(false);
+    const chunks=await request(app).get(`${url}/chunks`).set('x-auth-token',token).expect(200);
+    expect(chunks.body.data).toHaveLength(1);
+    expect(chunks.body.data[0]).toMatchObject({chunkVersion:2,hasEmbedding:true,embeddingDimensions:3});
     await request(app).get(`${url}/raw`).expect(401);
     await request(app).get(`${url}/raw`).set('x-auth-token',createUserToken(alice,false)).expect(403);
     await request(app).patch(`${url}/pin`).set('x-auth-token',createUserToken(alice,false)).send({pinned:true}).expect(403);

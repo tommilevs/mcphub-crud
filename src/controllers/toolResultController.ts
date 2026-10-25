@@ -266,10 +266,14 @@ export const searchToolResultChunks = async (req: Request, res: Response): Promi
   let embedding: number[] | null = null;
   let mode: 'hybrid' | 'lexical' = 'lexical';
   try {
-    embedding = await generateEmbedding(query, 'query');
-    mode = 'hybrid';
+    // Async indexing may still be pending. An embedding cannot improve search
+    // without stored vectors, so avoid a provider request until they exist.
+    if (!repository.hasChunkEmbeddings || await repository.hasChunkEmbeddings(resultId)) {
+      embedding = await generateEmbedding(query, 'query');
+      mode = 'hybrid';
+    }
   } catch (error) {
-    logger.warn('Chunk search embedding failed; using lexical search:', error);
+    logger.warn('Chunk search vectors unavailable; using lexical search:', error);
   }
   const data = await repository.searchChunks(resultId, query, embedding, limit);
   await repository.incrementUseCount(resultId);

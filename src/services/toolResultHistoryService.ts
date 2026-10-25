@@ -39,6 +39,7 @@ export interface ToolResultRepository {
     limit: number,
   ): Promise<ToolResultChunkHit[]>;
   listChunks?(resultId: string): Promise<ToolResultChunk[]>;
+  hasChunkEmbeddings?(resultId: string): Promise<boolean>;
   hybridSearch?(query: string, embedding: number[] | null, limit: number, filter?: ToolResultFilter): Promise<ToolResultSearchHit[]>;
   setPinned(resultId: string, pinned: boolean): Promise<ToolResultRecord | null>;
   incrementUseCount(resultId: string): Promise<void>;
