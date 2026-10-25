@@ -9,7 +9,7 @@ import { prepareAcquisitionPublication } from '../../src/services/mcpAcquisition
 import { DataSource } from 'typeorm';
 import { Server as StoredServer } from '../../src/db/entities/Server.js';
 import { Group as StoredGroup } from '../../src/db/entities/Group.js';
-import { publishPostgresAcquisition } from '../../src/services/mcpAcquisitionPostgresPublication.js';
+import { publishPostgresAcquisition, rollbackPostgresAcquisition } from '../../src/services/mcpAcquisitionPostgresPublication.js';
 
 const postgresDescribe = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
@@ -233,6 +233,17 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     await expect(publishPostgresAcquisition(settingsDb,rejected,randomUUID())).rejects.toThrow('reservation');
     expect(await settingsDb.getRepository(StoredServer).findOneBy({name:'rejected-fixture'})).toBeNull();
     expect((await settingsDb.getRepository(StoredGroup).findOneByOrFail({id:group.id})).servers).toHaveLength(1);
+    await settingsDb.getRepository(StoredServer).update({id:stored.id},{enabled:false});
+    await expect(rollbackPostgresAcquisition(settingsDb,applied.reservation)).rejects.toThrow('reconciliation');
+    expect((await settingsDb.getRepository(StoredServer).findOneByOrFail({id:stored.id})).enabled).toBe(false);
+    await settingsDb.getRepository(StoredServer).update({id:stored.id},{enabled:true});
+    const unrelated=await settingsDb.getRepository(StoredServer).save({name:'unrelated-database',command:'keep.exe',enabled:true,owner:'alice'});
+    const currentGroup=await settingsDb.getRepository(StoredGroup).findOneByOrFail({id:group.id});
+    await settingsDb.getRepository(StoredGroup).update({id:group.id},{servers:[...currentGroup.servers,{name:unrelated.name,tools:['read']}]});
+    await rollbackPostgresAcquisition(settingsDb,applied.reservation);
+    expect(await settingsDb.getRepository(StoredServer).findOneBy({id:stored.id})).toBeNull();
+    expect(await settingsDb.getRepository(StoredServer).findOneBy({id:unrelated.id})).not.toBeNull();
+    expect((await settingsDb.getRepository(StoredGroup).findOneByOrFail({id:group.id})).servers).toEqual([{name:unrelated.name,tools:['read']}]);
   });
 
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
