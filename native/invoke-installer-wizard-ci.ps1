@@ -38,7 +38,9 @@ public static class WizardButtons {
   public static string Class(IntPtr window) {var name=new StringBuilder(128);GetClassName(window,name,name.Capacity);return name.ToString();}
   public static string ControlText(IntPtr window) {
     var kind=Class(window);
-    if(kind!="Button" && kind!="Edit")throw new InvalidOperationException("Only button and directory-edit text may be inspected.");
+    // Dialog/page transitions can destroy an HWND after enumeration. Unknown
+    // or stale handles are skipped without reading any other control class.
+    if(kind!="Button" && kind!="Edit")return "";
     var text=new StringBuilder(32768);UIntPtr result;
     if(SendMessageTimeout(window,0x000D,(UIntPtr)text.Capacity,text,2,1000,out result)==IntPtr.Zero)return "";
     return text.ToString();
