@@ -232,3 +232,14 @@ plus imports of express, pg, bcryptjs and gpt-tokenizer. The full installer test
 now probes those dependencies from the installed directory before checking health.
 Run 40190705042 is the new full-NSIS acceptance gate; its result is still pending.
 The packaging hypothesis is not considered resolved until that gate passes.
+
+Run 40190705042 / job 121160895024 subsequently passed the complete silent NSIS
+gate on clean Windows. The 56.53 MiB bundle installed the expected files and
+service, loaded its installed dependencies, served health and accepted bootstrap
+login. Its Start Menu shortcut targeted the tray; reinstall preserved settings
+and the encrypted bootstrap credential; uninstall removed the service and retained
+data. The tested installer artifact is 12598177847 (expires October 28). Its ZIP
+SHA-256 is `51575e40a34163e1482c4c400695a346586807d75281214052695f2a57dedda1`;
+this is the archive digest, not the embedded EXE digest. This closes clean silent
+installation acceptance, including the earlier packaging failure. Interactive
+wizard/tray, actual logon/reboot and production cutover remain separate gates.
