@@ -1,7 +1,7 @@
 import {EventEmitter} from 'node:events';
 const mockConnect=jest.fn();
 jest.mock('node:net',()=>({__esModule:true,default:{createConnection:mockConnect}}));
-import {getNativeRuntimeStatus,restartNativeRuntimeProcess} from '../../src/services/nativeRuntimeSecretService.js';
+import {getNativeRuntimeStatus,restartNativeRuntimeProcess,startNativeNpmInstall,getNativeInstallStatus,cancelNativeInstall,forgetNativeInstall} from '../../src/services/nativeRuntimeSecretService.js';
 
 const suite=process.platform==='win32'?describe:describe.skip;
 suite('native administrative pipe responses',()=>{
@@ -19,6 +19,19 @@ suite('native administrative pipe responses',()=>{
    socket.emit('connect');
    expect(JSON.parse(socket.write.mock.calls[socket.write.mock.calls.length-1][0])).toEqual({op,...(op==='restart'?{id:'fixture'}:{}),execution_context:{kind:'interactive',session_id:7,pipe_name:'mcphub-user-fixture'}});
    socket.emit('data',Buffer.from('{"ok":true}\n'));await pending;
+  }
+ });
+ it('sends typed installer requests without an arbitrary command, path or interactive delegation',async()=>{
+  const operations=[
+   [()=>startNativeNpmInstall('fixture','@fixture/mcp','1.2.3'),{op:'install_start',id:'fixture',package:'@fixture/mcp',version:'1.2.3'}],
+   [()=>getNativeInstallStatus('fixture'),{op:'install_status',id:'fixture'}],
+   [()=>cancelNativeInstall('fixture'),{op:'install_cancel',id:'fixture'}],
+   [()=>forgetNativeInstall('fixture'),{op:'install_forget',id:'fixture'}],
+  ] as const;
+  for(const [invoke,expected] of operations){
+   const pending=invoke();socket.emit('connect');
+   expect(JSON.parse(socket.write.mock.calls.at(-1)![0])).toEqual(expected);
+   socket.emit('data',Buffer.from('{"state":"running"}\n'));await pending;
   }
  });
  it('rejects a disconnected runtime immediately rather than waiting thirty seconds',async()=>{

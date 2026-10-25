@@ -2,6 +2,9 @@ param([string]$Destination=(Join-Path $PSScriptRoot 'staging'))
 $ErrorActionPreference='Stop'
 if($env:OS -ne 'Windows_NT'){throw 'Windows runtime staging requires Windows.'}
 $repo=(Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
+$nodeSource=(Get-Command node -CommandType Application | Select-Object -First 1).Source
+$npmSource=Join-Path (Split-Path -Parent $nodeSource) 'node_modules\npm'
+if(-not(Test-Path -LiteralPath (Join-Path $npmSource 'bin\npm-cli.js'))){throw 'The selected Node toolchain has no npm CLI to bundle.'}
 $Destination=[IO.Path]::GetFullPath($Destination)
 if(Test-Path -LiteralPath $Destination){throw 'Staging destination already exists; use a fresh directory. Existing staging is never deleted.'}
 foreach($file in @('dist\index.js','frontend\dist\index.html')){
@@ -20,7 +23,10 @@ try{
   Copy-Item -LiteralPath (Join-Path $repo 'dist') -Destination (Join-Path $Destination 'dist') -Recurse
   New-Item -ItemType Directory -Path (Join-Path $Destination 'frontend') | Out-Null
   Copy-Item -LiteralPath (Join-Path $repo 'frontend/dist') -Destination (Join-Path $Destination 'frontend/dist') -Recurse
-  Copy-Item -LiteralPath (Get-Command node -CommandType Application).Source -Destination (Join-Path $Destination 'node.exe')
+  Copy-Item -LiteralPath $nodeSource -Destination (Join-Path $Destination 'node.exe')
+  Copy-Item -LiteralPath $npmSource -Destination (Join-Path $Destination 'npm') -Recurse
+  & (Join-Path $Destination 'node.exe') (Join-Path $Destination 'npm\bin\npm-cli.js') --version | Out-Null
+  if($LASTEXITCODE -ne 0){throw 'Bundled npm CLI failed its version probe.'}
   foreach($file in @('node.exe','package.json','dist\index.js','frontend\dist\index.html')){
     if(-not(Test-Path -LiteralPath (Join-Path $Destination $file))){throw "Staged runtime is missing $file"}
   }

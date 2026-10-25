@@ -61,3 +61,10 @@ export const restartNativeRuntimeProcess = (id: string,execution?: NativeExecuti
   const context=interactiveExecutionRequest(execution,true);
   return callRuntime({op:'restart',id,...(context?{execution_context:context}:{})});
 };
+
+// Installer jobs have their own asynchronous lifecycle; they are not MCP streams.
+export const startNativeNpmInstall = (id: string, packageName: string, version: string): Promise<RuntimeResponse> =>
+  callRuntime({op:'install_start',id,package:packageName,version});
+export const getNativeInstallStatus = (id: string): Promise<RuntimeResponse> => callRuntime({op:'install_status',id});
+export const cancelNativeInstall = (id: string): Promise<RuntimeResponse> => callRuntime({op:'install_cancel',id});
+export const forgetNativeInstall = (id: string): Promise<RuntimeResponse> => callRuntime({op:'install_forget',id});

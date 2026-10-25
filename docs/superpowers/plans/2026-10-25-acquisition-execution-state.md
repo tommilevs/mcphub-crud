@@ -41,7 +41,7 @@ implementation before connecting the acquisition worker.
 
 Native core progress: `run_owned_command` now owns one-shot Windows installer
 commands through OwnedChild, with CREATE_NO_WINDOW and Job Object tree ownership.
-It applies a 1..900-second bounded timeout, cooperative cancellation, no restart,
+It applies a positive timeout up to900seconds, cooperative cancellation, no restart,
 null stdin/stdout/stderr, and returns only exit code/timeout/cancel outcome. The
 service must still resolve a reviewed typed package request; this function is not
 an HTTP or arbitrary model command endpoint. No npm package was installed.
@@ -56,3 +56,30 @@ Next: asynchronous service IPC installer job registry with per-job cancellation
 and status, followed by the TypeScript worker adapter. Verify the distributed
 runtime includes an actual npm CLI before constructing npm execution paths;
 the managed MCP transport cannot substitute for a package installer.
+
+Service boundary now implements `install_start/status/cancel/forget` on the
+machine control connection, excluding user-agent and MCP-stream delegation.
+Start accepts only operation UUID, package name and exact stable version. Runtime,
+CLI and operation staging paths are resolved by the service. Jobs run asynchronously
+with a bounded64-entry registry; same-ID/same-package retries reuse the entry,
+identity conflicts fail, and only completed jobs can be acknowledged/forgotten.
+The operation directory and marker refuse automatic replay after registry loss.
+Fixed npm arguments force local `--prefix` and `--global=false`; no shell command
+or arbitrary installation path comes from the request. PATH includes bundled Node.
+
+Runtime staging now copies the selected Node toolchain's npm package and probes
+its CLI using staged node.exe. Host npm source/CLI probe passed (11.17.0);
+Node selection explicitly takes the first application when PATH contains multiple
+Node installations, avoiding an accidental array of executable paths.
+PowerShell AST passes. Full rebuilt installer packaging remains unverified for this
+change; the previously accepted installer artifact does not contain these features.
+
+Actual local native tests:32 passed, including registry retry/conflict/cancel/forget
+and the pinned adapter running a synthetic npm CLI under copied Node. The fixture
+verified exact args/cwd, rejected malformed packages before staging and required
+reconciliation after registry loss. This did not download/install an external
+package. Its unique temporary directory was deleted and absence asserted. Five
+TypeScript administrative-pipe tests and backend typecheck pass. Live service IPC,
+real npm installation, credentials, post-install MCP probing/publication and crash
+reconciliation remain acceptance gates. Typed TypeScript control adapters are added
+but acquisition execution worker integration is still pending.

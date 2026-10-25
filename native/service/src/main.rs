@@ -12,6 +12,10 @@ mod pipe_access;
 #[cfg(windows)]
 mod pipe_io;
 #[cfg(windows)]
+mod installer_jobs;
+#[cfg(windows)]
+static INSTALLER_JOBS: std::sync::OnceLock<installer_jobs::InstallerJobs> = std::sync::OnceLock::new();
+#[cfg(windows)]
 static OPTIONS: std::sync::OnceLock<options::Options> = std::sync::OnceLock::new();
 #[cfg(windows)]
 fn options() -> &'static options::Options {
@@ -359,6 +363,28 @@ fn serve_named_pipe_client(
         let result = (|| -> Result<serde_json::Value, Box<dyn std::error::Error>> {
             let request = request?;
             match request["op"].as_str() {
+                Some(op @ ("install_start" | "install_status" | "install_cancel" | "install_forget")) => {
+                    if options().user_agent || owned.is_some() { return Err("installer jobs require the machine control connection".into()); }
+                    let jobs = INSTALLER_JOBS.get_or_init(installer_jobs::InstallerJobs::default);
+                    let id = request["id"].as_str().ok_or("missing installer operation id")?;
+                    match op {
+                        "install_status" => Ok(jobs.status(id)?),
+                        "install_cancel" => Ok(jobs.cancel(id)?),
+                        "install_forget" => Ok(jobs.forget(id)?),
+                        _ => {
+                            let exe = std::env::current_exe()?;
+                            let install = exe.parent().ok_or("runtime location unavailable")?;
+                            let runtime = options().runtime_dir.clone().or_else(||
+                                [install.join("resources/runtime"),install.join("runtime")].into_iter()
+                                  .find(|path| path.join("node.exe").is_file())).ok_or("bundled runtime unavailable")?;
+                            let data = options().data_dir.clone().unwrap_or_else(|| std::env::var_os("ProgramData")
+                                .map(std::path::PathBuf::from).unwrap_or_else(|| install.to_path_buf()).join("MCPHub"));
+                            Ok(installer_jobs::start_npm(jobs,id,
+                                request["package"].as_str().unwrap_or_default(),request["version"].as_str().unwrap_or_default(),
+                                &runtime,&data.join("acquisitions"))?)
+                        }
+                    }
+                }
                 Some("start") if request["stream"] == true => {
                     if owned.is_some() {
                         return Err("one stream lease per connection".into());
