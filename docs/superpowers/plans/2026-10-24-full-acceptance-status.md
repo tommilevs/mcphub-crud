@@ -153,3 +153,19 @@ and version history retains all four revisions. Approved download is no-store an
 omits RAW. Revoking one evidence review hides the Experience and blocks an already
 approved skill's next export; non-admin access and another key scope are denied.
 Workflows and reviews are synthetic; no skill is installed or executed by this test.
+
+The actual SkillProposalPanel/SkillEditor and skillService were exercised in a
+browser against controlled HTTP responses. Saving sends a draft edit at revision
+1; approval is a separate request at revision 2. Unsaved edits disable review,
+approval and download; the saved-version list renders revisions 3/2/1. A 409
+export revalidation error is shown to the user. Key scope is preserved on requests.
+The export POST succeeded, but the browser extension did not deliver its download
+event, so file persistence was not verified. Translation/auth/fetch boundaries and
+API responses were fixtures, not an integrated deployed backend.
+
+This check exposed a shared textarea styling bug: `.hub-input` forced every field
+to 32 px, ignoring textarea rows. Textareas now honor their row count, have vertical
+padding and allow vertical resizing. With production-built CSS, the 14-row skill
+editor measured about 261 px and a three-row control 77 px; ordinary inputs remain
+32 px. The narrow 540 px view has no horizontal overflow. Both fixture servers and
+owned tabs were closed after verification.

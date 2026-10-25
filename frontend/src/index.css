@@ -201,6 +201,11 @@
 .hub-input:focus { border-color: var(--hub-ink-2); }
 .hub-input::placeholder { color: var(--hub-ink-3); }
 .hub-input.mono { font-family: var(--hub-mono); font-size: 12.5px; }
+textarea.hub-input {
+  height: auto;
+  padding: 8px 10px;
+  resize: vertical;
+}
 
 /* Switch */
 .hub-switch {
