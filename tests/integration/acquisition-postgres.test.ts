@@ -35,7 +35,7 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     await ensureMcpAcquisitionSchema(db); // startup/restart must preserve existing schema
     await ensureToolResultHistorySchema(db);
     repository = new AcquisitionPlanRepository(db);
-    settingsDb=new DataSource({type:'postgres',...config,schema,entities:[StoredServer,StoredGroup],synchronize:true,
+    settingsDb=new DataSource({type:'postgres',...config,username:config.user,schema,entities:[StoredServer,StoredGroup],synchronize:true,
       extra:{options:`-c search_path=${schema},public`}});
     await settingsDb.initialize();
   });
