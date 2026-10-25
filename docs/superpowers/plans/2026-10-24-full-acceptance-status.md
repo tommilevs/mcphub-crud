@@ -13,7 +13,7 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | Per-tool policies | Controller persistence/validation tests; actual browser add/save/remove and bounds checks | Deployed settings acceptance |
 | Result Explorer | Browser timeline pagination, stale-response rejection, network recovery and exact chunk-to-RAW highlighting; source compare/chunks/metrics | Complete Smart/RAW/Chunks/Related acceptance with deployed data |
 | MCP-Zero | Hierarchical retrieval, scope/fallback and RRF dedup tests; offline paired evaluation reporter with ranking metrics and measured latency/token summaries | Representative live/recorded precision/recall, cold/warm latency and token-cost benchmark |
-| Model attribution | Real PostgreSQL concurrent rotation, nonce winner, call-bound proof and review concurrency tests; concurrent loopback HTTP and SDK Streamable HTTP clients with per-key/task isolation and signed invocation IDs | External concurrent-client and trusted gateway deployment acceptance |
+| Model attribution | Real PostgreSQL concurrent rotation, nonce winner, call-bound proof and review concurrency tests; concurrent SDK clients; actual MCP route/bearer authentication binds signed evidence to its owner | External concurrent-client and trusted gateway deployment acceptance |
 | LoopGuard / ToolPilot | Failure loops, explicit unchanged-success tools, repeat-intent exclusions, scoped feedback, bounded metadata-only provider tests; PostgreSQL branch/feedback/reaction isolation; isolated browser acceptance of unchanged-success settings and advice | Full deployed settings/detail acceptance; independently verified reactions/outcomes |
 | Experience Memory | Scope/evidence tests and reviewed manual advice | Broader verified strategies and deployment acceptance; optional adapters remain optional |
 | Dataset / Skills | Reviewed SFT, recorded trajectories, DPO, split registry and miner tests; PostgreSQL preview/export tenant/latest-consent gates and current independent Experience evidence | Broader deployed export/skills acceptance; no fabricated original conversation |
@@ -89,3 +89,16 @@ successfully verifies the proof. An unsigned continuation remains self-reported.
 The SDK, TCP transport, runtime and PostgreSQL are real; authentication and the
 upstream tool remain fixtures. Production routing/authentication and an external
 provider adapter still require deployment acceptance.
+
+The production-route follow-up
+[40171751096](https://github.com/tommilevs/mcphub-crud/actions/runs/40171751096)
+passes all 29 tests across four integration suites. Real SDK clients call the
+application's MCP route, bearer-key resolution, principal runtime, attribution
+wrapper and actual HTTP upstream fixture. Both signed calls assert Alice as the
+proof owner; only Alice's authenticated bearer key obtains verified evidence.
+Bob's ordinary public-tool call succeeds without verified provenance, and exactly
+one nonce is persisted. Users, keys, settings and provider responses are synthetic;
+the authentication implementation, MCP routing, upstream transport and PostgreSQL
+nonce storage are real. The isolated schema is dropped and checked absent. This
+closes the fixture-authentication gap for this path, while external deployment and
+an adapter consuming actual provider responses remain unverified.
