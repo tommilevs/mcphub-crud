@@ -107,6 +107,17 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
       .send({ digest: plan.manifest_digest, idempotencyKey: randomUUID() }).expect(200)).body.data;
     id = operation.operation_id;
     const endpoint = `${prefix}/operations/${id}`;
+    await request(app).post(`${endpoint}/execute`).set('x-auth-token', token).send({}).expect(400);
+    // A separate authorization can be cancelled before credentials or native work.
+    const cancelPlan = (await request(app).post(`${prefix}/plans`).set('x-auth-token', token)
+      .send({ serverName: 'native-acquisition-fixture', version: '1.0.0', targetGroup: 'fixture-group' }).expect(201)).body.data;
+    const cancelId = (await request(app).post(`${prefix}/plans/${cancelPlan.plan_id}/authorize`).set('x-auth-token', token)
+      .send({ digest: cancelPlan.manifest_digest, idempotencyKey: randomUUID() }).expect(200)).body.data.operation_id;
+    const cancelled = await request(app).post(`${prefix}/operations/${cancelId}/cancel`).set('x-auth-token', token).expect(200);
+    expect(cancelled.body.data).toMatchObject({ state: 'cancelled', cancel_requested: true });
+    await request(app).post(`${prefix}/operations/${cancelId}/execute`).set('x-auth-token', token)
+      .send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(409);
+    expect(fs.existsSync(path.join(root, 'acquisitions', cancelId))).toBe(false);
     await request(app).post(`${endpoint}/execute`).set('x-auth-token', bob).send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(409);
     const accepted = await request(app).post(`${endpoint}/execute`).set('x-auth-token', token)
       .send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(202);
@@ -123,8 +134,9 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     await request(app).get(endpoint).set('x-auth-token', bob).expect(404);
     const raw = await pool.query('SELECT raw,status,payload_available FROM tool_results WHERE result_id=$1 AND username=$2', [observed.probe_result_id, 'alice']);
     expect(raw.rows).toHaveLength(1); expect(raw.rows[0]).toMatchObject({ status: 'success', payload_available: true });
-    expect(JSON.stringify(raw.rows[0].raw)).toContain('credentialPresent');
+    expect(JSON.parse(raw.rows[0].raw).content).toEqual([{ type: 'text', text: '{"credentialPresent":true}' }]);
     expect(JSON.stringify(raw.rows[0].raw)).not.toContain('synthetic-acquisition-only');
+    await expect(pool.query('UPDATE tool_results SET raw=$1 WHERE result_id=$2', ['changed', observed.probe_result_id])).rejects.toThrow();
     const stored = fs.readFileSync(process.env.MCPHUB_SETTING_PATH!, 'utf8');
     expect(stored).not.toContain('synthetic-acquisition-only');
     expect(JSON.parse(stored).groups[0].servers).toEqual([{ name: 'native-acquisition-fixture', tools: ['check_environment', 'fixture_probe'], prompts: [], resources: [] }]);

@@ -24,9 +24,19 @@ try {
   & (Join-Path $runtime 'node.exe') (Join-Path $runtime 'npm\bin\npm-cli.js') pack (Join-Path $PSScriptRoot 'tests\acquisition-fixture') --pack-destination $root --ignore-scripts --silent
   if($LASTEXITCODE -ne 0){throw 'Cannot pack offline MCP acceptance fixture.'}
   # New loopback-only disposable cluster, never the preinstalled worker service.
-  & (Join-Path $pgBin 'initdb.exe') -D $pgData -U postgres --auth=trust --encoding=UTF8 --no-locale | Out-Null
-  if($LASTEXITCODE -ne 0){throw 'Cannot initialize disposable PostgreSQL.'}
-  & (Join-Path $pgBin 'pg_ctl.exe') -D $pgData -l (Join-Path $root 'postgres.log') -o "-p $pgPort -h 127.0.0.1" -w start | Out-Null
+  Write-Output 'Initializing isolated PostgreSQL cluster.'
+  $initOut=Join-Path $root 'initdb.stdout.log';$initErr=Join-Path $root 'initdb.stderr.log'
+  $init=Start-Process -FilePath (Join-Path $pgBin 'initdb.exe') -ArgumentList @('-D',('"'+$pgData+'"'),'-U','postgres','--auth=trust','--encoding=UTF8','--no-locale') -WindowStyle Hidden -PassThru -RedirectStandardOutput $initOut -RedirectStandardError $initErr
+  try {
+    if(-not $init.WaitForExit(60000)){
+      $init.Kill($true);$init.WaitForExit()
+      Get-Content -LiteralPath $initOut,$initErr -ErrorAction SilentlyContinue
+      throw 'Disposable PostgreSQL initialization exceeded 60 seconds.'
+    }
+    if($init.ExitCode -ne 0){Get-Content -LiteralPath $initOut,$initErr;throw 'Cannot initialize disposable PostgreSQL.'}
+  } finally {$init.Dispose()}
+  Write-Output 'Starting isolated PostgreSQL cluster.'
+  & (Join-Path $pgBin 'pg_ctl.exe') -D $pgData -l (Join-Path $root 'postgres.log') -o "-p $pgPort -h 127.0.0.1" -t 30 -w start
   if($LASTEXITCODE -ne 0){throw 'Cannot start disposable PostgreSQL.'}
   $pgStarted=$true
   $command='"'+$binary+'" --service-name "'+$name+'" --pipe-name "'+$pipe+'" --secret-dir "'+(Join-Path $data 'secrets')+'" --data-dir "'+$data+'" --runtime-dir "'+$runtime+'" --no-gateway'
