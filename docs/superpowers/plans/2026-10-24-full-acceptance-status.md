@@ -13,7 +13,7 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | Per-tool policies | Controller persistence/validation tests; actual browser add/save/remove and bounds checks | Deployed settings acceptance |
 | Result Explorer | Browser timeline pagination, stale-response rejection, network recovery and exact chunk-to-RAW highlighting; source compare/chunks/metrics | Complete Smart/RAW/Chunks/Related acceptance with deployed data |
 | MCP-Zero | Hierarchical retrieval, scope/fallback and RRF dedup tests; offline paired evaluation reporter with ranking metrics and measured latency/token summaries | Representative live/recorded precision/recall, cold/warm latency and token-cost benchmark |
-| Model attribution | Real PostgreSQL concurrent rotation, nonce winner, call-bound proof and review concurrency tests | Real concurrent-client and trusted gateway deployment acceptance |
+| Model attribution | Real PostgreSQL concurrent rotation, nonce winner, call-bound proof and review concurrency tests; concurrent loopback HTTP clients with per-key/task isolation and one-time signed replay | External concurrent-client and trusted gateway deployment acceptance |
 | LoopGuard / ToolPilot | Failure loops, explicit unchanged-success tools, repeat-intent exclusions, scoped feedback, bounded metadata-only provider tests; PostgreSQL branch/feedback/reaction isolation; isolated browser acceptance of unchanged-success settings and advice | Full deployed settings/detail acceptance; independently verified reactions/outcomes |
 | Experience Memory | Scope/evidence tests and reviewed manual advice | Broader verified strategies and deployment acceptance; optional adapters remain optional |
 | Dataset / Skills | Reviewed SFT, recorded trajectories, DPO, split registry and miner tests; PostgreSQL preview/export tenant/latest-consent gates and current independent Experience evidence | Broader deployed export/skills acceptance; no fabricated original conversation |
@@ -64,3 +64,16 @@ and frontend build passed; all six current index assets occur in the generated
 NSIS manifest. The 58.12 MiB installer SHA-256 is
 `B0BE14F61D2C13C3CED6A5DF1F0111D6F6DA8BD5E8212CAC20F5E59A4A067472`.
 Packaging success does not establish wizard or production installation acceptance.
+
+The concurrent HTTP acceptance run
+[40171211042](https://github.com/tommilevs/mcphub-crud/actions/runs/40171211042)
+passes all 24 PostgreSQL integration tests. Its new loopback TCP test uses Express,
+the actual attribution runtime and durable PostgreSQL context/nonce storage. Four
+simultaneous starts with one model produce distinct tasks/calls; two keys for the
+same username remain isolated, as does another username from the same address.
+Continuation preserves context with distinct call IDs, fork preserves the task
+with a new branch, and attribution fields are stripped from forwarded arguments.
+Concurrent reuse of one signed invocation yields exactly one verified call, while
+an unsigned continuation remains self-reported. Fixture authentication assigns
+synthetic principals and the upstream handler is a stub. This does not establish
+production authentication, full MCP transport or external provider integration.
