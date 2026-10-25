@@ -129,6 +129,9 @@ installation/login, stopping the old installed user agent before replacing its
 executable, preserving another installation's agent, in-place SCM update,
 existing settings and initial-password retention, and uninstall without deleting
 user data. The NSIS hooks invoke that script and abort on an unsuccessful exit.
+`native/test-installer-preflight-windows.ps1` verifies that a fresh installation
+rejects an occupied gateway port before creating files or registering a service,
+and accepts it once released. It needs no installation fixture or persistent data.
 This functional lifecycle test does not exercise the complete NSIS wizard,
 bootstrap-password dialog, shortcuts or per-user tray autostart UI.
 The script also runs under 32-bit Windows PowerShell 5.1, as used by a 32-bit

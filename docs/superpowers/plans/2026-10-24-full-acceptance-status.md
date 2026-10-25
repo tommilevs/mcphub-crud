@@ -19,7 +19,7 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | Dataset / Skills | Reviewed SFT, recorded trajectories, DPO, split registry and miner tests; PostgreSQL preview/export tenant/latest-consent gates and current independent Experience evidence | Broader deployed export/skills acceptance; no fabricated original conversation |
 | Windows service / stdio | Actual isolated SCM, Job Objects, duplex streams, managed tools and interactive broker acceptance | Full installer wizard acceptance and production switch |
 | Native dashboard | Actual browser same-ID service/agent restart targets, offline agent and narrow layout | Deployed package acceptance |
-| Installer | Official NSIS bundle built and entry assets checked; install helper exercised in PowerShell 7 and 5.1 | Wizard/shortcuts/bootstrap flow and real logon/reboot |
+| Installer | Official NSIS bundle built and entry assets checked; install helper exercised in PowerShell 7 and 5.1; occupied-port preflight tested in 64/32-bit PowerShell; welcome/directory wizard pages observed | Complete installation/shortcuts/bootstrap flow and real logon/reboot |
 
 PostgreSQL query regressions now run in disposable pgvector CI, without needing
 the production administrator credential. The red run was
@@ -59,8 +59,8 @@ deployed localization, backend persistence or whole-page acceptance. The fixture
 server and its browser tab were closed after verification.
 
 The refreshed official Windows bundle contains runtime source through `746dcd2`
-(HEAD `d1f2994` changes only a test expectation). Backend build, frontend typecheck
+and the installer preflight fix from `41ee8af`. Backend build, frontend typecheck
 and frontend build passed; all six current index assets occur in the generated
-NSIS manifest. The 58.11 MiB installer SHA-256 is
-`CB4BD24BFDD9749618B6022B179213E8E06407141930A941486A385C925CB138`.
+NSIS manifest. The 58.12 MiB installer SHA-256 is
+`B0BE14F61D2C13C3CED6A5DF1F0111D6F6DA8BD5E8212CAC20F5E59A4A067472`.
 Packaging success does not establish wizard or production installation acceptance.
