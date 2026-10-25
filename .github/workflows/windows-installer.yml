@@ -1,0 +1,51 @@
+name: Windows installer acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/tool-result-history]
+    paths: ['.github/workflows/windows-installer.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-2022
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build application with pinned dependencies
+        run: |
+          corepack enable
+          corepack prepare pnpm@10.12.4 --activate
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm backend:build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm frontend:typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          pnpm frontend:build
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          ./native/stage-runtime-windows.ps1
+      - name: Install pinned Tauri CLI
+        run: cargo install tauri-cli --version 2.12.4 --locked
+      - name: Build official NSIS bundle
+        run: ./native/build-windows.ps1 -Action bundle
+      - name: Verify fresh-install port preflight
+        run: ./native/test-installer-preflight-windows.ps1
+      - name: Verify silent full installer and upgrade on disposable Windows
+        timeout-minutes: 15
+        run: ./native/test-nsis-ci-windows.ps1 -InstallerPath native/target/release/bundle/nsis/MCPHub_1.1.8_x64-setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: MCPHub-Windows-tested-installer
+          path: native/target/release/bundle/nsis/*-setup.exe
+          if-no-files-found: error
+          retention-days: 3
