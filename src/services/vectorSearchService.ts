@@ -1549,7 +1549,16 @@ export const searchToolsByVector = async (
       ['tool'],
       scopedServerNames,
     );
-    const rawServerResults = await rawServerResultsPromise;
+    // Server ranking is optional evidence. Observe both independent promises
+    // immediately, and retain usable tool matches if only server lookup fails.
+    const [rawServerResults, baselineToolResults] = await Promise.all([
+      rawServerResultsPromise.catch(error => {
+        logger.warn('Server ranking unavailable; retaining baseline tool search',
+          safeStringify({ error: summarizeErrorForLogging(error) }));
+        return [];
+      }),
+      baselineToolResultsPromise,
+    ]);
 
     const allowedServerNames = scopedServerNames ? new Set(scopedServerNames) : null;
     const serverScoreMap = new Map<string, number>();
@@ -1627,7 +1636,7 @@ export const searchToolsByVector = async (
       });
     };
 
-    const baseline = toCandidates(await baselineToolResultsPromise, false)
+    const baseline = toCandidates(baselineToolResults, false)
       .sort((left, right) => right.similarity - left.similarity)
       .slice(0, limit);
 

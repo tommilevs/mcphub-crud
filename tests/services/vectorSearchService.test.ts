@@ -188,6 +188,31 @@ describe('vectorSearchService', () => {
     );
   });
 
+  it.each([false, true])('keeps baseline tools when server retrieval fails (MCP-Zero %s)', async (mcpZeroEnabled) => {
+    mockGetSmartRoutingConfig.mockResolvedValue({
+      enabled: true, embeddingProvider: 'openai', embeddingModel: 'text-embedding-3-small',
+      llmProviderBaseUrl: 'https://api.openai.com/v1', llmProviderApiKey: '', mcpZeroEnabled,
+    });
+    mockVectorRepository.searchSimilar.mockImplementation(async (
+      _embedding: number[], _limit: number, _threshold: number, contentTypes?: string[],
+    ) => {
+      if (contentTypes?.includes('server')) throw new Error('Server index unavailable');
+      return [{embedding:{metadata:JSON.stringify({serverName:'maps',toolName:'maps-route'}),text_content:'maps-route'},similarity:0.8}];
+    });
+    const results = await searchToolsByVector('plan a route', 10, 0.3, ['maps']);
+    expect(results.map(result=>result.toolName)).toEqual(['maps-route']);
+    expect(results[0].similarity).toBe(0.8);
+    expect(results[0].routingDiagnostics).toBeUndefined();
+    expect(mockVectorRepository.searchSimilar).toHaveBeenCalledTimes(2);
+  });
+
+  it('handles failure of both concurrent lookups without an unobserved rejection', async () => {
+    mockVectorRepository.searchSimilar.mockRejectedValue(new Error('Vector database unavailable'));
+    await expect(searchToolsByVector('plan a route', 10, 0.3, ['maps'])).resolves.toEqual([]);
+    await new Promise(resolve=>setImmediate(resolve));
+    expect(mockVectorRepository.searchSimilar).toHaveBeenCalledTimes(2);
+  });
+
   it('fuses MCP-Zero two-stage candidates with the baseline instead of hiding it', async () => {
     mockGetSmartRoutingConfig.mockResolvedValue({
       enabled: true,
