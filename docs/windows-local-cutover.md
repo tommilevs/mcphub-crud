@@ -2,6 +2,12 @@
 
 Status: not migrated. Keep the current gateway and scheduled tasks running until the replacement passes acceptance.
 
+The NSIS directory page's **Next** button starts installation immediately; there
+is no separate review page. Do not advance past it during read-only wizard checks.
+Fresh installation now rejects an occupied gateway port before extracting files
+or stopping runtime processes. This detects a conflict; it does not migrate the
+old gateway or change its launch tasks.
+
 ## Verified inputs
 
 - Existing settings: `C:\aitools\MCPHub\data\mcp_settings.json`. The similarly named file in its parent directory is an unused sample.

@@ -80,6 +80,15 @@ function Stop-InstalledRuntime {
   }
 }
 
+# NSIS calls Prepare before extracting files. A fresh install must not report
+# success while an older gateway or another application owns its requested port.
+# Existing service upgrades retain their registered endpoint and stop it below.
+if($Action -ne 'Uninstall' -and -not $registered){
+  $listeners=[Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+  if($listeners | Where-Object {$_.Port -eq $GatewayPort}){
+    throw "MCPHub gateway port $GatewayPort is already in use. Stop or migrate the existing gateway before installing, or select another GatewayPort."
+  }
+}
 Stop-InstalledRuntime
 if($Action -eq 'Prepare'){return}
 $sc=Join-Path $env:SystemRoot 'System32\sc.exe'
