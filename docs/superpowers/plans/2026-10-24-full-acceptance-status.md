@@ -185,3 +185,13 @@ leaves preview available. There was no horizontal overflow at 540 px. API,
 translation/auth boundaries and history/preference child panels were fixtures;
 integrated backend and full child-panel acceptance remain open. The temporary
 server and owned tab were closed, and the empty export created no download file.
+
+The actual ExperienceMemoryPanel/ExperienceManager and experienceService passed
+a controlled browser check at 540 px. Editing the title or changing selected
+evidence resets approval; saving sent `approved: false` with only the new evidence
+ID. Separate approval sent revision 1 and rendered approved revision 2. After the
+fixture revoked evidence, refresh displayed the exclusion warning and disabled
+approval. Changing key scope immediately removed the old entry; loading sent the
+new key and rendered an empty scope. No horizontal overflow occurred. API and
+translation/auth boundaries were fixtures, not integrated backend acceptance.
+The owned tab and in-memory server were closed; no fixture files were created.
