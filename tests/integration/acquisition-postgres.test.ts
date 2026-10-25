@@ -285,6 +285,24 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect(replacement.id).toBeTruthy();
   });
 
+  test('one execution lease spans credential setup and cannot replay after an unknown outcome',async()=>{
+    const operations=new AcquisitionOperationRepository({query:async(sql,args)=>(await pool.query(sql,args)).rows});
+    const manifest=buildAcquisitionManifest({name:'execution-fixture',installations:{npm:{type:'npm',command:'npx',args:['-y','fixture']}}} as unknown as MarketServer,'1.0.0','fixture-group');
+    const plan=await repository.create('alice',manifest);
+    const operation=await repository.authorize('alice',plan.plan_id,plan.manifest_digest,randomUUID());
+    const id=operation.operation_id;
+    expect(await operations.executionCandidate('bob',id)).toBeNull();
+    expect((await operations.executionCandidate('alice',id)).manifest).toEqual(manifest);
+    expect(await operations.claimExecution('bob',id,plan.manifest_digest)).toBeNull();
+    expect(await operations.claimExecution('alice',id,'a'.repeat(64))).toBeNull();
+    const claims=(await Promise.all(Array.from({length:5},()=>operations.claimExecution('alice',id,plan.manifest_digest)))).filter(Boolean);
+    expect(claims).toHaveLength(1);expect(await operations.executionCandidate('alice',id)).toBeNull();
+    expect(await operations.requireExecutionReconciliation('alice',id,randomUUID())).toBe(false);
+    expect(await operations.requireExecutionReconciliation('alice',id,claims[0].execution_claim_id)).toBe(true);
+    expect((await operations.get('alice',id))).toMatchObject({state:'failed',execution_started:true,requires_reconciliation:true});
+    expect(await operations.claim('alice',id)).toBeNull();
+  });
+
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
     const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
     const operations = new AcquisitionOperationRepository(db);

@@ -34,6 +34,8 @@ export async function ensureMcpAcquisitionSchema(db: { query(sql: string): Promi
         REFERENCES mcp_acquisition_plans(plan_id,owner,manifest_digest)
     );
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS claim_id uuid;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS execution_claim_id uuid;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS execution_started_at timestamptz;
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS cancel_requested boolean NOT NULL DEFAULT FALSE;
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS requires_reconciliation boolean NOT NULL DEFAULT FALSE;
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS failure_code varchar(64);
