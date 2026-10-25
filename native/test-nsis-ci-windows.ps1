@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$InstallerPath,[switch]$CheckTray)
+param([Parameter(Mandatory=$true)][string]$InstallerPath,[switch]$CheckTray,[switch]$CheckWizard)
 $ErrorActionPreference='Stop'
 # This test installs the real default service. It must never run on a user's PC
 # or a self-hosted runner that could contain an existing installation.
@@ -15,7 +15,11 @@ if((Get-Service -Name MCPHub -ErrorAction SilentlyContinue) -or (Test-Path -Lite
 if([Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners() | Where-Object {$_.Port -eq 3000}){
   throw 'Runner gateway port is occupied.'
 }
-function Invoke-Installer {
+function Invoke-Installer([switch]$Interactive) {
+  if($Interactive){
+    & (Join-Path $PSScriptRoot 'invoke-installer-wizard-ci.ps1') -InstallerPath $InstallerPath -Destination $install
+    return
+  }
   $process=Start-Process -FilePath $InstallerPath -ArgumentList @('/S',"/D=$install") -WindowStyle Hidden -Wait -PassThru
   try{if($process.ExitCode -ne 0){throw "NSIS exited with code $($process.ExitCode)"}}finally{$process.Dispose()}
 }
@@ -32,7 +36,7 @@ function Assert-Login([string]$Password){
   if(-not $response.token){throw 'Installed gateway rejected its bootstrap administrator.'}
 }
 try{
-  Invoke-Installer
+  Invoke-Installer -Interactive:$CheckWizard
   foreach($file in @('mcphub-tray.exe','mcphub-runtime-service.exe','runtime-install.ps1','runtime\node.exe','runtime\dist\index.js','runtime\frontend\dist\index.html')){
     if(-not(Test-Path -LiteralPath (Join-Path $install $file))){throw "Installed bundle is missing $file"}
   }
