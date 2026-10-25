@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { MarketServer } from '../types/index.js';
 import { AcquisitionInputError } from './mcpAcquisitionService.js';
+import { acquisitionRowsDatabase } from './mcpAcquisitionDb.js';
 
 export interface AcquisitionManifest {
   schemaVersion: 1;
@@ -56,7 +57,8 @@ export interface AcquisitionPlanDb { query(sql: string, parameters?: any[]): Pro
 
 /** Persistence only. Creating or reading a plan never authorizes or executes it. */
 export class AcquisitionPlanRepository {
-  constructor(private readonly db: AcquisitionPlanDb) {}
+  private readonly db: AcquisitionPlanDb;
+  constructor(db: AcquisitionPlanDb) { this.db = acquisitionRowsDatabase(db); }
 
   async create(owner: string, manifest: AcquisitionManifest, ttlSeconds = 1800) {
     if (!owner.trim() || owner.length > 255 || !Number.isInteger(ttlSeconds) || ttlSeconds < 60 || ttlSeconds > 86400) {

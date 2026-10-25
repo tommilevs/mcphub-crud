@@ -26,3 +26,10 @@ test('generic transitions cannot declare readiness without runtime activation', 
     'b5ed66f5-a21e-4acd-85d9-b1dbbfe120dc','verifying','ready')).rejects.toThrow('activation');
   expect(query).not.toHaveBeenCalled();
 });
+
+test('TypeORM zero affected rows never grants an acquisition state transition', async () => {
+  const query=jest.fn().mockResolvedValue([[],0]);
+  const repository=new AcquisitionOperationRepository({query});
+  expect(await repository.recordPublicationApplied('alice','a5ed66f5-a21e-4acd-85d9-b1dbbfe120dc',
+    'b5ed66f5-a21e-4acd-85d9-b1dbbfe120dc','a'.repeat(64))).toBe(false);
+});

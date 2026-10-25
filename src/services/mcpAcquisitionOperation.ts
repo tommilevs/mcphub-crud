@@ -3,6 +3,7 @@ import { AcquisitionPlanRepository, type AcquisitionPlanDb } from './mcpAcquisit
 import { AcquisitionInputError } from './mcpAcquisitionService.js';
 import type { JsonPublicationReservation } from './mcpAcquisitionJsonPublication.js';
 import type { PostgresPublicationReservation } from './mcpAcquisitionPublicationSettings.js';
+import { acquisitionRowsDatabase } from './mcpAcquisitionDb.js';
 
 const transitions: Record<string, readonly string[]> = {
   staging: ['starting', 'failed', 'rolled_back'],
@@ -17,7 +18,8 @@ const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 
 /** State persistence only: native actions must be reconciled before recording their outcomes. */
 export class AcquisitionOperationRepository {
-  constructor(private readonly db: AcquisitionPlanDb) {}
+  private readonly db: AcquisitionPlanDb;
+  constructor(db: AcquisitionPlanDb) { this.db = acquisitionRowsDatabase(db); }
 
   async get(owner: string, operationId: string) {
     if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
