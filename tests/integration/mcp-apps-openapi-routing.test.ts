@@ -34,8 +34,12 @@ import { MCP_APPS_CAPABILITIES } from '../../src/utils/mcpApps.js';
 import { createUserToken } from '../utils/testHelpers.js';
 import { ensureAttributionContextSchema } from '../../src/db/attributionContextSchema.js';
 import { createGatewayProof } from '../../src/services/gatewayProvenance.js';
+import { ensureToolResultHistorySchema } from '../../src/db/toolResultHistorySchema.js';
+import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
+import { ToolResultHistoryService } from '../../src/services/toolResultHistoryService.js';
+import { getToolResults,getToolResultById,getToolResultRaw,getToolResultRange,pinToolResult } from '../../src/controllers/toolResultController.js';
 
-let mockAttributionDb: {query:(sql:string,parameters?:unknown[])=>Promise<any>} | undefined;
+let mockAttributionDb: {isInitialized?:boolean;query:(sql:string,parameters?:unknown[])=>Promise<any>} | undefined;
 jest.mock('../../src/db/connection.js',()=>{
   const actual=jest.requireActual('../../src/db/connection.js');
   return {...actual,getAppDataSource:()=>mockAttributionDb??actual.getAppDataSource()};
@@ -82,6 +86,11 @@ beforeAll(async () => {
   app.use(express.json());
   app.use('/api', auth, userContextMiddleware);
   app.put('/api/credentials/:name', updateMyCredential);
+  app.get('/api/tool-results',getToolResults);
+  app.get('/api/tool-results/:id',getToolResultById);
+  app.get('/api/tool-results/:id/raw',getToolResultRaw);
+  app.get('/api/tool-results/:id/range',getToolResultRange);
+  app.patch('/api/tool-results/:id/pin',pinToolResult);
   const routes = ['/mcp', '/mcp/:group'];
   app.post(routes, sseUserContextMiddleware, handleMcpPostRequest);
   app.get(routes, sseUserContextMiddleware, handleMcpOtherRequest);
@@ -292,6 +301,61 @@ postgresTest('production MCP auth binds signed adapter evidence to the authentic
     mockAttributionDb=undefined;
     if(oldMode===undefined)delete process.env.MCPHUB_ATTRIBUTION_MODE;else process.env.MCPHUB_ATTRIBUTION_MODE=oldMode;
     if(oldKeys===undefined)delete process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;else process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=oldKeys;
+    if(pool)await pool.end();
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);
+    await admin.end();
+  }
+});
+
+postgresTest('History HTTP returns exact RAW bytes and enforces administrator access on PostgreSQL',async()=>{
+  const schema=`history_http_${randomBytes(12).toString('hex')}`;
+  const config={host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST??'127.0.0.1',port:Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT??5432),
+    user:process.env.MCPHUB_ATTRIBUTION_TEST_USER,password:process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,
+    database:process.env.MCPHUB_ATTRIBUTION_TEST_DB??'postgres',connectionTimeoutMillis:5000};
+  const admin=new PgClient(config);let pool:Pool|undefined;
+  try{
+    await admin.connect();await admin.query(`CREATE SCHEMA ${schema}`);
+    pool=new Pool({...config,options:`-c search_path=${schema}`});
+    const db={isInitialized:true,query:async(sql:string,parameters?:unknown[])=>(await pool!.query(sql,parameters)).rows};
+    await ensureAttributionContextSchema(db);await ensureToolResultHistorySchema(db);
+    mockAttributionDb=db;
+    const repository=new ToolResultRepositoryDb(db);
+    const history=new ToolResultHistoryService(repository);
+    const saved=(await history.capture({server:'http-fixture',tool:'read',durationMs:1,status:'success',username:alice,
+      result:{content:[{type:'text',text:'immutable 😀\r\nXid 79'}],structuredContent:{counter:'9007199254740993'}}}))!;
+    const metadata=(await history.capture({server:'http-fixture',tool:'read',durationMs:1,status:'success',username:alice,
+      result:{content:[{type:'text',text:'omitted'}]},capturePayload:false,payloadOmissionReason:'fixture-disabled'}))!;
+    await history.capture({server:'http-fixture',tool:'read',durationMs:1,status:'success',username:bob,result:{content:[]}});
+    const token=createUserToken('admin',true);
+    const url=`/api/tool-results/${saved.resultId}`;
+    await request(app).get(`${url}/raw`).expect(401);
+    await request(app).get(`${url}/raw`).set('x-auth-token',createUserToken(alice,false)).expect(403);
+    await request(app).patch(`${url}/pin`).set('x-auth-token',createUserToken(alice,false)).send({pinned:true}).expect(403);
+    const listed=await request(app).get('/api/tool-results').set('x-auth-token',token).query({username:alice}).expect(200);
+    expect(listed.body.pagination.total).toBe(2);
+    expect(listed.body.data.every((value:any)=>value.raw===undefined&&value.rawText===undefined)).toBe(true);
+    const detail=await request(app).get(url).set('x-auth-token',token).expect(200);
+    expect(detail.body.data).toMatchObject({resultId:saved.resultId,rawSha256:saved.rawSha256,payloadAvailable:true});
+    expect(detail.body.data.raw).toBeUndefined();
+    const raw=await request(app).get(`${url}/raw`).set('x-auth-token',token).expect(200);
+    expect(raw.text).toBe(saved.raw);
+    const bytes=Buffer.from(saved.raw!,'utf8'),start=bytes.indexOf(Buffer.from('😀'))+1,end=start+2;
+    expect(start).toBeGreaterThan(0);
+    const range=await request(app).get(`${url}/range`).set('x-auth-token',token).query({start,end}).expect(206);
+    expect(range.headers['content-range']).toBe(`bytes ${start}-${end-1}/${bytes.length}`);
+    expect(range.body).toEqual(bytes.subarray(start,end));
+    await request(app).get(`${url}/range`).set('x-auth-token',token).query({start:0,end:bytes.length+1}).expect(400);
+    await request(app).get(`/api/tool-results/${metadata.resultId}/raw`).set('x-auth-token',token).expect(409);
+    await request(app).get(`/api/tool-results/${metadata.resultId}/range`).set('x-auth-token',token).query({start:0,end:1}).expect(409);
+    const pin=await request(app).patch(`${url}/pin`).set('x-auth-token',token).send({pinned:true}).expect(200);
+    expect(pin.body.data.pinned).toBe(true);
+    const reopened=await repository.findById(saved.resultId);
+    expect(reopened).toMatchObject({raw:saved.raw,rawSha256:saved.rawSha256,pinned:true});
+    expect(reopened!.useCount).toBeGreaterThanOrEqual(3);
+    await request(app).get('/api/tool-results/00000000-0000-0000-0000-000000000000/raw').set('x-auth-token',token).expect(404);
+  }finally{
+    mockAttributionDb=undefined;
     if(pool)await pool.end();
     await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);
