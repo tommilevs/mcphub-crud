@@ -53,13 +53,13 @@ try{
   $password=[Text.Encoding]::UTF8.GetString($plain);[Array]::Clear($plain,0,$plain.Length)
   Assert-Login $password
   if($CheckTray){
-    $tray=Start-Process -FilePath (Join-Path $install 'mcphub-tray.exe') -WindowStyle Hidden -PassThru
+    $tray=Start-Process -FilePath (Join-Path $install 'mcphub-tray.exe') -ArgumentList '--open-dashboard' -WindowStyle Hidden -PassThru
     try{
       $deadline=[DateTime]::UtcNow.AddSeconds(60)
       do{
         $tray.Refresh()
         if($tray.HasExited){throw 'Installed tray exited before opening its dashboard.'}
-        if($tray.MainWindowHandle -ne [IntPtr]::Zero){break}
+        if($tray.MainWindowHandle -ne [IntPtr]::Zero -and $tray.MainWindowTitle -match 'MCPHub'){break}
         Start-Sleep -Milliseconds 250
       }while([DateTime]::UtcNow -lt $deadline)
       if($tray.MainWindowHandle -eq [IntPtr]::Zero -or $tray.MainWindowTitle -notmatch 'MCPHub'){

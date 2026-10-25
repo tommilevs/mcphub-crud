@@ -23,6 +23,6 @@ jobs:
           run-id: 40190705042
           github-token: ${{ github.token }}
           path: tested-installer
-      - name: Verify installed tray on disposable Windows
+      - name: Verify explicitly opened installed dashboard on disposable Windows
         shell: pwsh
         run: ./native/test-nsis-ci-windows.ps1 -InstallerPath tested-installer/MCPHub_1.1.8_x64-setup.exe -CheckTray
