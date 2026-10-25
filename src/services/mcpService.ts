@@ -3330,7 +3330,7 @@ const beginOnDemandToolCall = (serverInfo: ServerInfo): (() => void) | undefined
  *
  * Concurrent callers coalesce on `spawningPromise` so only one spawn runs.
  */
-const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> => {
+export const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> => {
   if (serverInfo.status === 'connected') return;
 
   // Another call is already spawning - wait for it
