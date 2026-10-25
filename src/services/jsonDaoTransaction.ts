@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { withJsonSettingsFileLock } from './jsonSettingsFileLock.js';
 
 const context = new AsyncLocalStorage<{ active: boolean }>();
 let queue = Promise.resolve();
@@ -22,7 +23,7 @@ export function assertJsonDaoTransactionAccess(): void {
   if (busy && !context.getStore()?.active) throw new Error('Settings mutation conflicts with an active JSON transaction');
 }
 
-export function serializeJsonDao<T extends object>(dao: T): T {
+export function serializeJsonDao<T extends object>(dao: T, settingsPath?: () => string, lockReads = true): T {
   const seen = new Set<PropertyKey>();
   for (let prototype: object | null = dao; prototype && prototype !== Object.prototype; prototype = Object.getPrototypeOf(prototype)) {
     for (const key of Reflect.ownKeys(prototype)) {
@@ -32,7 +33,12 @@ export function serializeJsonDao<T extends object>(dao: T): T {
       // Preserve synchronous helpers and ordinary method replacement/decorators.
       if (typeof value !== 'function' || value.constructor.name !== 'AsyncFunction') continue;
       Object.defineProperty(dao, key, { configurable: true, writable: true,
-        value: (...args: unknown[]) => withJsonDaoTransaction(() => Reflect.apply(value, dao, args)) });
+        value: (...args: unknown[]) => withJsonDaoTransaction(() => {
+          const read = /^(find|get|has|exists|count|list|read|load|validate|verify|check|is)([A-Z_]|$)/.test(String(key));
+          const invoke = () => Reflect.apply(value, dao, args);
+          return settingsPath && (!read || lockReads)
+            ? withJsonSettingsFileLock(settingsPath(), invoke, read) : invoke();
+        }) });
     }
   }
   return dao;

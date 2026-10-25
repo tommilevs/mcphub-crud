@@ -5,6 +5,8 @@
 import { loadSettings, migrateToDao, switchToDao, switchToLegacy } from './configManager.js';
 import { UserDaoImpl, ServerDaoImpl, GroupDaoImpl } from '../dao/index.js';
 import { logger } from '../utils/logger.js';
+import { serializeJsonDao } from '../services/jsonDaoTransaction.js';
+import { getSettingsPath } from './index.js';
 
 /**
  * Validate data integrity after migration
@@ -103,9 +105,9 @@ export async function testDaoOperations(): Promise<boolean> {
     logger.log('🧪 Testing DAO operations...');
 
     switchToDao();
-    const userDao = new UserDaoImpl();
-    const serverDao = new ServerDaoImpl();
-    const groupDao = new GroupDaoImpl();
+    const userDao = serializeJsonDao(new UserDaoImpl(), getSettingsPath);
+    const serverDao = serializeJsonDao(new ServerDaoImpl(), getSettingsPath);
+    const groupDao = serializeJsonDao(new GroupDaoImpl(), getSettingsPath);
 
     // Test user operations
     logger.log('Testing user operations...');

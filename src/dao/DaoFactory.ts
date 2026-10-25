@@ -12,6 +12,7 @@ import { BuiltinPromptDao, BuiltinPromptDaoImpl } from './BuiltinPromptDao.js';
 import { BuiltinResourceDao, BuiltinResourceDaoImpl } from './BuiltinResourceDao.js';
 import { logger } from '../utils/logger.js';
 import { serializeJsonDao } from '../services/jsonDaoTransaction.js';
+import { getSettingsPath } from '../config/index.js';
 
 /**
  * DAO Factory interface for creating DAO instances
@@ -68,70 +69,70 @@ export class JsonFileDaoFactory implements DaoFactory {
 
   getUserDao(): UserDao {
     if (!this.userDao) {
-      this.userDao = serializeJsonDao(new UserDaoImpl());
+      this.userDao = serializeJsonDao(new UserDaoImpl(), getSettingsPath);
     }
     return this.userDao;
   }
 
   getServerDao(): ServerDao {
     if (!this.serverDao) {
-      this.serverDao = serializeJsonDao(new ServerDaoImpl());
+      this.serverDao = serializeJsonDao(new ServerDaoImpl(), getSettingsPath);
     }
     return this.serverDao;
   }
 
   getGroupDao(): GroupDao {
     if (!this.groupDao) {
-      this.groupDao = serializeJsonDao(new GroupDaoImpl());
+      this.groupDao = serializeJsonDao(new GroupDaoImpl(), getSettingsPath);
     }
     return this.groupDao;
   }
 
   getSystemConfigDao(): SystemConfigDao {
     if (!this.systemConfigDao) {
-      this.systemConfigDao = serializeJsonDao(new SystemConfigDaoImpl());
+      this.systemConfigDao = serializeJsonDao(new SystemConfigDaoImpl(), getSettingsPath, true);
     }
     return this.systemConfigDao;
   }
 
   getUserConfigDao(): UserConfigDao {
     if (!this.userConfigDao) {
-      this.userConfigDao = serializeJsonDao(new UserConfigDaoImpl());
+      this.userConfigDao = serializeJsonDao(new UserConfigDaoImpl(), getSettingsPath);
     }
     return this.userConfigDao;
   }
 
   getOAuthClientDao(): OAuthClientDao {
     if (!this.oauthClientDao) {
-      this.oauthClientDao = serializeJsonDao(new OAuthClientDaoImpl());
+      this.oauthClientDao = serializeJsonDao(new OAuthClientDaoImpl(), getSettingsPath);
     }
     return this.oauthClientDao;
   }
 
   getOAuthTokenDao(): OAuthTokenDao {
     if (!this.oauthTokenDao) {
-      this.oauthTokenDao = serializeJsonDao(new OAuthTokenDaoImpl());
+      this.oauthTokenDao = serializeJsonDao(new OAuthTokenDaoImpl(), getSettingsPath);
     }
     return this.oauthTokenDao;
   }
 
   getBearerKeyDao(): BearerKeyDao {
     if (!this.bearerKeyDao) {
-      this.bearerKeyDao = serializeJsonDao(new BearerKeyDaoImpl());
+      this.bearerKeyDao = serializeJsonDao(new BearerKeyDaoImpl(), getSettingsPath);
     }
     return this.bearerKeyDao;
   }
 
   getBuiltinPromptDao(): BuiltinPromptDao {
     if (!this.builtinPromptDao) {
-      this.builtinPromptDao = serializeJsonDao(new BuiltinPromptDaoImpl());
+      this.builtinPromptDao = serializeJsonDao(new BuiltinPromptDaoImpl(), getSettingsPath);
     }
     return this.builtinPromptDao;
   }
 
   getBuiltinResourceDao(): BuiltinResourceDao {
     if (!this.builtinResourceDao) {
-      this.builtinResourceDao = serializeJsonDao(new BuiltinResourceDaoImpl());
+      this.builtinResourceDao = serializeJsonDao(new BuiltinResourceDaoImpl(), getSettingsPath);
     }
     return this.builtinResourceDao;
   }

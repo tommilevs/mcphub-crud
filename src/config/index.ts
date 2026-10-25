@@ -1,5 +1,6 @@
 import dotenv from 'dotenv';
 import { assertJsonDaoTransactionAccess } from '../services/jsonDaoTransaction.js';
+import { withJsonSettingsFileLock } from '../services/jsonSettingsFileLock.js';
 import {
   getSmartRoutingPath,
   assertSmartRoutingSettingsAvailable,
@@ -127,6 +128,7 @@ export const saveSettings = (settings: McpSettings, user?: IUser): boolean => {
   const settingsPath = getSettingsPath();
   try {
     assertJsonDaoTransactionAccess();
+    return withJsonSettingsFileLock(settingsPath, () => {
     const mergedSettings = dataService.mergeSettings!(loadOriginalSettings(), settings, user);
     assertSmartRoutingSettingsAvailable(mergedSettings);
     fs.writeFileSync(settingsPath, JSON.stringify(mergedSettings, null, 2), 'utf8');
@@ -137,6 +139,7 @@ export const saveSettings = (settings: McpSettings, user?: IUser): boolean => {
     lastModified = fs.statSync(settingsPath).mtimeMs;
 
     return true;
+    });
   } catch (error) {
     logger.error('Failed to save settings', { settingsPath, error });
     return false;

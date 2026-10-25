@@ -221,3 +221,23 @@ Full local Jest regression:344 suites/3150 tests passed,8 suites/55 tests skippe
 removed and absence asserted. This proves in-process coordination; it does not
 prove that old cross-process writers honor the filesystem lock or that live
 publication/DB-mode saga integration is complete.
+
+Shared filesystem locking now spans complete JSON factory operations, legacy
+config saves and migration diagnostics. The same reentrant lock is used by the
+atomic replacement helper; nested async calls retain ownership until completion.
+Read-only fallback does not grant lock ownership to a nested write. Lock records
+carry a version, random ownership token, PID and timestamp, without credentials.
+Unknown or stale locks are not removed speculatively.
+
+Actual separate Node child held the lock while the parent publication write was
+rejected, then released it and the parent reacquired successfully. Nested atomic
+replacement, lock metadata and read-only fallback tests passed. Child exited and
+all unique fixture directories were deleted with absence asserted. Full local
+regression:345 suites/3153 tests passed,8 suites/55 tests skipped,180.593seconds.
+After the record-format addition,16 targeted tests and backend typecheck passed.
+
+Release gate: crash recovery of an abandoned file lock still needs authoritative
+owner-death reconciliation before deployment. Do not use a timeout to steal a
+possibly active lock. Older binaries and external writers ignoring the protocol
+are outside the cooperative guarantee. Publication persistence/receipt, DB-mode
+transaction adapter and the execution saga still need integration.

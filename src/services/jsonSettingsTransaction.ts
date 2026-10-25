@@ -4,9 +4,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { McpSettings } from '../types/index.js';
 import { assertSmartRoutingSettingsAvailable } from '../utils/smartRoutingPath.js';
 import { assertJsonDaoTransactionAccess } from './jsonDaoTransaction.js';
+import { withJsonSettingsFileLock, SettingsTransactionConflict } from './jsonSettingsFileLock.js';
+export { SettingsTransactionConflict } from './jsonSettingsFileLock.js';
 
 const digest = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
-export class SettingsTransactionConflict extends Error {}
 
 /** Cooperative cross-process lock plus atomic replacement; mutation must be synchronous.
  * Legacy writers that ignore this lock still need migration before concurrent publication is enabled.
@@ -16,14 +17,10 @@ export function transactJsonSettings<T>(settingsPath: string,
   assertJsonDaoTransactionAccess();
   const target = path.resolve(settingsPath);
   const directory = path.dirname(target);
-  const lock = path.join(directory, `.${path.basename(target)}.mcphub-lock`);
   const token = randomUUID();
-  let lockFd: number;
-  try { lockFd = fs.openSync(lock, 'wx', 0o600); }
-  catch { throw new SettingsTransactionConflict('Settings transaction is busy or unavailable'); }
+  return withJsonSettingsFileLock(target, () => {
   let temporary: string | undefined;
   try {
-    fs.writeFileSync(lockFd, token, 'utf8');
     const original = fs.readFileSync(target);
     const before = digest(original);
     if (expectedDigest !== undefined && expectedDigest !== before) throw new SettingsTransactionConflict('Settings revision changed');
@@ -49,9 +46,7 @@ export function transactJsonSettings<T>(settingsPath: string,
     temporary = undefined;
     return { value: result.value, digest: digest(serialized) };
   } finally {
-    fs.closeSync(lockFd);
     if (temporary && fs.existsSync(temporary)) fs.unlinkSync(temporary);
-    // Never remove another participant's lock or automatically reclaim a stale lock.
-    if (fs.existsSync(lock) && fs.readFileSync(lock, 'utf8') === token) fs.unlinkSync(lock);
   }
+  });
 }
