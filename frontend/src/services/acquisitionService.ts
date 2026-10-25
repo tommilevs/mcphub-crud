@@ -22,7 +22,7 @@ export interface AcquisitionPlan {
     source: { repository: string | null };
   };
 }
-export interface AcquisitionOperation { operation_id: string; state: string; cancel_requested?: boolean }
+export interface AcquisitionOperation { operation_id: string; state: string; cancel_requested?: boolean; requires_reconciliation?: boolean; failure_code?: string | null }
 
 export async function findAcquisitionCandidates(objective: string) {
   return apiPost<ApiResponse<{ candidates: AcquisitionCandidate[] }>>('/market/acquisition/proposals', { objective });

@@ -108,4 +108,22 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect((await operations.cancel('alice', operation.operation_id)).state).toBe('rolled_back');
     expect(await operations.claim('alice', operation.operation_id)).toBeNull();
   });
+
+  test('uncertain native outcomes block forward progress until cleanup is reconciled', async () => {
+    const operations = new AcquisitionOperationRepository({ query: async (sql, args) => (await pool.query(sql, args)).rows });
+    const manifest = buildAcquisitionManifest({ name: 'fixture', installations: {
+      npm: { type: 'npm', command: 'npx', args: ['-y', 'fixture'] },
+    } } as unknown as MarketServer, '1.0.0', 'fixture-group');
+    const plan = await repository.create('alice', manifest);
+    const operation = await repository.authorize('alice', plan.plan_id, plan.manifest_digest, randomUUID());
+    const claim = await operations.claim('alice', operation.operation_id);
+    expect(await operations.requireReconciliation('bob', operation.operation_id, claim.claim_id)).toBe(false);
+    expect(await operations.requireReconciliation('alice', operation.operation_id, claim.claim_id)).toBe(true);
+    expect((await operations.get('alice', operation.operation_id)).requires_reconciliation).toBe(true);
+    expect(await operations.transition('alice', operation.operation_id, claim.claim_id, 'staging', 'starting')).toBeNull();
+    await operations.transition('alice', operation.operation_id, claim.claim_id, 'staging', 'failed', 'native_state_unknown');
+    expect((await operations.get('alice', operation.operation_id)).failure_code).toBe('native_state_unknown');
+    await operations.transition('alice', operation.operation_id, claim.claim_id, 'failed', 'rolled_back');
+    expect((await operations.get('alice', operation.operation_id)).requires_reconciliation).toBe(false);
+  });
 });

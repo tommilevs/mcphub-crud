@@ -19,7 +19,7 @@ export class AcquisitionOperationRepository {
 
   async get(owner: string, operationId: string) {
     if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
-    const rows = await this.db.query(`SELECT operation_id,plan_id,manifest_digest,state,cancel_requested,authorized_at,updated_at
+    const rows = await this.db.query(`SELECT operation_id,plan_id,manifest_digest,state,cancel_requested,requires_reconciliation,failure_code,authorized_at,updated_at
       FROM mcp_acquisition_operations WHERE operation_id=$1 AND owner=$2`, [operationId, owner]);
     return rows[0] ?? null;
   }
@@ -39,15 +39,25 @@ export class AcquisitionOperationRepository {
     return rows.length ? { ...rows[0], manifest: plan.manifest } : null;
   }
 
-  async transition(owner: string, operationId: string, claimId: string, from: string, to: string) {
+  async transition(owner: string, operationId: string, claimId: string, from: string, to: string, failureCode: string | null = null) {
     if (!uuid.test(operationId) || !uuid.test(claimId) || !canTransitionAcquisition(from, to)) {
       throw new AcquisitionInputError('Invalid acquisition state transition');
     }
-    const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET state=$5,updated_at=NOW()
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET state=$5,failure_code=$6,
+      requires_reconciliation=CASE WHEN $5='rolled_back' THEN FALSE ELSE requires_reconciliation END,updated_at=NOW()
       WHERE operation_id=$1 AND owner=$2 AND claim_id=$3 AND state=$4
       AND (NOT cancel_requested OR $5 IN ('failed','rolled_back'))
-      RETURNING operation_id,state,cancel_requested`, [operationId, owner, claimId, from, to]);
+      AND (NOT requires_reconciliation OR $5 IN ('failed','rolled_back'))
+      RETURNING operation_id,state,cancel_requested`, [operationId, owner, claimId, from, to, failureCode]);
     return rows[0] ?? null;
+  }
+
+  async requireReconciliation(owner: string, operationId: string, claimId: string) {
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations
+      SET requires_reconciliation=TRUE,failure_code='native_state_unknown',updated_at=NOW()
+      WHERE operation_id=$1 AND owner=$2 AND claim_id=$3 AND state IN ('staging','starting','verifying')
+      RETURNING operation_id`, [operationId, owner, claimId]);
+    return rows.length > 0;
   }
 
   async cancel(owner: string, operationId: string) {

@@ -104,6 +104,8 @@ export default function McpAcquisitionPanel() {
         </>}
         <p role="status" className="text-xs text-[var(--hub-ink-3)]">{!operation
           ? t('acquisition.notStarted', 'Nothing has been installed. This screen records authorization only.')
+          : operation.requires_reconciliation
+            ? t('acquisition.uncertain', 'Execution state is uncertain. Review is required before retrying; no automatic restart will occur.')
           : operation.state === 'authorized'
             ? t('acquisition.authorizedPending', 'Authorization saved. Installation has not started; the execution worker is not connected yet.')
             : operation.state === 'cancelled'

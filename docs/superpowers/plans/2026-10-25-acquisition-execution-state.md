@@ -83,3 +83,23 @@ TypeScript administrative-pipe tests and backend typecheck pass. Live service IP
 real npm installation, credentials, post-install MCP probing/publication and crash
 reconciliation remain acceptance gates. Typed TypeScript control adapters are added
 but acquisition execution worker integration is still pending.
+
+TypeScript installation-phase coordinator now connects an atomic PG claim to the
+typed native start/status/cancel adapters. It starts once, polls boundedly, sends
+cancellation once and advances staging->starting only after a known exit0. This
+does not publish tools, mark ready, or claim functional MCP verification. Failed
+or cancelled installation retains staging for verified cleanup rather than
+claiming rollback. Unknown/lost native responses retain the claim and persist
+requires_reconciliation with a static code; they never replay start or delete
+uncertain staging. The UI reports uncertainty explicitly. Guarded SQL transitions
+block forward progress while reconciliation is required, allowing only failure
+or verified rollback; rollback clears the flag.
+
+Local evidence:20 targeted service/controller/UI tests and both backend/frontend
+typechecks passed. New coordinator tests inject repository/native boundaries;
+they do not prove a real package installation. Real-PG coverage adds owner-bound
+reconciliation state, blocked forward transition, static failure reason and flag
+clearance after rollback. Hosted CI result pending for this source change.
+Remaining: installed package/bin resolution under the owned directory, native
+MCP connection with secret references, safe functional probe, group publication
+and rollback receipts, explicit execution trigger and restart reconciliation.
