@@ -19,7 +19,17 @@ remain visible as proposals but cannot become executable plans. No fake approval
 endpoint is introduced: a model boolean must never count as human authorization.
 HTTP plan creation and review UI follow this tested persistence boundary.
 
-Local evidence: 9 unit/controller tests pass, backend typecheck passes; real-PG
-suite skips without explicit disposable test credentials. Hosted CI result pending.
+Local evidence: 12 unit/controller tests pass, backend typecheck passes; real-PG
+suite skips without explicit disposable test credentials. Hosted run 40202273180 /
+job 121195762241 passed all 35 tests in five real-PG suites, including three plan
+storage tests (persistence/owner isolation/update rejection, expiry, digest mismatch).
 SQL trigger rejects UPDATE of the entire plan; expiry is filtered at read time.
 Lifecycle/authorization records must remain separate from immutable manifest data.
+
+Admin API: POST `/api/market/acquisition/plans` accepts catalog `serverName`, exact
+stable release `version` and existing `targetGroup` ID. Owner comes exclusively
+from the authenticated user. GET `/api/market/acquisition/plans/:id` returns only
+the same owner's unexpired plan. Responses remain `proposed` / `catalog_only`:
+neither a body field `approved` nor plan creation grants installation permission.
+Unit HTTP fixtures inject identities/config/storage; deployed identity acceptance
+and the user confirmation UI remain pending. Database absence yields 503.
