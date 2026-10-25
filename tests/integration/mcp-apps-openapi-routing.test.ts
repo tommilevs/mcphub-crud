@@ -519,7 +519,7 @@ postgresTest('Experience and Skills HTTP require current evidence and separate r
       }
       await request(app).put(`/api/attribution/tasks/${taskId}/review`).set('x-auth-token',token).send({revision:0,outcome:'success',trainingConsent:false}).expect(200);
     }
-    const proposal={title:'Fixture workflow',summary:'Read then write after reviewing the input',evidenceIds:ids,approved:false,scope:{servers:['fixture'],tools:['read','write']}};
+    const proposal={title:'Fixture workflow',summary:'Read then write after reviewing the input',evidenceIds:ids,approved:false,scope:{servers:['fixture'],tools:['fixture/read','fixture/write']}};
     await request(app).post('/api/experiences').set('x-auth-token',createUserToken(alice,false)).send(proposal).expect(403);
     const created=await request(app).post('/api/experiences').set('x-auth-token',token).send(proposal).expect(200);
     const experienceId=created.body.data.experience_id;
