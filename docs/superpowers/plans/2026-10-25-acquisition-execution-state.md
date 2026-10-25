@@ -185,3 +185,23 @@ creation is protected by a unique server name. Applying this helper must use an
 atomic current-settings transaction or equivalent durable DB transaction, not a
 sequence of stale DAO snapshots. Physical apply, operation-bound publication
 reservation/receipt, runtime/index refresh and final ready gate remain pending.
+
+`transactJsonSettings` now provides a synchronous current-document mutation,
+cooperative cross-process lock, optional expected revision, repeated content check,
+fsync and same-directory atomic replacement. It validates reserved Smart Routing
+names, preserves the existing file on callback/conflict failure and removes its
+own transaction files. It neither resets an unreadable document nor reclaims an
+unknown/stale lock automatically. Errors avoid printing document content.
+
+Evidence: five real-filesystem transaction tests plus four publication/rollback
+tests pass on Windows; backend typecheck passes. Fixtures use synthetic settings,
+verify unrelated data and external edit preservation, busy-lock ownership, stale
+revision rejection and cleanup. Every unique temporary fixture directory was
+removed and absence asserted. A rollback regression now retains object format
+when users added configured memberships, avoiding a new mixed legacy array.
+
+This adapter is not yet enabled for live publication. Legacy writers ignore its
+cooperative lock, and a noncooperative writer can still race the final rename;
+all relevant mutation paths must adopt a shared transaction protocol before
+claiming conflict-free concurrent publication. Cache invalidation, DB-mode adapter,
+durable receipt and operation saga remain integration work.

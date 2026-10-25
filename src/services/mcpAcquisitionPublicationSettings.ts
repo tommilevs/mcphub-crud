@@ -62,8 +62,11 @@ export function rollbackAcquisitionPublication(settings: McpSettings, receipt: P
   const next = structuredClone(settings);
   delete next.mcpServers[receipt.serverName];
   const group = next.groups?.find(item => item.id === receipt.groupId);
-  if (group) group.servers = group.servers.filter(entry => nameOf(entry) !== receipt.serverName).map(entry =>
-    typeof entry !== 'string' && receipt.legacyStrings.includes(entry.name) && equal(entry,
-      { name: entry.name, tools: 'all', prompts: 'all', resources: 'all' }) ? entry.name : entry) as typeof group.servers;
+  if (group) {
+    const remaining = group.servers.filter(entry => nameOf(entry) !== receipt.serverName);
+    const restoreLegacy = remaining.every(entry => typeof entry === 'string' ||
+      (receipt.legacyStrings.includes(entry.name) && equal(entry, { name: entry.name, tools: 'all', prompts: 'all', resources: 'all' })));
+    group.servers = (restoreLegacy ? remaining.map(nameOf) : remaining) as typeof group.servers;
+  }
   return next;
 }

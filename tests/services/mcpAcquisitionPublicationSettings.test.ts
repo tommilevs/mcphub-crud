@@ -32,3 +32,10 @@ test('rollback preserves unrelated edits and refuses changed or adopted resource
   const adopted = prepare(); adopted.settings.groups![1].servers = ['new'];
   expect(() => rollbackAcquisitionPublication(adopted.settings, adopted.receipt)).toThrow('reconciliation');
 });
+test('rollback retains new object memberships without creating mixed legacy arrays', () => {
+  const result = prepare();
+  (result.settings.groups![0].servers as any[]).push({ name: 'added-later', tools: ['read'] });
+  const rollback = rollbackAcquisitionPublication(result.settings, result.receipt);
+  expect(rollback.groups![0].servers.every(entry => typeof entry === 'object')).toBe(true);
+  expect(rollback.groups![0].servers).toContainEqual({ name: 'added-later', tools: ['read'] });
+});
