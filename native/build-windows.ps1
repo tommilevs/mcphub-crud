@@ -20,6 +20,8 @@ $build = if ($Action -eq 'test') { "`"$cargo`" test -p mcphub-runtime-core -p mc
 if ($Action -eq 'service') { $build = "`"$cargo`" build -p mcphub-runtime-service --release" }
 if ($Action -eq 'bundle') { $build = "`"$cargo`" build -p mcphub-runtime-service --release && cd tray && `"$cargo`" tauri build --bundles nsis" }
 $cargoDirectory = Split-Path -Parent $cargo
-$command = "cd /d `"$PSScriptRoot`" && call `"$devCmd`" -arch=x64 >nul && set `"LIB=$lib`" && set `"PATH=$cargoDirectory;%PATH%`" && $build"
-& cmd.exe /d /c $command
+# Expand PATH after VsDevCmd has installed the MSVC/SDK paths. Ordinary %PATH%
+# expansion happens before the batch runs and can select Git's Unix link.exe.
+$command = "cd /d `"$PSScriptRoot`" && call `"$devCmd`" -arch=x64 >nul && set `"LIB=$lib`" && set `"PATH=$cargoDirectory;!PATH!`" && $build"
+& cmd.exe /d /v:on /c $command
 if ($LASTEXITCODE -ne 0) { throw "Native Windows build failed with exit code $LASTEXITCODE" }
