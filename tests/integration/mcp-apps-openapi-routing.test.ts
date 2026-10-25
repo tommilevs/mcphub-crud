@@ -37,7 +37,7 @@ import { createGatewayProof } from '../../src/services/gatewayProvenance.js';
 import { ensureToolResultHistorySchema } from '../../src/db/toolResultHistorySchema.js';
 import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepository.js';
 import { ToolResultHistoryService } from '../../src/services/toolResultHistoryService.js';
-import { getToolResults,getToolResultById,getToolResultRaw,getToolResultRange,pinToolResult,getToolResultChunks,searchToolResultChunks } from '../../src/controllers/toolResultController.js';
+import { getToolResults,getToolResultById,getToolResultRaw,getToolResultRange,pinToolResult,getToolResultChunks,searchToolResultChunks,compareToolResults,getToolResultStats,getToolResultTimeline,getToolResultConversationTimeline,getToolResultLineage } from '../../src/controllers/toolResultController.js';
 import { generateEmbedding } from '../../src/services/vectorSearchService.js';
 
 let mockAttributionDb: {isInitialized?:boolean;query:(sql:string,parameters?:unknown[])=>Promise<any>} | undefined;
@@ -89,6 +89,11 @@ beforeAll(async () => {
   app.use('/api', auth, userContextMiddleware);
   app.put('/api/credentials/:name', updateMyCredential);
   app.get('/api/tool-results',getToolResults);
+  app.get('/api/tool-results/stats',getToolResultStats);
+  app.post('/api/tool-results/compare',compareToolResults);
+  app.get('/api/tool-results/timeline/:sessionId',getToolResultTimeline);
+  app.get('/api/tool-results/conversation-timeline/:conversationId',getToolResultConversationTimeline);
+  app.get('/api/tool-results/:id/lineage',getToolResultLineage);
   app.get('/api/tool-results/:id',getToolResultById);
   app.get('/api/tool-results/:id/raw',getToolResultRaw);
   app.get('/api/tool-results/:id/range',getToolResultRange);
@@ -326,7 +331,7 @@ postgresTest('History HTTP returns exact RAW bytes and enforces administrator ac
     mockAttributionDb=db;
     const repository=new ToolResultRepositoryDb(db);
     const history=new ToolResultHistoryService(repository);
-    const saved=(await history.capture({server:'http-fixture',tool:'read',durationMs:1,status:'success',username:alice,
+    const saved=(await history.capture({server:'http-fixture',tool:'read',durationMs:1,status:'success',username:alice,sessionId:'http-session',conversationId:'http-conversation',
       result:{content:[{type:'text',text:'immutable 😀\r\nXid 79'}],structuredContent:{counter:'9007199254740993'}}}))!;
     const metadata=(await history.capture({server:'http-fixture',tool:'read',durationMs:1,status:'success',username:alice,
       result:{content:[{type:'text',text:'omitted'}]},capturePayload:false,payloadOmissionReason:'fixture-disabled'}))!;
@@ -370,6 +375,28 @@ postgresTest('History HTTP returns exact RAW bytes and enforces administrator ac
     const reopened=await repository.findById(saved.resultId);
     expect(reopened).toMatchObject({raw:saved.raw,rawSha256:saved.rawSha256,pinned:true});
     expect(reopened!.useCount).toBeGreaterThanOrEqual(3);
+    const duplicate=(await history.capture({server:'http-fixture',tool:'read',durationMs:1,status:'success',username:alice,
+      sessionId:'http-session',conversationId:'http-conversation',parentResultId:saved.resultId,result:JSON.parse(saved.raw!)}))!;
+    const comparison=await request(app).post('/api/tool-results/compare').set('x-auth-token',token).send({resultIds:[saved.resultId,duplicate.resultId]}).expect(200);
+    expect(comparison.body.data).toMatchObject({sameRaw:true,totalBytes:saved.rawBytes*2});
+    expect(comparison.body.data.results.every((value:any)=>value.raw===undefined&&value.rawText===undefined)).toBe(true);
+    const omittedComparison=await request(app).post('/api/tool-results/compare').set('x-auth-token',token).send({resultIds:[saved.resultId,metadata.resultId]}).expect(200);
+    expect(omittedComparison.body.data.sameRaw).toBe(false);
+    await request(app).post('/api/tool-results/compare').set('x-auth-token',token).send({resultIds:[saved.resultId]}).expect(400);
+    await request(app).post('/api/tool-results/compare').set('x-auth-token',createUserToken(alice,false)).send({resultIds:[saved.resultId,duplicate.resultId]}).expect(403);
+    const stats=await request(app).get('/api/tool-results/stats').set('x-auth-token',token).query({username:alice}).expect(200);
+    expect(stats.body.data).toMatchObject({total:3,pinned:1,payloadAvailable:2,totalRawBytes:saved.rawBytes*2});
+    expect(stats.body.data.retrieval.searches).toBeGreaterThanOrEqual(1);
+    expect(stats.body.data.retrieval.lexicalFallbacks).toBeGreaterThanOrEqual(1);
+    await request(app).get('/api/tool-results/stats').set('x-auth-token',createUserToken(alice,false)).expect(403);
+    for(const timelineUrl of ['/api/tool-results/timeline/http-session','/api/tool-results/conversation-timeline/http-conversation']){
+      const timeline=await request(app).get(timelineUrl).set('x-auth-token',token).expect(200);
+      expect(timeline.body.data.map((value:any)=>value.resultId).sort()).toEqual([saved.resultId,duplicate.resultId].sort());
+      expect(timeline.body.data.every((value:any)=>value.raw===undefined)).toBe(true);
+    }
+    const lineage=await request(app).get(`/api/tool-results/${duplicate.resultId}/lineage`).set('x-auth-token',token).expect(200);
+    expect(lineage.body.data.ancestors.map((value:any)=>value.resultId)).toEqual([saved.resultId]);
+    expect(lineage.body.data.ancestors[0].raw).toBeUndefined();
     await request(app).get('/api/tool-results/00000000-0000-0000-0000-000000000000/raw').set('x-auth-token',token).expect(404);
   }finally{
     mockAttributionDb=undefined;
