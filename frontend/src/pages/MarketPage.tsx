@@ -19,6 +19,7 @@ import RegistryServerCard from '@/components/RegistryServerCard';
 import RegistryServerDetail from '@/components/RegistryServerDetail';
 import Pagination from '@/components/ui/Pagination';
 import CursorPagination from '@/components/ui/CursorPagination';
+import McpAcquisitionPanel from '@/components/McpAcquisitionPanel';
 
 const MarketPage: React.FC = () => {
   const { t } = useTranslation();
@@ -258,6 +259,7 @@ const MarketPage: React.FC = () => {
         </div>
       </div>
 
+      <McpAcquisitionPanel />
       {/* Tabs */}
       <div className="mb-5">
         <div style={{ borderBottom: '1px solid var(--hub-line)' }}>

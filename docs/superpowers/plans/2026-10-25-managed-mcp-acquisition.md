@@ -1,7 +1,8 @@
 # Missing capability discovery and managed MCP installation
 
 Status: required extension to the full application; catalog proposals and immutable
-plan persistence/admin API implemented; authorization/execution/UI remain pending.
+plan persistence/admin API and dashboard authorization/review UI implemented;
+execution, credentials, management MCP tools and end-to-end installation remain pending.
 
 ## User outcome
 
