@@ -19,3 +19,10 @@ test('publication rejects a mismatched operation receipt before reaching the dat
       baseDigest: 'a'.repeat(64), receipt: { operationId: 'another-operation' } } as any)).rejects.toThrow('Invalid publication');
   expect(query).not.toHaveBeenCalled();
 });
+
+test('generic transitions cannot declare readiness without runtime activation', async () => {
+  const query=jest.fn().mockResolvedValue([]);const repository=new AcquisitionOperationRepository({query});
+  await expect(repository.transition('alice','a5ed66f5-a21e-4acd-85d9-b1dbbfe120dc',
+    'b5ed66f5-a21e-4acd-85d9-b1dbbfe120dc','verifying','ready')).rejects.toThrow('activation');
+  expect(query).not.toHaveBeenCalled();
+});

@@ -103,6 +103,7 @@ export class AcquisitionOperationRepository {
   }
 
   async transition(owner: string, operationId: string, claimId: string, from: string, to: string, failureCode: string | null = null) {
+    if (to === 'ready') throw new AcquisitionInputError('Readiness requires verified runtime activation');
     if (!uuid.test(operationId) || !uuid.test(claimId) || !canTransitionAcquisition(from, to)) {
       throw new AcquisitionInputError('Invalid acquisition state transition');
     }
@@ -113,6 +114,41 @@ export class AcquisitionOperationRepository {
       AND (NOT requires_reconciliation OR $5 IN ('failed','rolled_back'))
       RETURNING operation_id,state,cancel_requested`, [operationId, owner, claimId, from, to, failureCode]);
     return rows[0] ?? null;
+  }
+
+  async claimActivation(owner: string, operationId: string) {
+    if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
+    const activationClaim = randomUUID();
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET activation_claim_id=$3,updated_at=NOW()
+      WHERE operation_id=$1 AND owner=$2 AND state='verifying' AND claim_id IS NOT NULL
+      AND publication IS NOT NULL AND publication_applied_digest IS NOT NULL AND activation_claim_id IS NULL
+      AND NOT cancel_requested AND NOT requires_reconciliation
+      RETURNING claim_id,activation_claim_id,publication,publication_applied_digest`, [operationId, owner, activationClaim]);
+    return rows[0] ?? null;
+  }
+
+  /** Only the runtime/index coordinator supplies this evidence, after observing actual activation. */
+  async completeActivation(owner: string, operationId: string, activationClaim: string, evidence: {
+    serverName: string; tools: string[]; indexStatus: 'verified' | 'disabled';
+  }) {
+    if (!uuid.test(operationId) || !uuid.test(activationClaim) || !evidence?.serverName ||
+        !Array.isArray(evidence.tools) || !evidence.tools.length || evidence.tools.some(tool => typeof tool !== 'string' || !tool) ||
+        !['verified', 'disabled'].includes(evidence.indexStatus)) throw new AcquisitionInputError('Invalid activation evidence');
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations o
+      SET state='ready',activation=$4::jsonb,activated_at=NOW(),updated_at=NOW()
+      FROM mcp_acquisition_plans p WHERE o.operation_id=$1 AND o.owner=$2 AND o.activation_claim_id=$3
+      AND o.state='verifying' AND NOT o.cancel_requested AND NOT o.requires_reconciliation
+      AND o.activation IS NULL AND o.publication_applied_digest IS NOT NULL AND p.plan_id=o.plan_id
+      AND p.manifest->>'serverName'=$5 AND o.publication->'receipt'->>'serverName'=$5
+      AND $6::jsonb @> (o.inspection->'tools')
+      AND ((o.verification='discovery_only' AND NOT (p.manifest ? 'probe') AND o.probe_claim_id IS NULL)
+        OR (o.verification='functional' AND o.inspection->>'resultId'=o.probe_result_id::text AND EXISTS(
+          SELECT 1 FROM tool_results r WHERE r.result_id=o.probe_result_id AND r.username=$2 AND r.key_id IS NULL
+          AND r.payload_available AND r.raw IS NOT NULL AND r.status='success'
+          AND r.objective=('acquisition:'||o.operation_id::text)
+          AND r.server=p.manifest->>'serverName' AND r.tool=p.manifest->'probe'->>'tool')))
+      RETURNING o.operation_id`, [operationId, owner, activationClaim, JSON.stringify(evidence), evidence.serverName, JSON.stringify(evidence.tools)]);
+    return rows.length > 0;
   }
 
   async requireReconciliation(owner: string, operationId: string, claimId: string) {

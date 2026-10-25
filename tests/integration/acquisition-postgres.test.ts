@@ -168,6 +168,34 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     await expect(pool.query('UPDATE mcp_acquisition_operations SET publication_applied_digest=NULL WHERE operation_id=$1',[id])).rejects.toThrow('immutable');
   });
 
+  test('ready requires one activation claim after publication and verified tool coverage', async () => {
+    const operations=new AcquisitionOperationRepository({query:async(sql,args)=>(await pool.query(sql,args)).rows});
+    const manifest=buildAcquisitionManifest({name:'fixture',installations:{npm:{type:'npm',command:'npx',args:['-y','fixture']}}} as unknown as MarketServer,'1.0.0','fixture-group');
+    const plan=await repository.create('alice',manifest);
+    const operation=await repository.authorize('alice',plan.plan_id,plan.manifest_digest,randomUUID());
+    const id=operation.operation_id,claim=await operations.claim('alice',id);
+    await operations.transition('alice',id,claim.claim_id,'staging','starting');
+    await operations.beginVerification('alice',id);
+    await operations.recordInspection('alice',id,claim.claim_id,{verification:'discovery_only',tools:['ping']});
+    expect(await operations.claimActivation('alice',id)).toBeNull();
+    await expect(operations.transition('alice',id,claim.claim_id,'verifying','ready')).rejects.toThrow('activation');
+    const prepared=prepareAcquisitionPublication({mcpServers:{},groups:[{id:'fixture-group',name:'Fixture',servers:[]}]},
+      manifest,id,'alice',{command:'node.exe',args:['fixture.js'],cwd:'owned'},['ping']);
+    expect(await operations.reservePublication('alice',id,claim.claim_id,{storage:'json',settingsPath:'/synthetic/settings.json',baseDigest:'a'.repeat(64),receipt:prepared.receipt})).toBe(true);
+    expect(await operations.claimActivation('alice',id)).toBeNull();
+    await operations.recordPublicationApplied('alice',id,claim.claim_id,'b'.repeat(64));
+    expect(await operations.claimActivation('bob',id)).toBeNull();
+    const claims=(await Promise.all(Array.from({length:5},()=>operations.claimActivation('alice',id)))).filter(Boolean);
+    expect(claims).toHaveLength(1);
+    const token=claims[0].activation_claim_id;
+    const evidence={serverName:'fixture',tools:['ping'],indexStatus:'verified' as const};
+    expect(await operations.completeActivation('alice',id,randomUUID(),evidence)).toBe(false);
+    expect(await operations.completeActivation('alice',id,token,{...evidence,tools:['wrong']})).toBe(false);
+    expect(await operations.completeActivation('alice',id,token,evidence)).toBe(true);
+    expect((await operations.get('alice',id)).state).toBe('ready');
+    expect(await operations.completeActivation('alice',id,token,evidence)).toBe(false);
+  });
+
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
     const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
     const operations = new AcquisitionOperationRepository(db);
