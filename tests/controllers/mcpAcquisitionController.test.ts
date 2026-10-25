@@ -1,6 +1,7 @@
 import express from 'express';
 import request from 'supertest';
-import { proposeMcpAcquisition, createMcpAcquisitionPlan, getMcpAcquisitionPlan, authorizeMcpAcquisitionPlan } from '../../src/controllers/mcpAcquisitionController.js';
+import { proposeMcpAcquisition, createMcpAcquisitionPlan, getMcpAcquisitionPlan, authorizeMcpAcquisitionPlan,
+  getMcpAcquisitionOperation, cancelMcpAcquisitionOperation } from '../../src/controllers/mcpAcquisitionController.js';
 import { loadSettings } from '../../src/config/configManager.js';
 import { getMarketServers } from '../../src/services/marketService.js';
 import { requireAdminMiddleware } from '../../src/utils/requireAdmin.js';
@@ -19,6 +20,8 @@ app.post('/proposals', proposeMcpAcquisition);
 app.post('/plans', createMcpAcquisitionPlan);
 app.get('/plans/:id', getMcpAcquisitionPlan);
 app.post('/plans/:id/authorize', authorizeMcpAcquisitionPlan);
+app.get('/operations/:id', getMcpAcquisitionOperation);
+app.post('/operations/:id/cancel', cancelMcpAcquisitionOperation);
 beforeEach(() => { jest.resetAllMocks(); username = undefined; authMethod = undefined; });
 
 test('shared admin gate denies requests without admin identity before catalog access', async () => {
@@ -103,4 +106,22 @@ test('dashboard approval requires an exact digest and rejects unavailable plans'
   await request(app).post(endpoint).send({ approved: true }).expect(400);
   mockQuery.mockResolvedValue([]);
   await request(app).post(endpoint).send({ digest: 'a'.repeat(64), idempotencyKey: '00000000-0000-4000-8000-000000000001' }).expect(409);
+});
+
+test('operation reads and cancellation bind authenticated owner and conceal missing operations', async () => {
+  const endpoint = '/operations/00000000-0000-4000-8000-000000000000';
+  await request(app).get(endpoint).expect(401);
+  username = 'alice';
+  mockQuery.mockResolvedValue([]);
+  await request(app).get(endpoint).expect(404);
+  await request(app).post(endpoint + '/cancel').send({ owner: 'bob' }).expect(404);
+  expect(mockQuery.mock.calls.every(call => call[1][1] === 'alice')).toBe(true);
+});
+
+test('cancellation reports active cleanup as pending, never as completed cancellation', async () => {
+  username = 'alice';
+  mockQuery.mockResolvedValue([{ operation_id: 'fixture', state: 'starting', cancel_requested: true }]);
+  const response = await request(app).post('/operations/00000000-0000-4000-8000-000000000000/cancel').expect(200);
+  expect(response.body.data).toMatchObject({ state: 'starting', cancel_requested: true });
+  expect(JSON.stringify(response.body)).not.toContain('claim_id');
 });

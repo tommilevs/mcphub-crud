@@ -4,6 +4,7 @@ import { getMarketServers } from '../services/marketService.js';
 import { AcquisitionInputError, proposeMcpServers } from '../services/mcpAcquisitionService.js';
 import { getAppDataSource } from '../db/connection.js';
 import { AcquisitionPlanRepository, buildAcquisitionManifest } from '../services/mcpAcquisitionPlan.js';
+import { AcquisitionOperationRepository } from '../services/mcpAcquisitionOperation.js';
 
 /** Admin route: complete configured names are used only for duplicate exclusion. */
 export async function proposeMcpAcquisition(req: Request, res: Response): Promise<void> {
@@ -95,3 +96,22 @@ export async function authorizeMcpAcquisitionPlan(req: Request, res: Response): 
     res.status(503).json({ success: false, message: 'Acquisition authorization is unavailable' });
   }
 }
+
+async function operationRequest(req: Request, res: Response, cancel: boolean): Promise<void> {
+  const owner = ownerOf(req);
+  if (!owner) { res.status(401).json({ success: false, message: 'Authenticated owner is required' }); return; }
+  try {
+    const repository = new AcquisitionOperationRepository(getAppDataSource());
+    const result = cancel ? await repository.cancel(owner, req.params.id as string)
+      : await repository.get(owner, req.params.id as string);
+    if (!result) { res.status(404).json({ success: false, message: 'Operation is unavailable' }); return; }
+    res.json({ success: true, data: result });
+  } catch (error) {
+    if (error instanceof AcquisitionInputError) {
+      res.status(400).json({ success: false, message: error.message }); return;
+    }
+    res.status(503).json({ success: false, message: 'Acquisition operation storage is unavailable' });
+  }
+}
+export const getMcpAcquisitionOperation = (req: Request, res: Response) => operationRequest(req, res, false);
+export const cancelMcpAcquisitionOperation = (req: Request, res: Response) => operationRequest(req, res, true);

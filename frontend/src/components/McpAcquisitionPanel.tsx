@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { useAuth } from '../contexts/AuthContext';
 import type { Group } from '../types';
 import { findAcquisitionCandidates, acquisitionGroups, prepareAcquisitionPlan, approveAcquisitionPlan,
+  getAcquisitionOperation, cancelAcquisitionOperation,
   type AcquisitionCandidate, type AcquisitionPlan, type AcquisitionOperation } from '../services/acquisitionService';
 
 /** Explicit review surface. Authorization is separate from installation execution. */
@@ -51,6 +52,12 @@ export default function McpAcquisitionPanel() {
     if (!result.success || !result.data) throw new Error(result.message || t('app.error'));
     setOperation(result.data);
   });
+  const updateOperation = (cancel = false) => perform(async () => {
+    if (!operation) return;
+    const result = await (cancel ? cancelAcquisitionOperation : getAcquisitionOperation)(operation.operation_id);
+    if (!result.success || !result.data) throw new Error(result.message || t('app.error'));
+    setOperation(result.data);
+  });
   return <details className="mb-5 rounded-lg border border-[var(--hub-line)] bg-[var(--hub-surface)] p-4">
     <summary className="cursor-pointer text-sm font-medium">{t('acquisition.title', 'Find a missing capability')}</summary>
     <div className="mt-3 space-y-3 text-sm">
@@ -95,9 +102,20 @@ export default function McpAcquisitionPanel() {
             <span>{t('acquisition.confirm', 'I reviewed this exact package, version and target group and authorize its installation.')}</span></label>
           <button type="button" className="hub-btn" disabled={busy || !reviewed} onClick={approve}>{t('acquisition.authorize', 'Save authorization')}</button>
         </>}
-        <p role="status" className="text-xs text-[var(--hub-ink-3)]">{operation
-          ? t('acquisition.authorizedPending', 'Authorization saved. Installation has not started; the execution worker is not connected yet.')
-          : t('acquisition.notStarted', 'Nothing has been installed. This screen records authorization only.')}</p>
+        <p role="status" className="text-xs text-[var(--hub-ink-3)]">{!operation
+          ? t('acquisition.notStarted', 'Nothing has been installed. This screen records authorization only.')
+          : operation.state === 'authorized'
+            ? t('acquisition.authorizedPending', 'Authorization saved. Installation has not started; the execution worker is not connected yet.')
+            : operation.state === 'cancelled'
+              ? t('acquisition.cancelled', 'Cancelled before execution.')
+              : operation.cancel_requested && !['ready', 'failed', 'rolled_back'].includes(operation.state)
+                ? t('acquisition.cancelling', 'Cancellation requested. Waiting for the worker to finish cleanup.')
+                : t(`acquisition.state.${operation.state}`, operation.state)}</p>
+        {operation && <div className="flex flex-wrap gap-2">
+          <button type="button" className="hub-btn" disabled={busy} onClick={() => updateOperation()}>{t('acquisition.refresh', 'Refresh status')}</button>
+          {['authorized', 'staging', 'starting', 'verifying'].includes(operation.state) &&
+            <button type="button" className="hub-btn" disabled={busy || operation.cancel_requested} onClick={() => updateOperation(true)}>{t('acquisition.cancel', 'Cancel installation')}</button>}
+        </div>}
       </section>}
       {busy && <p role="status">{t('app.loading', 'Loading…')}</p>}
       {error && <p role="alert" className="break-words text-[var(--hub-err)]">{error}</p>}

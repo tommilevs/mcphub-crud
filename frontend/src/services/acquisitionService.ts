@@ -22,7 +22,7 @@ export interface AcquisitionPlan {
     source: { repository: string | null };
   };
 }
-export interface AcquisitionOperation { operation_id: string; state: string }
+export interface AcquisitionOperation { operation_id: string; state: string; cancel_requested?: boolean }
 
 export async function findAcquisitionCandidates(objective: string) {
   return apiPost<ApiResponse<{ candidates: AcquisitionCandidate[] }>>('/market/acquisition/proposals', { objective });
@@ -35,4 +35,10 @@ export async function approveAcquisitionPlan(plan: AcquisitionPlan, idempotencyK
   return apiPost<ApiResponse<AcquisitionOperation>>(`/market/acquisition/plans/${encodeURIComponent(plan.plan_id)}/authorize`, {
     digest: plan.manifest_digest, idempotencyKey,
   });
+}
+export async function getAcquisitionOperation(id: string) {
+  return apiGet<ApiResponse<AcquisitionOperation>>(`/market/acquisition/operations/${encodeURIComponent(id)}`);
+}
+export async function cancelAcquisitionOperation(id: string) {
+  return apiPost<ApiResponse<AcquisitionOperation>>(`/market/acquisition/operations/${encodeURIComponent(id)}/cancel`);
 }
