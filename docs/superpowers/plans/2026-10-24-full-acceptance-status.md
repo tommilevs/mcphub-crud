@@ -58,12 +58,17 @@ overflow. Translation and API responses were stubbed, so this does not establish
 deployed localization, backend persistence or whole-page acceptance. The fixture
 server and its browser tab were closed after verification.
 
-The refreshed official Windows bundle contains runtime source through `746dcd2`
-and the installer preflight fix from `41ee8af`. Backend build, frontend typecheck
+The refreshed official Windows bundle contains runtime source through `47d089d`,
+the installer preflight fix from `41ee8af` and textarea CSS from `a0e9a74`.
+Backend build, frontend typecheck
 and frontend build passed; all six current index assets occur in the generated
-NSIS manifest. The 58.12 MiB installer SHA-256 is
-`B0BE14F61D2C13C3CED6A5DF1F0111D6F6DA8BD5E8212CAC20F5E59A4A067472`.
+NSIS manifest. The 58.13 MiB installer SHA-256 is
+`06751EA5F3F3545CE80E6D9150C9E544AA6F14A457328962AA17B96D1D5BA5C3`.
 Packaging success does not establish wizard or production installation acceptance.
+The refreshed staged runtime passed the isolated install/login/upgrade/data
+retention/uninstall lifecycle again. No temporary acceptance service remains.
+WindowsSandbox.exe is absent on this host; clean full-NSIS acceptance needs a
+separate Windows environment. Production gateway and launch tasks were untouched.
 
 The concurrent HTTP acceptance run
 [40171211042](https://github.com/tommilevs/mcphub-crud/actions/runs/40171211042)
