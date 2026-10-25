@@ -16,7 +16,9 @@ public static class WizardButtons {
   public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
 }
 '@
-$process=Start-Process -FilePath $InstallerPath -ArgumentList "/D=$Destination" -WindowStyle Hidden -PassThru
+# This is the interactive UI under test on a disposable runner, not a background
+# helper. A hidden wizard has no accessible top-level UIAutomation window.
+$process=Start-Process -FilePath $InstallerPath -ArgumentList "/D=$Destination" -WindowStyle Normal -PassThru
 $destinationObserved=$false;$finished=$false;$passwordAcknowledged=$false;$lastPage=''
 $windowCount=0;$visibleButtonCount=0;$lastAction='none';$actionCount=0
 try{
@@ -25,6 +27,12 @@ try{
     $process.Refresh()
     if($process.HasExited){break}
     $owners=@($process.Id)
+    # NSIS may keep its launcher alive while a child owns the actual wizard.
+    $processTree=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId)
+    do{
+      $children=@($processTree | Where-Object {$owners -contains [int]$_.ParentProcessId -and $owners -notcontains [int]$_.ProcessId} | ForEach-Object {[int]$_.ProcessId})
+      $owners+=$children
+    }while($children.Count -gt 0)
     $passwordOwners=@(Get-CimInstance Win32_Process -Filter "Name='mcphub-runtime-service.exe'" | Where-Object {
       $_.ExecutablePath -eq (Join-Path $Destination 'mcphub-runtime-service.exe') -and $_.CommandLine -match '--show-initial-password'
     } | ForEach-Object {[int]$_.ProcessId})
