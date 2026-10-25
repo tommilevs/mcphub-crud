@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { DataSource } from 'typeorm';
+import type { DataSource, EntityManager } from 'typeorm';
 import { Server } from '../db/entities/Server.js';
 import { Group } from '../db/entities/Group.js';
 import type { McpSettings } from '../types/index.js';
@@ -15,6 +15,29 @@ export function acquisitionStoredServerDigest(server: Server): string {
   const fields = Object.entries(server).filter(([key]) => !['createdAt', 'updatedAt'].includes(key))
     .sort(([left], [right]) => left.localeCompare(right));
   return createHash('sha256').update(JSON.stringify(Object.fromEntries(fields))).digest('hex');
+}
+
+/** Short validation transaction. Runtime/index work must happen outside this callback. */
+export async function withValidatedPostgresPublication<T>(db: Pick<DataSource, 'transaction'>,
+  reservation: PostgresPublicationReservation, work: (manager: EntityManager) => Promise<T>) {
+  if (reservation.storage !== 'postgres') throw new Error('Publication belongs to a different settings store');
+  return db.transaction('SERIALIZABLE', async manager => {
+    await manager.query('LOCK TABLE "servers", "groups" IN SHARE ROW EXCLUSIVE MODE');
+    const receipt = reservation.receipt;
+    const server = await manager.getRepository(Server).findOneBy({ id: reservation.serverId, name: receipt.serverName });
+    if (!server || acquisitionStoredServerDigest(server) !== reservation.storedServerDigest) {
+      throw new Error('Publication changed after application; activation requires reconciliation');
+    }
+    const groups = await manager.getRepository(Group).find({ select: { id: true, name: true, servers: true } });
+    const current: McpSettings = { mcpServers: { [receipt.serverName]: receipt.server },
+      groups: groups.map(group => ({ id: group.id, name: group.name, servers: group.servers })) as McpSettings['groups'] };
+    rollbackAcquisitionPublication(current, receipt); // Comparison only; no returned data is persisted.
+    if (!groups.some(group => group.id === receipt.groupId && group.servers.some(entry =>
+      (typeof entry === 'string' ? entry : entry.name) === receipt.serverName))) {
+      throw new Error('Publication membership disappeared; activation requires reconciliation');
+    }
+    return work(manager);
+  });
 }
 
 /** Remove only the unchanged row and owned membership. Runtime cleanup and lifecycle commit follow separately. */

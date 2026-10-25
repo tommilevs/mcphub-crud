@@ -10,6 +10,7 @@ import { DataSource } from 'typeorm';
 import { Server as StoredServer } from '../../src/db/entities/Server.js';
 import { Group as StoredGroup } from '../../src/db/entities/Group.js';
 import { publishPostgresAcquisition, rollbackPostgresAcquisition } from '../../src/services/mcpAcquisitionPostgresPublication.js';
+import { activatePostgresAcquisition } from '../../src/services/mcpAcquisitionActivationWorker.js';
 
 const postgresDescribe = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
@@ -229,6 +230,15 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect((await settingsDb.getRepository(StoredGroup).findOneByOrFail({id:group.id})).servers).toEqual([{name:manifest.serverName,tools:['ping'],prompts:[],resources:[]}]);
     expect((await operations.getPublication('alice',id)).publication).toMatchObject({storage:'postgres',serverId:stored.id});
     expect((await operations.getPublication('alice',id)).publication_applied_digest).toBe(applied.digest);
+    const activated=await activatePostgresAcquisition('alice',id,settingsDb,{repository:operations,
+      observe:async receipt=>{
+        // This write must not block: runtime observation is outside the settings transaction.
+        await settingsDb.getRepository(StoredGroup).update({id:group.id},{description:'unrelated user edit'});
+        return {serverName:receipt.serverName,tools:['ping'],indexStatus:'disabled' as const};
+      }});
+    expect(activated.status).toBe('ready');
+    expect((await operations.get('alice',id)).state).toBe('ready');
+    expect((await settingsDb.getRepository(StoredGroup).findOneByOrFail({id:group.id})).description).toBe('unrelated user edit');
     const rejected={...input,manifest:{...manifest,serverName:'rejected-fixture'},operationId:randomUUID()};
     await expect(publishPostgresAcquisition(settingsDb,rejected,randomUUID())).rejects.toThrow('reservation');
     expect(await settingsDb.getRepository(StoredServer).findOneBy({name:'rejected-fixture'})).toBeNull();
@@ -244,6 +254,22 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect(await settingsDb.getRepository(StoredServer).findOneBy({id:stored.id})).toBeNull();
     expect(await settingsDb.getRepository(StoredServer).findOneBy({id:unrelated.id})).not.toBeNull();
     expect((await settingsDb.getRepository(StoredGroup).findOneByOrFail({id:group.id})).servers).toEqual([{name:unrelated.name,tools:['read']}]);
+    const conflictManifest={...manifest,serverName:'activation-conflict'};
+    const conflictPlan=await repository.create('alice',conflictManifest);
+    const conflict=await repository.authorize('alice',conflictPlan.plan_id,conflictPlan.manifest_digest,randomUUID());
+    const conflictClaim=await operations.claim('alice',conflict.operation_id);
+    await operations.transition('alice',conflict.operation_id,conflictClaim.claim_id,'staging','starting');
+    await operations.beginVerification('alice',conflict.operation_id);
+    await operations.recordInspection('alice',conflict.operation_id,conflictClaim.claim_id,{verification:'discovery_only',tools:['ping']});
+    await publishPostgresAcquisition(settingsDb,{...input,manifest:conflictManifest,operationId:conflict.operation_id},conflictClaim.claim_id);
+    const changed=await activatePostgresAcquisition('alice',conflict.operation_id,settingsDb,{repository:operations,
+      observe:async receipt=>{
+        await settingsDb.getRepository(StoredServer).update({name:receipt.serverName},{enabled:false});
+        return {serverName:receipt.serverName,tools:['ping'],indexStatus:'disabled' as const};
+      }});
+    expect(changed.status).toBe('reconciliation_required');
+    expect((await operations.get('alice',conflict.operation_id)).requires_reconciliation).toBe(true);
+    expect((await settingsDb.getRepository(StoredServer).findOneByOrFail({name:conflictManifest.serverName})).enabled).toBe(false);
   });
 
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
