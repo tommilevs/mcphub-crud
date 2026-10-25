@@ -53,6 +53,14 @@ try{
   $password=[Text.Encoding]::UTF8.GetString($plain);[Array]::Clear($plain,0,$plain.Length)
   Assert-Login $password
   if($CheckTray){
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class TrayWindowEvidence {
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr handle);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
+}
+'@
     $trayStart=[Diagnostics.ProcessStartInfo]::new((Join-Path $install 'mcphub-tray.exe'))
     $trayStart.ArgumentList.Add('--open-dashboard')
     $trayStart.UseShellExecute=$false
@@ -72,15 +80,23 @@ try{
       if($tray.MainWindowHandle -eq [IntPtr]::Zero -or $tray.MainWindowTitle -notmatch 'MCPHub'){
         throw 'Installed tray did not create its dashboard window.'
       }
+      $dashboardHandle=$tray.MainWindowHandle
+      if(-not $tray.WaitForInputIdle(10000) -or -not [TrayWindowEvidence]::IsWindowVisible($dashboardHandle)){
+        throw 'Installed dashboard did not become visible and ready.'
+      }
       if(-not $tray.CloseMainWindow()){throw 'Installed dashboard did not accept a close request.'}
       $deadline=[DateTime]::UtcNow.AddSeconds(10)
       do{
         Start-Sleep -Milliseconds 100
         $tray.Refresh()
         if($tray.HasExited){throw "Closing the dashboard terminated the tray (code $($tray.ExitCode))."}
-        if($tray.MainWindowHandle -eq [IntPtr]::Zero){break}
+        if(-not [TrayWindowEvidence]::IsWindowVisible($dashboardHandle)){break}
       }while([DateTime]::UtcNow -lt $deadline)
-      if($tray.MainWindowHandle -ne [IntPtr]::Zero){throw 'Closing the dashboard did not hide its window.'}
+      # A process can expose another helper window after hiding its dashboard;
+      # inspect the exact original HWND instead of rediscovering MainWindowHandle.
+      if(-not [TrayWindowEvidence]::IsWindow($dashboardHandle) -or [TrayWindowEvidence]::IsWindowVisible($dashboardHandle)){
+        throw 'Closing the dashboard did not retain its hidden window.'
+      }
       Wait-Gateway
       Assert-Login $password
       Write-Output 'Installed tray passed: dashboard window created, close hides without exiting, service gateway and login remain available.'
