@@ -168,3 +168,20 @@ acceptance for competing verification continuations, unavailable evidence reject
 receipt persistence and no receipt overwrite; current source CI pending. Prior
 commitc02a602 real-PG run40215724564/job121236311791 passed39tests/5suites, including
 single concurrent probe and owner-bound immutable RAW attachment.
+
+Publication settings transaction preparation is implemented as a pure helper,
+not yet a live persistence adapter. It builds one private owner-scoped native
+server and an explicit verified-tools selection for the target group, with no
+automatic prompt/resource exposure. Existing names, dangling references and
+target aliases cause a conflict. It preserves unrelated settings and isolates its
+receipt from mutable configuration references. Legacy string memberships are
+normalized on publication and restored on rollback only if still unchanged.
+Rollback compares current server/entry with its receipt and refuses to remove
+resources edited or adopted by another group; it never restores an old global
+settings snapshot. Three targeted tests and backend typecheck pass.
+
+Persistence finding: existing JSON DAOs load/save whole settings, while DB server
+creation is protected by a unique server name. Applying this helper must use an
+atomic current-settings transaction or equivalent durable DB transaction, not a
+sequence of stale DAO snapshots. Physical apply, operation-bound publication
+reservation/receipt, runtime/index refresh and final ready gate remain pending.
