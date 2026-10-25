@@ -2,7 +2,7 @@ jest.mock('openid-client', () => ({}));
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { randomBytes } from 'node:crypto';
+import { randomBytes,randomUUID,createHash } from 'node:crypto';
 import { Client as PgClient, Pool } from 'pg';
 import type { Server as HttpServer } from 'node:http';
 import express from 'express';
@@ -39,8 +39,11 @@ import { ToolResultRepositoryDb } from '../../src/db/repositories/ToolResultRepo
 import { ToolResultHistoryService } from '../../src/services/toolResultHistoryService.js';
 import { getToolResults,getToolResultById,getToolResultRaw,getToolResultRange,pinToolResult,getToolResultChunks,searchToolResultChunks,compareToolResults,getToolResultStats,getToolResultTimeline,getToolResultConversationTimeline,getToolResultLineage } from '../../src/controllers/toolResultController.js';
 import { generateEmbedding } from '../../src/services/vectorSearchService.js';
+import { previewDataset,exportDataset } from '../../src/controllers/datasetController.js';
+import { saveTaskReview } from '../../src/controllers/taskReviewController.js';
+import { saveToolResultReview } from '../../src/controllers/toolResultReviewController.js';
 
-let mockAttributionDb: {isInitialized?:boolean;query:(sql:string,parameters?:unknown[])=>Promise<any>} | undefined;
+let mockAttributionDb: {isInitialized?:boolean;query:(sql:string,parameters?:unknown[])=>Promise<any>;transaction?:(work:(db:any)=>Promise<any>)=>Promise<any>} | undefined;
 jest.mock('../../src/db/connection.js',()=>{
   const actual=jest.requireActual('../../src/db/connection.js');
   return {...actual,getAppDataSource:()=>mockAttributionDb??actual.getAppDataSource()};
@@ -100,6 +103,10 @@ beforeAll(async () => {
   app.patch('/api/tool-results/:id/pin',pinToolResult);
   app.get('/api/tool-results/:id/chunks',getToolResultChunks);
   app.get('/api/tool-results/:id/search',searchToolResultChunks);
+  app.put('/api/tool-results/:id/review',saveToolResultReview);
+  app.put('/api/attribution/tasks/:taskId/review',saveTaskReview);
+  app.post('/api/datasets/preview',previewDataset);
+  app.post('/api/datasets/export',exportDataset);
   const routes = ['/mcp', '/mcp/:group'];
   app.post(routes, sseUserContextMiddleware, handleMcpPostRequest);
   app.get(routes, sseUserContextMiddleware, handleMcpOtherRequest);
@@ -404,6 +411,73 @@ postgresTest('History HTTP returns exact RAW bytes and enforces administrator ac
     await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
     expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);
     await admin.end();
+  }
+});
+
+postgresTest('Dataset HTTP export honors current review, consent and authenticated owner',async()=>{
+  const schema=`dataset_http_${randomBytes(12).toString('hex')}`;
+  const config={host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST??'127.0.0.1',port:Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT??5432),
+    user:process.env.MCPHUB_ATTRIBUTION_TEST_USER,password:process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,
+    database:process.env.MCPHUB_ATTRIBUTION_TEST_DB??'postgres',connectionTimeoutMillis:5000};
+  const admin=new PgClient(config);let pool:Pool|undefined;
+  const oldFlag=process.env.MCPHUB_DATASET_BUILDER_ENABLED;
+  try{
+    await admin.connect();await admin.query(`CREATE SCHEMA ${schema}`);
+    pool=new Pool({...config,options:`-c search_path=${schema},public`});
+    const db={query:async(sql:string,parameters?:unknown[])=>(await pool!.query(sql,parameters)).rows,
+      transaction:async(work:(manager:any)=>Promise<any>)=>{
+        const client=await pool!.connect();
+        try{await client.query('BEGIN');const result=await work({query:async(sql:string,parameters?:unknown[])=>(await client.query(sql,parameters)).rows});await client.query('COMMIT');return result;}
+        catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();}
+      }};
+    await ensureAttributionContextSchema(db);await ensureToolResultHistorySchema(db);mockAttributionDb=db;
+    process.env.MCPHUB_DATASET_BUILDER_ENABLED='true';
+    const id=randomUUID(),foreignId=randomUUID(),taskId=randomUUID(),raw='{"content":[{"type":"text","text":"private-fixture-raw"}]}';
+    const digest=createHash('sha256').update(raw).digest('hex');
+    const attribution={taskId,traceId:randomUUID(),branchId:randomUUID(),modelSegmentId:randomUUID(),invokedToolName:'demo-read',
+      identity:{modelId:'synthetic-observed',source:'gateway_observed',verified:true},provenance:{causalCorrelationVerified:true}};
+    await pool.query(`INSERT INTO tool_results(result_id,username,status,raw,raw_sha256,objective,arguments,attribution)
+      VALUES($1,'admin','success',$2,$3,'read a record','{}',$4),($5,$6,'success',$2,$3,'read a record','{}',$4)`,
+      [id,raw,digest,JSON.stringify(attribution),foreignId,alice]);
+    await pool.query(`INSERT INTO tool_result_training_contexts(result_id,revision,discovery_call_id,objective,tool_catalogue,privacy_approved,reviewed_by)
+      VALUES($1,1,$2,'read a record',$3,true,'fixture-reviewer')`,[id,randomUUID(),JSON.stringify([{name:'demo-read',inputSchema:{type:'object'}}])]);
+    const token=createUserToken('admin',true),selection={resultIds:[id,foreignId]};
+    const preview=()=>request(app).post('/api/datasets/preview').set('x-auth-token',token).send(selection);
+    await request(app).post('/api/datasets/preview').send(selection).expect(401);
+    await request(app).post('/api/datasets/preview').set('x-auth-token',createUserToken(alice,false)).send(selection).expect(403);
+    expect((await preview().expect(200)).body.data.exported).toBe(0);
+    const taskReview=(revision:number,trainingConsent:boolean)=>request(app).put(`/api/attribution/tasks/${taskId}/review`).set('x-auth-token',token).send({revision,outcome:'success',trainingConsent});
+    await taskReview(0,true).expect(200);
+    expect((await preview().expect(200)).body.data.exported).toBe(0);
+    const resultReview=(revision:number,privacy:string,rawSha256=digest)=>request(app).put(`/api/tool-results/${id}/review`).set('x-auth-token',token).send({revision,privacy,quality:'correct',rawSha256});
+    await resultReview(0,'approved','0'.repeat(64)).expect(409);
+    await resultReview(0,'approved').expect(200);
+    const ready=await preview().expect(200);
+    expect(ready.headers['cache-control']).toBe('no-store');
+    expect(ready.body.data.exported).toBe(1);
+    expect(ready.body.data.excluded.unavailable_or_out_of_scope).toBe(1);
+    const split=Object.keys(ready.body.data.splits).find(key=>ready.body.data.splits[key]===1)!;
+    const exported=await request(app).post('/api/datasets/export').set('x-auth-token',token).send({...selection,split}).expect(200);
+    expect(JSON.parse(exported.text).metadata).toMatchObject({resultId:id,identityTrust:'trusted',split});
+    expect(exported.text).not.toContain('private-fixture-raw');
+    expect(exported.headers['cache-control']).toBe('no-store');
+    expect(exported.headers['x-dataset-file-digest']).toBe(createHash('sha256').update(exported.text).digest('hex'));
+    expect(exported.headers['x-dataset-export-id']).toBeTruthy();
+    await resultReview(1,'rejected').expect(200);
+    expect((await preview().expect(200)).body.data.exported).toBe(0);
+    await resultReview(2,'approved').expect(200);
+    expect((await preview().expect(200)).body.data.exported).toBe(1);
+    await taskReview(1,false).expect(200);
+    await taskReview(0,true).expect(409);
+    expect((await preview().expect(200)).body.data.exported).toBe(0);
+    const revoked=await request(app).post('/api/datasets/export').set('x-auth-token',token).send({...selection,split}).expect(200);
+    expect(revoked.text).toBe('');
+    expect((await pool.query('SELECT raw,raw_sha256 FROM tool_results WHERE result_id=$1',[id])).rows[0]).toMatchObject({raw,raw_sha256:digest});
+  }finally{
+    mockAttributionDb=undefined;
+    if(oldFlag===undefined)delete process.env.MCPHUB_DATASET_BUILDER_ENABLED;else process.env.MCPHUB_DATASET_BUILDER_ENABLED=oldFlag;
+    if(pool)await pool.end();await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);await admin.end();
   }
 });
 
