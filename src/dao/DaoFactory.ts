@@ -11,6 +11,7 @@ import { ActivityDao } from './ActivityDao.js';
 import { BuiltinPromptDao, BuiltinPromptDaoImpl } from './BuiltinPromptDao.js';
 import { BuiltinResourceDao, BuiltinResourceDaoImpl } from './BuiltinResourceDao.js';
 import { logger } from '../utils/logger.js';
+import { serializeJsonDao } from '../services/jsonDaoTransaction.js';
 
 /**
  * DAO Factory interface for creating DAO instances
@@ -67,70 +68,70 @@ export class JsonFileDaoFactory implements DaoFactory {
 
   getUserDao(): UserDao {
     if (!this.userDao) {
-      this.userDao = new UserDaoImpl();
+      this.userDao = serializeJsonDao(new UserDaoImpl());
     }
     return this.userDao;
   }
 
   getServerDao(): ServerDao {
     if (!this.serverDao) {
-      this.serverDao = new ServerDaoImpl();
+      this.serverDao = serializeJsonDao(new ServerDaoImpl());
     }
     return this.serverDao;
   }
 
   getGroupDao(): GroupDao {
     if (!this.groupDao) {
-      this.groupDao = new GroupDaoImpl();
+      this.groupDao = serializeJsonDao(new GroupDaoImpl());
     }
     return this.groupDao;
   }
 
   getSystemConfigDao(): SystemConfigDao {
     if (!this.systemConfigDao) {
-      this.systemConfigDao = new SystemConfigDaoImpl();
+      this.systemConfigDao = serializeJsonDao(new SystemConfigDaoImpl());
     }
     return this.systemConfigDao;
   }
 
   getUserConfigDao(): UserConfigDao {
     if (!this.userConfigDao) {
-      this.userConfigDao = new UserConfigDaoImpl();
+      this.userConfigDao = serializeJsonDao(new UserConfigDaoImpl());
     }
     return this.userConfigDao;
   }
 
   getOAuthClientDao(): OAuthClientDao {
     if (!this.oauthClientDao) {
-      this.oauthClientDao = new OAuthClientDaoImpl();
+      this.oauthClientDao = serializeJsonDao(new OAuthClientDaoImpl());
     }
     return this.oauthClientDao;
   }
 
   getOAuthTokenDao(): OAuthTokenDao {
     if (!this.oauthTokenDao) {
-      this.oauthTokenDao = new OAuthTokenDaoImpl();
+      this.oauthTokenDao = serializeJsonDao(new OAuthTokenDaoImpl());
     }
     return this.oauthTokenDao;
   }
 
   getBearerKeyDao(): BearerKeyDao {
     if (!this.bearerKeyDao) {
-      this.bearerKeyDao = new BearerKeyDaoImpl();
+      this.bearerKeyDao = serializeJsonDao(new BearerKeyDaoImpl());
     }
     return this.bearerKeyDao;
   }
 
   getBuiltinPromptDao(): BuiltinPromptDao {
     if (!this.builtinPromptDao) {
-      this.builtinPromptDao = new BuiltinPromptDaoImpl();
+      this.builtinPromptDao = serializeJsonDao(new BuiltinPromptDaoImpl());
     }
     return this.builtinPromptDao;
   }
 
   getBuiltinResourceDao(): BuiltinResourceDao {
     if (!this.builtinResourceDao) {
-      this.builtinResourceDao = new BuiltinResourceDaoImpl();
+      this.builtinResourceDao = serializeJsonDao(new BuiltinResourceDaoImpl());
     }
     return this.builtinResourceDao;
   }

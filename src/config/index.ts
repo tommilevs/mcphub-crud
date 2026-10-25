@@ -1,4 +1,5 @@
 import dotenv from 'dotenv';
+import { assertJsonDaoTransactionAccess } from '../services/jsonDaoTransaction.js';
 import {
   getSmartRoutingPath,
   assertSmartRoutingSettingsAvailable,
@@ -125,6 +126,7 @@ export const loadSettings = (user?: IUser): McpSettings => {
 export const saveSettings = (settings: McpSettings, user?: IUser): boolean => {
   const settingsPath = getSettingsPath();
   try {
+    assertJsonDaoTransactionAccess();
     const mergedSettings = dataService.mergeSettings!(loadOriginalSettings(), settings, user);
     assertSmartRoutingSettingsAvailable(mergedSettings);
     fs.writeFileSync(settingsPath, JSON.stringify(mergedSettings, null, 2), 'utf8');

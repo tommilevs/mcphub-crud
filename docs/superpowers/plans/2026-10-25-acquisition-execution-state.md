@@ -205,3 +205,19 @@ cooperative lock, and a noncooperative writer can still race the final rename;
 all relevant mutation paths must adopt a shared transaction protocol before
 claiming conflict-free concurrent publication. Cache invalidation, DB-mode adapter,
 durable receipt and operation saga remain integration work.
+
+JSON factory DAO operations now share a reentrant AsyncLocalStorage/FIFO critical
+section across their entire async read-modify-write lifecycle. Nested calls do
+not deadlock, synchronous helpers/method replacement remain intact, exceptions
+release the queue, and expired async contexts cannot retain ownership. DB-mode
+DAOs are unchanged. Uncoordinated synchronous settings writes reject while another
+JSON transaction is active, before merging or mutating its snapshot.
+
+Actual factory/filesystem test:10 concurrent server creates plus a coordinated
+atomic publication-like write preserved all11 entries and invalidated the cache.
+Nested-call, busy-writer, exception-release and existing DAO/cache tests passed.
+Full local Jest regression:344 suites/3150 tests passed,8 suites/55 tests skipped,
+164.86seconds. Backend typecheck passed. Every new synthetic temp directory was
+removed and absence asserted. This proves in-process coordination; it does not
+prove that old cross-process writers honor the filesystem lock or that live
+publication/DB-mode saga integration is complete.

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import type { McpSettings } from '../types/index.js';
 import { assertSmartRoutingSettingsAvailable } from '../utils/smartRoutingPath.js';
+import { assertJsonDaoTransactionAccess } from './jsonDaoTransaction.js';
 
 const digest = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex');
 export class SettingsTransactionConflict extends Error {}
@@ -12,6 +13,7 @@ export class SettingsTransactionConflict extends Error {}
  */
 export function transactJsonSettings<T>(settingsPath: string,
   mutate: (current: McpSettings) => { settings: McpSettings; value: T }, expectedDigest?: string) {
+  assertJsonDaoTransactionAccess();
   const target = path.resolve(settingsPath);
   const directory = path.dirname(target);
   const lock = path.join(directory, `.${path.basename(target)}.mcphub-lock`);

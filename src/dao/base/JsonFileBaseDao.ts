@@ -4,6 +4,7 @@ import path from 'path';
 import { McpSettings } from '../../types/index.js';
 import { getSettingsPath, clearSettingsCache, getSettingsGeneration } from '../../config/index.js';
 import { logger } from '../../utils/logger.js';
+import { assertJsonDaoTransactionAccess } from '../../services/jsonDaoTransaction.js';
 
 /**
  * Abstract base class for JSON file-based DAO implementations
@@ -62,6 +63,7 @@ export abstract class JsonFileBaseDao {
    * Save settings to JSON file and update cache
    */
   protected async saveSettings(settings: McpSettings): Promise<void> {
+    assertJsonDaoTransactionAccess();
     try {
       assertSmartRoutingSettingsAvailable(settings);
       // Ensure directory exists
