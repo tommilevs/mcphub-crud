@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "k": 2,
+  "cases": [
+    {
+      "id": "synthetic-route-cold",
+      "phase": "cold",
+      "evidence": "synthetic",
+      "relevant": [{"serverName": "maps", "toolName": "route"}],
+      "baseline": {"tools": [{"serverName": "mail", "toolName": "send"}, {"serverName": "maps", "toolName": "route"}]},
+      "mcpZero": {"tools": [{"serverName": "maps", "toolName": "route"}, {"serverName": "mail", "toolName": "send"}]}
+    },
+    {
+      "id": "synthetic-route-warm",
+      "phase": "warm",
+      "evidence": "synthetic",
+      "relevant": [{"serverName": "maps", "toolName": "route"}],
+      "baseline": {"tools": [{"serverName": "mail", "toolName": "send"}, {"serverName": "maps", "toolName": "route"}]},
+      "mcpZero": {"tools": [{"serverName": "maps", "toolName": "route"}, {"serverName": "mail", "toolName": "send"}]}
+    }
+  ]
+}
