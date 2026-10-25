@@ -132,3 +132,13 @@ Owner-filtered statistics match record/pin/payload/byte counts and expose retrie
 counters. Session and conversation timelines return both linked results without
 RAW, and lineage resolves the retained parent. Browser and deployed-data
 acceptance remain separate gates.
+
+[40172946373](https://github.com/tommilevs/mcphub-crud/actions/runs/40172946373)
+passes 31 integration tests, including authenticated Dataset preview/export over
+HTTP against the production History schema. Missing reviews prevent export;
+task consent and digest-bound privacy/quality review enable one eligible record.
+Another owner's record is excluded. Wrong-digest and stale-revision reviews
+return 409; revoking privacy or consent immediately removes the example from the
+next preview/export. JSONL omits RAW, response/file digests match and no-store
+headers are present. RAW and its digest remain unchanged. Seeded attribution and
+discovery context are synthetic reviewed fixtures, not actual provider evidence.
