@@ -1,9 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { Client, Pool } from 'pg';
 import { ensureMcpAcquisitionSchema } from '../../src/db/mcpAcquisitionSchema.js';
 import { AcquisitionPlanRepository, buildAcquisitionManifest } from '../../src/services/mcpAcquisitionPlan.js';
 import type { MarketServer } from '../../src/types/index.js';
 import { AcquisitionOperationRepository } from '../../src/services/mcpAcquisitionOperation.js';
+import { ensureToolResultHistorySchema } from '../../src/db/toolResultHistorySchema.js';
 
 const postgresDescribe = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
@@ -125,5 +126,37 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect((await operations.get('alice', operation.operation_id)).failure_code).toBe('native_state_unknown');
     await operations.transition('alice', operation.operation_id, claim.claim_id, 'failed', 'rolled_back');
     expect((await operations.get('alice', operation.operation_id)).requires_reconciliation).toBe(false);
+  });
+
+  test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
+    const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
+    await ensureToolResultHistorySchema(db);
+    const operations = new AcquisitionOperationRepository(db);
+    const manifest = buildAcquisitionManifest({ name: 'fixture', installations: {
+      npm: { type: 'npm', command: 'npx', args: ['-y', 'fixture'] },
+    } } as unknown as MarketServer, '1.0.0', 'fixture-group', 'fixture_ping');
+    const plan = await repository.create('alice', manifest);
+    const operation = await repository.authorize('alice', plan.plan_id, plan.manifest_digest, randomUUID());
+    const claim = await operations.claim('alice', operation.operation_id);
+    await operations.transition('alice', operation.operation_id, claim.claim_id, 'staging', 'starting');
+    await operations.transition('alice', operation.operation_id, claim.claim_id, 'starting', 'verifying');
+    expect(await operations.claimProbe('bob', operation.operation_id, plan.manifest_digest)).toBeNull();
+    const claims = (await Promise.all(Array.from({ length: 5 }, () => operations.claimProbe('alice', operation.operation_id, plan.manifest_digest)))).filter(Boolean);
+    expect(claims).toHaveLength(1);
+    const raw = JSON.stringify({ content: [{ type: 'text', text: 'synthetic-probe' }] });
+    const save = async (owner: string) => {
+      const id = randomUUID();
+      await pool.query(`INSERT INTO tool_results(result_id,server,tool,duration_ms,status,username,objective,arguments,raw,raw_bytes,raw_sha256)
+        VALUES($1,'fixture','fixture_ping',0,'success',$2,$3,'{}',$4,$5,$6)`,
+      [id, owner, `acquisition:${operation.operation_id}`, raw, Buffer.byteLength(raw), createHash('sha256').update(raw).digest('hex')]);
+      return id;
+    };
+    expect(await operations.completeProbe('alice', operation.operation_id, claims[0], await save('bob'))).toBe(false);
+    const resultId = await save('alice');
+    expect(await operations.completeProbe('alice', operation.operation_id, claims[0], resultId)).toBe(true);
+    expect(await operations.completeProbe('alice', operation.operation_id, claims[0], resultId)).toBe(true);
+    expect(await operations.completeProbe('alice', operation.operation_id, claims[0], await save('alice'))).toBe(false);
+    expect((await operations.get('alice', operation.operation_id)).probe_result_id).toBe(resultId);
+    expect(await operations.claimProbe('alice', operation.operation_id, plan.manifest_digest)).toBeNull();
   });
 });

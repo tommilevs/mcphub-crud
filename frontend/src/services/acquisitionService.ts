@@ -20,6 +20,7 @@ export interface AcquisitionPlan {
     package: { name: string; version: string };
     requiredInputs: string[];
     source: { repository: string | null };
+    probe?: { tool: string };
   };
 }
 export interface AcquisitionOperation { operation_id: string; state: string; cancel_requested?: boolean; requires_reconciliation?: boolean; failure_code?: string | null }
@@ -28,8 +29,8 @@ export async function findAcquisitionCandidates(objective: string) {
   return apiPost<ApiResponse<{ candidates: AcquisitionCandidate[] }>>('/market/acquisition/proposals', { objective });
 }
 export async function acquisitionGroups() { return apiGet<ApiResponse<Group[]>>('/groups'); }
-export async function prepareAcquisitionPlan(serverName: string, version: string, targetGroup: string) {
-  return apiPost<ApiResponse<AcquisitionPlan>>('/market/acquisition/plans', { serverName, version, targetGroup });
+export async function prepareAcquisitionPlan(serverName: string, version: string, targetGroup: string, probeTool?: string) {
+  return apiPost<ApiResponse<AcquisitionPlan>>('/market/acquisition/plans', { serverName, version, targetGroup, ...(probeTool ? { probeTool } : {}) });
 }
 export async function approveAcquisitionPlan(plan: AcquisitionPlan, idempotencyKey: string) {
   return apiPost<ApiResponse<AcquisitionOperation>>(`/market/acquisition/plans/${encodeURIComponent(plan.plan_id)}/authorize`, {

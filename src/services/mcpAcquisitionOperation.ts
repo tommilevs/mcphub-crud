@@ -19,7 +19,8 @@ export class AcquisitionOperationRepository {
 
   async get(owner: string, operationId: string) {
     if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
-    const rows = await this.db.query(`SELECT operation_id,plan_id,manifest_digest,state,cancel_requested,requires_reconciliation,failure_code,authorized_at,updated_at
+    const rows = await this.db.query(`SELECT operation_id,plan_id,manifest_digest,state,cancel_requested,requires_reconciliation,failure_code,
+      probe_claim_id IS NOT NULL AS probe_started,probe_result_id,authorized_at,updated_at
       FROM mcp_acquisition_operations WHERE operation_id=$1 AND owner=$2`, [operationId, owner]);
     return rows[0] ?? null;
   }
@@ -58,6 +59,32 @@ export class AcquisitionOperationRepository {
       WHERE operation_id=$1 AND owner=$2 AND claim_id=$3 AND state IN ('staging','starting','verifying')
       RETURNING operation_id`, [operationId, owner, claimId]);
     return rows.length > 0;
+  }
+
+  async claimProbe(owner: string, operationId: string, digest: string) {
+    const claimId = randomUUID();
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET probe_claim_id=$3,updated_at=NOW()
+      WHERE operation_id=$1 AND owner=$2 AND manifest_digest=$4 AND state='verifying'
+      AND NOT cancel_requested AND NOT requires_reconciliation AND probe_claim_id IS NULL
+      RETURNING probe_claim_id`, [operationId, owner, claimId, digest]);
+    return rows[0]?.probe_claim_id ?? null;
+  }
+
+  async completeProbe(owner: string, operationId: string, claimId: string, resultId: string) {
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations o SET probe_result_id=$4,updated_at=NOW()
+      FROM tool_results r,mcp_acquisition_plans p
+      WHERE o.operation_id=$1 AND o.owner=$2 AND o.probe_claim_id=$3 AND (o.probe_result_id IS NULL OR o.probe_result_id=$4)
+      AND p.plan_id=o.plan_id AND r.result_id=$4 AND r.username=$2 AND r.key_id IS NULL
+      AND r.payload_available AND r.raw IS NOT NULL AND r.objective=('acquisition:'||o.operation_id::text)
+      AND r.server=p.manifest->>'serverName' AND r.tool=p.manifest->'probe'->>'tool'
+      RETURNING o.operation_id`, [operationId, owner, claimId, resultId]);
+    return rows.length > 0;
+  }
+
+  async uncertainProbe(owner: string, operationId: string, claimId: string) {
+    await this.db.query(`UPDATE mcp_acquisition_operations SET requires_reconciliation=TRUE,
+      failure_code='probe_outcome_unknown',updated_at=NOW()
+      WHERE operation_id=$1 AND owner=$2 AND probe_claim_id=$3 AND probe_result_id IS NULL`, [operationId, owner, claimId]);
   }
 
   async cancel(owner: string, operationId: string) {

@@ -126,3 +126,29 @@ tools/call, missing configuration rejected before any connection. Backend typech
 passes. This is not live-service or installed-package functional acceptance.
 Previous source537fc44 real-PG run40214375437/job121232228511 passed38tests across
 five suites, including reconciliation state blocking forward progress.
+
+Explicit functional probe permission is now optional immutable plan data
+(`probe.tool`), included in its digest. Existing plans default to discovery only.
+The API/UI can request one named tool call with exactly empty arguments; the
+review shows it explicitly and any edit invalidates the saved plan/checkbox.
+This is a limited first probe adapter, not support for arbitrary argument-bearing
+probes. Never infer safety/authorization from the server's readOnlyHint.
+
+Inspection executes a probe only for the authenticated owner of a verifying,
+uncancelled, unreconciled operation whose persisted immutable manifest/digest
+exactly matches the supplied plan. An atomic probe claim prevents concurrent or
+uncertain-outcome replays. The exact tool must appear in tools/list. Its result is
+captured through ToolResultHistoryService without compression before returning
+functional/functional_failed and result_id. Evidence attachment checks owner,
+operation objective, server/tool and actual available RAW; another result cannot
+replace it. RPC/persistence uncertainty retains the claim and requires review.
+The native connection still closes in finally; no group publication is performed.
+
+Evidence:21 targeted tests pass, including actual MCP SDK over the controlled
+native pipe calling the authorized tool once, retaining RAW capture input under
+the owner and returning only a reference, rejecting unapproved manifests/replays.
+Backend/frontend typechecks and production frontend build pass. These use injected
+authorization/history dependencies, not a deployed installation. Real-PG coverage
+adds competing probe claims and owner-bound RAW evidence attachment; CI pending.
+Next: coordinate starting->verifying and persist discovery/probe evidence, owner
+credential references, staged publication/rollback receipt and full execution UI.

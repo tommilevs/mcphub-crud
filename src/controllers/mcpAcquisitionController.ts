@@ -33,7 +33,7 @@ function ownerOf(req: Request): string | null {
 export async function createMcpAcquisitionPlan(req: Request, res: Response): Promise<void> {
   const owner = ownerOf(req);
   if (!owner) { res.status(401).json({ success: false, message: 'Authenticated owner is required' }); return; }
-  const { serverName, version, targetGroup } = req.body ?? {};
+  const { serverName, version, targetGroup, probeTool } = req.body ?? {};
   if ([serverName, version, targetGroup].some(value => typeof value !== 'string' || !value.trim() || value.length > 255)) {
     res.status(400).json({ success: false, message: 'Server, exact version and target group are required' }); return;
   }
@@ -47,7 +47,7 @@ export async function createMcpAcquisitionPlan(req: Request, res: Response): Pro
     }
     const server = getMarketServers()[serverName];
     if (!server) { res.status(404).json({ success: false, message: 'Catalog server is unavailable' }); return; }
-    const manifest = buildAcquisitionManifest(server, version, targetGroup);
+    const manifest = buildAcquisitionManifest(server, version, targetGroup, probeTool);
     const plan = await new AcquisitionPlanRepository(getAppDataSource()).create(owner, manifest);
     res.status(201).json({ success: true, data: { ...plan, status: 'proposed', verification: 'catalog_only' } });
   } catch (error) {

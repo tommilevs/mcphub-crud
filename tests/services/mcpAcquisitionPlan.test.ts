@@ -35,3 +35,12 @@ test('refuses floating versions and unsupported command shapes', () => {
     npm: { type: 'npm', command: 'powershell', args: ['package'] },
   } }, '1.0.0', 'group')).toThrow();
 });
+
+test('explicit probe permission changes the immutable plan digest and is absent by default', () => {
+  const base = buildAcquisitionManifest(catalog, '1.2.3', 'group');
+  expect(base.probe).toBeUndefined();
+  const withProbe = buildAcquisitionManifest(catalog, '1.2.3', 'group', 'fixture_ping');
+  expect(withProbe.probe).toEqual({ tool: 'fixture_ping' });
+  expect(acquisitionManifestDigest(base)).not.toBe(acquisitionManifestDigest(withProbe));
+  expect(() => buildAcquisitionManifest(catalog, '1.2.3', 'group', '\nunsafe')).toThrow();
+});

@@ -74,9 +74,10 @@ test('plan creation binds to authenticated owner and never executes or authorize
     npm: { type: 'npm', command: 'npx', args: ['-y', 'fixture'], env: { KEY: 'private-value' } },
   } } });
   mockQuery.mockImplementation(async (_sql, args) => [{ plan_id: args[0], manifest: JSON.parse(args[2]), manifest_digest: args[3] }]);
-  const response = await request(app).post('/plans').send({ serverName: 'fixture', version: '1.0.0', targetGroup: 'group', owner: 'bob', approved: true }).expect(201);
+  const response = await request(app).post('/plans').send({ serverName: 'fixture', version: '1.0.0', targetGroup: 'group', probeTool: 'fixture_ping', owner: 'bob', approved: true }).expect(201);
   expect(mockQuery.mock.calls[0][1][1]).toBe('alice');
   expect(response.body.data).toMatchObject({ status: 'proposed', verification: 'catalog_only', manifest: { package: { version: '1.0.0' } } });
+  expect(response.body.data.manifest.probe).toEqual({ tool: 'fixture_ping' });
   expect(JSON.stringify(response.body)).not.toContain('private-value');
 });
 

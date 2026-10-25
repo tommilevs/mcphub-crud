@@ -16,6 +16,7 @@ export default function McpAcquisitionPanel() {
   const [selected, setSelected] = useState('');
   const [version, setVersion] = useState('');
   const [group, setGroup] = useState('');
+  const [probeTool, setProbeTool] = useState('');
   const [plan, setPlan] = useState<AcquisitionPlan>();
   const [operation, setOperation] = useState<AcquisitionOperation>();
   const [key, setKey] = useState('');
@@ -39,7 +40,7 @@ export default function McpAcquisitionPanel() {
   });
   const prepare = () => perform(async () => {
     clearPlan();
-    const result = await prepareAcquisitionPlan(selected, version, group);
+    const result = await prepareAcquisitionPlan(selected, version, group, probeTool || undefined);
     if (!result.success || !result.data) throw new Error(result.message || t('app.error'));
     setKey(crypto.randomUUID()); setPlan(result.data);
   });
@@ -84,6 +85,10 @@ export default function McpAcquisitionPanel() {
                 {groups.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}
               </select></label>
           </div>
+          <label className="block space-y-1"><span>{t('acquisition.probeTool', 'Optional verification tool to call once with {}')}</span>
+            <input className="hub-input" maxLength={255} value={probeTool} onChange={event => { setProbeTool(event.target.value); clearPlan(); }}/>
+          </label>
+          <p className="text-xs text-[var(--hub-ink-3)]">{t('acquisition.probeHelp', 'Choose only a tool whose effects you understand and permit. Leaving this empty allows discovery only, without calling tools.')}</p>
           <p className="text-xs text-[var(--hub-ink-3)]">{t('acquisition.support', 'Plan preparation currently supports simple npm packages with a fixed release version. Other installers may require manual configuration.')}</p>
           <button type="button" className="hub-btn" disabled={!selected || !version.trim() || !group} onClick={prepare}>{t('acquisition.prepare', 'Prepare plan')}</button>
         </>}
@@ -94,12 +99,13 @@ export default function McpAcquisitionPanel() {
           <div><dt>{t('acquisition.group', 'Target group')}</dt><dd>{groups.find(item => item.id === plan.manifest.targetGroup)?.name || plan.manifest.targetGroup}</dd></div>
           <div><dt>{t('acquisition.source', 'Catalog source')}</dt><dd>{plan.manifest.source.repository || t('acquisition.noSource', 'Not specified')}</dd></div>
           <div><dt>{t('acquisition.inputs', 'Required configuration')}</dt><dd>{plan.manifest.requiredInputs.join(', ') || t('acquisition.none', 'None declared')}</dd></div>
+          <div><dt>{t('acquisition.probeTool', 'Optional verification tool to call once with {}')}</dt><dd>{plan.manifest.probe?.tool || t('acquisition.discoveryOnly', 'Discovery only; no tool calls authorized')}</dd></div>
           <div><dt>{t('acquisition.expires', 'Expires')}</dt><dd>{new Date(plan.expires_at).toLocaleString()}</dd></div>
           <div><dt>{t('acquisition.digest', 'Plan fingerprint')}</dt><dd className="font-mono break-all">{plan.manifest_digest}</dd></div>
         </dl>
         {!operation && <>
           <label className="flex items-start gap-2"><input type="checkbox" disabled={busy} checked={reviewed} onChange={event => setReviewed(event.target.checked)}/>
-            <span>{t('acquisition.confirm', 'I reviewed this exact package, version and target group and authorize its installation.')}</span></label>
+            <span>{t('acquisition.confirm', 'I reviewed this exact package, version, target group and optional verification call and authorize this plan.')}</span></label>
           <button type="button" className="hub-btn" disabled={busy || !reviewed} onClick={approve}>{t('acquisition.authorize', 'Save authorization')}</button>
         </>}
         <p role="status" className="text-xs text-[var(--hub-ink-3)]">{!operation

@@ -10,9 +10,13 @@ export interface AcquisitionManifest {
   package: { ecosystem: 'npm'; name: string; version: string };
   source: { type: 'local_catalog'; repository: string | null };
   requiredInputs: string[];
+  probe?: { tool: string };
 }
 
-export function buildAcquisitionManifest(server: MarketServer, version: string, targetGroup: string): AcquisitionManifest {
+export function buildAcquisitionManifest(server: MarketServer, version: string, targetGroup: string, probeTool?: string): AcquisitionManifest {
+  if (probeTool !== undefined && (typeof probeTool !== 'string' || !probeTool.trim() || probeTool.length > 255 || /[\u0000-\u001f\u007f]/.test(probeTool))) {
+    throw new AcquisitionInputError('Invalid explicitly reviewed probe tool');
+  }
   // Stable releases only for the first adapter: never resolve a mutable tag at execution time.
   if (typeof version !== 'string' || version.trim() !== version ||
       !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(version) || version.length > 64 ||
@@ -33,6 +37,7 @@ export function buildAcquisitionManifest(server: MarketServer, version: string, 
     source: { type: 'local_catalog', repository: server.repository?.url ?? null },
     requiredInputs: Object.entries(server.arguments ?? {}).filter(([, input]) => input.required)
       .map(([name]) => name).sort(),
+    ...(probeTool ? { probe: { tool: probeTool } } : {}),
   };
 }
 
