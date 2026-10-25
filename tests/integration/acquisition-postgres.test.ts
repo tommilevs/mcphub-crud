@@ -3,6 +3,7 @@ import { Client, Pool } from 'pg';
 import { ensureMcpAcquisitionSchema } from '../../src/db/mcpAcquisitionSchema.js';
 import { AcquisitionPlanRepository, buildAcquisitionManifest } from '../../src/services/mcpAcquisitionPlan.js';
 import type { MarketServer } from '../../src/types/index.js';
+import { AcquisitionOperationRepository } from '../../src/services/mcpAcquisitionOperation.js';
 
 const postgresDescribe = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
@@ -86,5 +87,25 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     // A plan that already has its own operation must not swallow another plan's key.
     expect(await repository.authorize('alice', other.plan_id, other.manifest_digest, key)).toBeNull();
     expect((await pool.query('SELECT COUNT(*)::int AS count FROM mcp_acquisition_operations WHERE plan_id=$1', [plan.plan_id])).rows[0].count).toBe(1);
+  });
+
+  test('only one worker claims execution, cancellation blocks progress and stale claims cannot write', async () => {
+    const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
+    const operations = new AcquisitionOperationRepository(db);
+    const manifest = buildAcquisitionManifest({ name: 'fixture', installations: {
+      npm: { type: 'npm', command: 'npx', args: ['-y', 'fixture'] },
+    } } as unknown as MarketServer, '1.0.0', 'fixture-group');
+    const plan = await repository.create('alice', manifest);
+    const operation = await repository.authorize('alice', plan.plan_id, plan.manifest_digest, randomUUID());
+    expect(await operations.claim('bob', operation.operation_id)).toBeNull();
+    const claims = (await Promise.all(Array.from({ length: 5 }, () => operations.claim('alice', operation.operation_id)))).filter(Boolean);
+    expect(claims).toHaveLength(1);
+    const claim = claims[0];
+    expect(await operations.transition('alice', operation.operation_id, randomUUID(), 'staging', 'starting')).toBeNull();
+    expect((await operations.cancel('alice', operation.operation_id)).state).toBe('staging');
+    expect(await operations.transition('alice', operation.operation_id, claim.claim_id, 'staging', 'starting')).toBeNull();
+    expect((await operations.transition('alice', operation.operation_id, claim.claim_id, 'staging', 'rolled_back')).state).toBe('rolled_back');
+    expect((await operations.cancel('alice', operation.operation_id)).state).toBe('rolled_back');
+    expect(await operations.claim('alice', operation.operation_id)).toBeNull();
   });
 });

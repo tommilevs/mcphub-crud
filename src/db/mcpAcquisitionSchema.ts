@@ -33,5 +33,7 @@ export async function ensureMcpAcquisitionSchema(db: { query(sql: string): Promi
       FOREIGN KEY(plan_id,owner,manifest_digest)
         REFERENCES mcp_acquisition_plans(plan_id,owner,manifest_digest)
     );
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS claim_id uuid;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS cancel_requested boolean NOT NULL DEFAULT FALSE;
   `);
 }
