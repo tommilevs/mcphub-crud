@@ -27,6 +27,18 @@ export class AcquisitionOperationRepository {
     return rows[0] ?? null;
   }
 
+  /** Read-only candidate; the reservation below is the atomic publication gate. */
+  async publicationCandidate(owner: string, operationId: string) {
+    if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
+    const rows = await this.db.query(`SELECT o.claim_id,o.inspection,p.manifest,p.manifest_digest
+      FROM mcp_acquisition_operations o JOIN mcp_acquisition_plans p ON p.plan_id=o.plan_id
+      WHERE o.operation_id=$1 AND o.owner=$2 AND o.state='verifying' AND o.claim_id IS NOT NULL
+      AND NOT o.cancel_requested AND NOT o.requires_reconciliation AND o.publication IS NULL
+      AND o.inspection IS NOT NULL AND o.verification IN ('discovery_only','functional')
+      AND o.manifest_digest=p.manifest_digest`, [operationId, owner]);
+    return rows[0] ?? null;
+  }
+
   /** One durable reservation only. A retry must reconcile the existing receipt, never apply again. */
   async reservePublication(owner: string, operationId: string, claimId: string, reservation: JsonPublicationReservation) {
     const receipt = reservation?.receipt;

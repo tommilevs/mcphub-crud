@@ -147,12 +147,15 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     const reservation={storage:'json' as const,settingsPath:'/synthetic/settings.json',baseDigest:'a'.repeat(64),receipt:prepared.receipt};
     expect(await operations.reservePublication('alice',id,claim.claim_id,reservation)).toBe(false);
     expect(await operations.recordInspection('alice',id,claim.claim_id,{verification:'discovery_only',tools:['ping']})).toBe(true);
+    expect(await operations.publicationCandidate('bob',id)).toBeNull();
+    expect((await operations.publicationCandidate('alice',id)).manifest).toEqual(manifest);
     await expect(operations.reservePublication('bob',id,claim.claim_id,reservation)).rejects.toThrow('Invalid publication');
     expect(await operations.reservePublication('alice',id,randomUUID(),reservation)).toBe(false);
     const altered=structuredClone(reservation); altered.receipt.entry.tools=['unverified'];
     expect(await operations.reservePublication('alice',id,claim.claim_id,altered)).toBe(false);
     const claims=await Promise.all(Array.from({length:5},()=>operations.reservePublication('alice',id,claim.claim_id,reservation)));
     expect(claims.filter(Boolean)).toHaveLength(1);
+    expect(await operations.publicationCandidate('alice',id)).toBeNull();
     const restarted=new AcquisitionOperationRepository(db);
     expect((await restarted.getPublication('alice',id)).publication).toEqual(reservation);
     expect(await restarted.getPublication('bob',id)).toBeNull();
