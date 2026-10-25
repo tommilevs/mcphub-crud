@@ -63,6 +63,7 @@ using System.Runtime.InteropServices;
 public static class TrayWindowEvidence {
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr handle);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
+  [DllImport("user32.dll", SetLastError=true)] public static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
 }
 '@
     $trayStart=[Diagnostics.ProcessStartInfo]::new((Join-Path $install 'mcphub-tray.exe'))
@@ -88,7 +89,9 @@ public static class TrayWindowEvidence {
       if(-not $tray.WaitForInputIdle(10000) -or -not [TrayWindowEvidence]::IsWindowVisible($dashboardHandle)){
         throw 'Installed dashboard did not become visible and ready.'
       }
-      if(-not $tray.CloseMainWindow()){throw 'Installed dashboard did not accept a close request.'}
+      if(-not [TrayWindowEvidence]::PostMessage($dashboardHandle,0x0010,[IntPtr]::Zero,[IntPtr]::Zero)){
+        throw 'Installed dashboard did not accept its exact-window close request.'
+      }
       $deadline=[DateTime]::UtcNow.AddSeconds(10)
       do{
         Start-Sleep -Milliseconds 100
@@ -98,8 +101,10 @@ public static class TrayWindowEvidence {
       }while([DateTime]::UtcNow -lt $deadline)
       # A process can expose another helper window after hiding its dashboard;
       # inspect the exact original HWND instead of rediscovering MainWindowHandle.
-      if(-not [TrayWindowEvidence]::IsWindow($dashboardHandle) -or [TrayWindowEvidence]::IsWindowVisible($dashboardHandle)){
-        throw 'Closing the dashboard did not retain its hidden window.'
+      $retained=[TrayWindowEvidence]::IsWindow($dashboardHandle)
+      $visible=[TrayWindowEvidence]::IsWindowVisible($dashboardHandle)
+      if(-not $retained -or $visible){
+        throw "Closing the dashboard did not retain its hidden window: retained=$retained, visible=$visible."
       }
       Wait-Gateway
       Assert-Login $password
