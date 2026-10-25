@@ -360,6 +360,7 @@ describe('smartRouting config resolution', () => {
         loopGuardRepetitions: 3,
         loopGuardToolBudgets: {},
         loopGuardIgnoredTools: [],
+        loopGuardUnchangedTools: [],
         mcpZeroTopServers: 5,
         serverDescriptionMode: 'names',
         embeddingMaxTokens: undefined,
