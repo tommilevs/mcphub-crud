@@ -8,6 +8,7 @@ import { assertSmartRoutingNameAvailable } from '../utils/smartRoutingPath.js';
 import { AcquisitionOperationRepository } from './mcpAcquisitionOperation.js';
 import { prepareAcquisitionPublication, rollbackAcquisitionPublication, type PostgresPublicationReservation } from './mcpAcquisitionPublicationSettings.js';
 import type { JsonPublicationInput } from './mcpAcquisitionJsonPublication.js';
+export class AcquisitionPublicationCommitUnknown extends Error {}
 
 /** Persisted row identity, including defaults and sync metadata, excluding timestamps. */
 export function acquisitionStoredServerDigest(server: Server): string {
@@ -49,7 +50,8 @@ export async function rollbackPostgresAcquisition(db: Pick<DataSource, 'transact
 export async function publishPostgresAcquisition(db: Pick<DataSource, 'transaction'>,
   input: JsonPublicationInput, claimId: string) {
   assertSmartRoutingNameAvailable(input.manifest.serverName);
-  return db.transaction('SERIALIZABLE', async manager => {
+  let preparedToCommit = false;
+  try { return await db.transaction('SERIALIZABLE', async manager => {
     // Lock both collections to cover case-insensitive collisions and dangling references,
     // including inserts that row locks on the target alone cannot exclude.
     await manager.query('LOCK TABLE "servers", "groups" IN SHARE ROW EXCLUSIVE MODE');
@@ -79,6 +81,10 @@ export async function publishPostgresAcquisition(db: Pick<DataSource, 'transacti
     if (!await operations.recordPublicationApplied(input.owner, input.operationId, claimId, digest)) {
       throw new Error('Publication outcome could not be committed');
     }
+    preparedToCommit = true;
     return { reservation, digest };
-  });
+  }); } catch (error) {
+    if (preparedToCommit) throw new AcquisitionPublicationCommitUnknown('Publication commit outcome requires reconciliation');
+    throw error;
+  }
 }
