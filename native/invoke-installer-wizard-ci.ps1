@@ -18,6 +18,7 @@ public static class WizardButtons {
 '@
 $process=Start-Process -FilePath $InstallerPath -ArgumentList "/D=$Destination" -WindowStyle Hidden -PassThru
 $destinationObserved=$false;$finished=$false;$passwordAcknowledged=$false;$lastPage=''
+$windowCount=0;$visibleButtonCount=0;$lastAction='none';$actionCount=0
 try{
   $deadline=[DateTime]::UtcNow.AddMinutes(5)
   while([DateTime]::UtcNow -lt $deadline){
@@ -31,6 +32,7 @@ try{
     foreach($ownerId in $owners){
       $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty,$ownerId)
       $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,$condition)
+      $windowCount=$windows.Count
       foreach($window in $windows){
         $buttons=@($window.FindAll([Windows.Automation.TreeScope]::Descendants,
           [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Button)))
@@ -54,6 +56,7 @@ try{
           }
         }
         $active=@($buttons | Where-Object {$_.Current.IsEnabled -and -not $_.Current.IsOffscreen})
+        $visibleButtonCount=$active.Count
         $pageKey=(@($window.Current.NativeWindowHandle,$isPassword)+@($active | ForEach-Object {$_.Current.Name})+$edits) -join '|'
         if($pageKey -eq $lastPage){continue}
         foreach($button in $active){
@@ -74,6 +77,8 @@ try{
             throw 'Wizard button activation failed.'
           }
           if($isPassword){$passwordAcknowledged=$true}
+          $lastAction=$label;$actionCount++
+          Write-Output "Wizard button posted: $label (password dialog: $isPassword)."
           $lastPage=$pageKey
           break
         }
@@ -81,7 +86,7 @@ try{
     }
     Start-Sleep -Milliseconds 250
   }
-  if(-not $process.HasExited){throw 'Wizard acceptance timed out.'}
+  if(-not $process.HasExited){throw "Wizard acceptance timed out: windows=$windowCount, visibleButtons=$visibleButtonCount, actions=$actionCount, last=$lastAction, destination=$destinationObserved, passwordAcknowledged=$passwordAcknowledged."}
   if($process.ExitCode -ne 0 -or -not $finished -or -not $destinationObserved -or -not $passwordAcknowledged){
     throw "Wizard acceptance incomplete: exit=$($process.ExitCode), destination=$destinationObserved, finish=$finished, passwordAcknowledged=$passwordAcknowledged."
   }

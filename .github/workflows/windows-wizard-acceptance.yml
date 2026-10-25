@@ -28,6 +28,6 @@ jobs:
           run-id: ${{ inputs.installerRunId || '40193083656' }}
           github-token: ${{ github.token }}
           path: tested-installer
-      - name: Verify interactive wizard and installed runtime
+      - name: Verify interactive wizard with button-only diagnostics
         shell: pwsh
         run: ./native/test-nsis-ci-windows.ps1 -InstallerPath tested-installer/MCPHub_1.1.8_x64-setup.exe -CheckWizard -CheckTray
