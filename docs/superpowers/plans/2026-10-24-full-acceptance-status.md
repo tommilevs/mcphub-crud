@@ -170,3 +170,13 @@ padding and allow vertical resizing. With production-built CSS, the 14-row skill
 editor measured about 261 px and a three-row control 77 px; ordinary inputs remain
 32 px. The narrow 540 px view has no horizontal overflow. Both fixture servers and
 owned tabs were closed after verification.
+
+The actual DatasetBuilderPanel and datasetService also passed a controlled browser
+check. Seed/format changes hide the previous manifest. Changing selected result
+IDs during a delayed preview leaves that old response unusable for download;
+the next preview/export request contains only the new IDs and current key scope.
+An empty export clears the preview, shows the consent/review refresh message and
+leaves preview available. There was no horizontal overflow at 540 px. API,
+translation/auth boundaries and history/preference child panels were fixtures;
+integrated backend and full child-panel acceptance remain open. The temporary
+server and owned tab were closed, and the empty export created no download file.
