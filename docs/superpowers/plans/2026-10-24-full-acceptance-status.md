@@ -142,3 +142,14 @@ return 409; revoking privacy or consent immediately removes the example from the
 next preview/export. JSONL omits RAW, response/file digests match and no-store
 headers are present. RAW and its digest remain unchanged. Seeded attribution and
 discovery context are synthetic reviewed fixtures, not actual provider evidence.
+
+[40173253825](https://github.com/tommilevs/mcphub-crud/actions/runs/40173253825)
+passes 32 integration tests including Experience-to-Skills over authenticated HTTP.
+Two independently reviewed two-step workflows support an Experience proposal;
+draft Experience is not readable as approved advice or usable for a skill preview.
+Separate approval enables a draft skill, whose export remains blocked until its
+exact revision is approved. Editing revokes approval, stale revisions conflict,
+and version history retains all four revisions. Approved download is no-store and
+omits RAW. Revoking one evidence review hides the Experience and blocks an already
+approved skill's next export; non-admin access and another key scope are denied.
+Workflows and reviews are synthetic; no skill is installed or executed by this test.
