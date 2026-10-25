@@ -1,7 +1,8 @@
 import express from 'express';
 import request from 'supertest';
 import { proposeMcpAcquisition, createMcpAcquisitionPlan, getMcpAcquisitionPlan, authorizeMcpAcquisitionPlan,
-  getMcpAcquisitionOperation, cancelMcpAcquisitionOperation } from '../../src/controllers/mcpAcquisitionController.js';
+  getMcpAcquisitionOperation, cancelMcpAcquisitionOperation, executeMcpAcquisitionOperation } from '../../src/controllers/mcpAcquisitionController.js';
+import { enqueueAcquisitionExecution } from '../../src/services/mcpAcquisitionExecutionQueue.js';
 import { loadSettings } from '../../src/config/configManager.js';
 import { getMarketServers } from '../../src/services/marketService.js';
 import { requireAdminMiddleware } from '../../src/utils/requireAdmin.js';
@@ -10,6 +11,7 @@ jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => ({ quer
 
 jest.mock('../../src/config/configManager.js', () => ({ loadSettings: jest.fn() }));
 jest.mock('../../src/services/marketService.js', () => ({ getMarketServers: jest.fn() }));
+jest.mock('../../src/services/mcpAcquisitionExecutionQueue.js',()=>({enqueueAcquisitionExecution:jest.fn()}));
 
 const app = express();
 let username: string | undefined;
@@ -22,7 +24,31 @@ app.get('/plans/:id', getMcpAcquisitionPlan);
 app.post('/plans/:id/authorize', authorizeMcpAcquisitionPlan);
 app.get('/operations/:id', getMcpAcquisitionOperation);
 app.post('/operations/:id/cancel', cancelMcpAcquisitionOperation);
+app.post('/operations/:id/execute', executeMcpAcquisitionOperation);
 beforeEach(() => { jest.resetAllMocks(); username = undefined; authMethod = undefined; });
+
+test('execution requires dashboard authentication and rejects caller-selected commands',async()=>{
+  username='alice';authMethod='apiKey';
+  await request(app).post('/operations/operation/execute').send({authMethod:'jwt'}).expect(403);
+  authMethod='jwt';
+  await request(app).post('/operations/operation/execute').send({command:'arbitrary.exe'}).expect(400);
+  expect(enqueueAcquisitionExecution).not.toHaveBeenCalled();
+});
+test('execution accepts an owner-bound background job without returning credential values',async()=>{
+  username='alice';authMethod='jwt';(enqueueAcquisitionExecution as jest.Mock).mockResolvedValue({accepted:true});
+  const result=await request(app).post('/operations/operation/execute').send({credentials:{API_KEY:'private-fixture'}}).expect(202);
+  expect(enqueueAcquisitionExecution).toHaveBeenCalledWith('alice','operation',{API_KEY:'private-fixture'});
+  expect(JSON.stringify(result.body)).not.toContain('private-fixture');
+});
+test('duplicate execution returns conflict without acknowledging another job',async()=>{
+  username='alice';authMethod='session';(enqueueAcquisitionExecution as jest.Mock).mockResolvedValue({accepted:false});
+  await request(app).post('/operations/operation/execute').send({}).expect(409);
+});
+test('unexpected execution errors cannot expose credential diagnostics',async()=>{
+  username='alice';authMethod='jwt';(enqueueAcquisitionExecution as jest.Mock).mockRejectedValue(new Error('private-fixture-value'));
+  const result=await request(app).post('/operations/operation/execute').send({credentials:{API_KEY:'private-fixture-value'}}).expect(503);
+  expect(JSON.stringify(result.body)).not.toContain('private-fixture-value');
+});
 
 test('shared admin gate denies requests without admin identity before catalog access', async () => {
   const guarded = express();

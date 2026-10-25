@@ -26,13 +26,23 @@ interface ExecutionDependencies {
 /** Exactly one claimed execution; plaintext credentials never enter the database, settings or phase metadata. */
 export async function runAcquisitionExecution(owner: string, operationId: string, credentials: Record<string, string> = {},
   overrides?: ExecutionDependencies): Promise<PhaseResult> {
+  const execute = await prepareAcquisitionExecution(owner, operationId, credentials, overrides);
+  return execute ? execute() : { status: 'not_claimed' };
+}
+
+/** Validate and acquire durable ownership before acknowledging an asynchronous HTTP request. */
+export async function prepareAcquisitionExecution(owner: string, operationId: string, credentials: Record<string, string> = {},
+  overrides?: ExecutionDependencies): Promise<(() => Promise<PhaseResult>) | null> {
+  if (!overrides && (process.platform !== 'win32' || process.env.MCPHUB_NATIVE_RUNTIME_ENABLED !== 'true')) {
+    throw new AcquisitionExecutionUnavailable('Installed Windows native runtime is required');
+  }
   const deps: ExecutionDependencies = overrides ?? { enabled: () => process.platform === 'win32' && process.env.MCPHUB_NATIVE_RUNTIME_ENABLED === 'true',
     repository: new AcquisitionOperationRepository(getAppDataSource()), putSecret: putNativeRuntimeSecret,
     stage: stageAcquisitionPackage, verify: verifyAcquisitionOperation, publish: publishVerifiedAcquisition,
     activate: activateAcquisition, rollback: rollbackPublishedAcquisition };
   if (!deps.enabled()) throw new AcquisitionExecutionUnavailable('Installed Windows native runtime is required');
   const candidate = await deps.repository.executionCandidate(owner, operationId);
-  if (!candidate) return { status: 'not_claimed' };
+  if (!candidate) return null;
   if (acquisitionManifestDigest(candidate.manifest) !== candidate.manifest_digest) throw new AcquisitionInputError('Acquisition plan integrity check failed');
   const required: string[] = candidate.manifest.requiredInputs;
   if (!credentials || typeof credentials !== 'object' || Array.isArray(credentials) || required.length > 64 ||
@@ -42,20 +52,28 @@ export async function runAcquisitionExecution(owner: string, operationId: string
       required.reduce((total, name) => total + (credentials[name]?.length ?? 0), 0) > 65536) {
     throw new AcquisitionInputError('Exact reviewed credentials are required');
   }
+  const values: Record<string, string> = Object.assign(Object.create(null), credentials);
+  credentials = Object.create(null);
   const claim = await deps.repository.claimExecution(owner, operationId, candidate.manifest_digest);
-  if (!claim) return { status: 'not_claimed' };
+  if (!claim) return null;
+  let started = false;
+  return async () => {
+  if (started) return { status: 'not_claimed' };
+  started = true;
   const reconcile = async (): Promise<PhaseResult> => {
     let checkpointSaved = false;
     try { checkpointSaved = await deps.repository.requireExecutionReconciliation(owner, operationId, claim.execution_claim_id); } catch { /* execution claim prevents replay */ }
     return { status: 'reconciliation_required', checkpointSaved };
   };
   try {
+    const operation = await deps.repository.get(owner, operationId);
+    if (operation?.cancel_requested || operation?.state === 'cancelled') return { status: 'cancelled' };
+    if (!operation || operation.requires_reconciliation) return reconcile();
     const references: Record<string, string> = Object.create(null);
     for (const name of required) {
       const id = `acq-${createHash('sha256').update(`${owner}\0${operationId}\0${name}`).digest('hex')}`;
-      await deps.putSecret(id, credentials[name]); references[name] = id;
+      await deps.putSecret(id, values[name]); references[name] = id; delete values[name];
     }
-    credentials = Object.create(null); // Do not retain plaintext throughout a long installation.
     const staged = await deps.stage(owner, operationId);
     if (staged.status !== 'package_staged') return ['failed', 'cancelled', 'reconciliation_required'].includes(staged.status) ? staged : reconcile();
     const verified = await deps.verify(owner, operationId, references);
@@ -70,4 +88,6 @@ export async function runAcquisitionExecution(owner: string, operationId: string
     }
     return reconcile();
   } catch { return reconcile(); }
+  finally { for (const name of Object.keys(values)) delete values[name]; }
+  };
 }

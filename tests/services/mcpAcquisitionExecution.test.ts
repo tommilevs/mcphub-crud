@@ -1,4 +1,4 @@
-import { runAcquisitionExecution } from '../../src/services/mcpAcquisitionExecution.js';
+import { runAcquisitionExecution, prepareAcquisitionExecution } from '../../src/services/mcpAcquisitionExecution.js';
 import { acquisitionManifestDigest } from '../../src/services/mcpAcquisitionPlan.js';
 
 describe('claimed acquisition execution pipeline',()=>{
@@ -43,8 +43,18 @@ describe('claimed acquisition execution pipeline',()=>{
   });
   test('cancellation after publication uses owned rollback instead of activation replay',async()=>{
     const deps=dependencies();deps.activate.mockResolvedValue({status:'not_claimed'});
-    deps.repository.get.mockResolvedValue({cancel_requested:true,requires_reconciliation:false});
+    deps.repository.get.mockResolvedValueOnce({cancel_requested:false}).mockResolvedValue({cancel_requested:true,requires_reconciliation:false});
     expect((await runAcquisitionExecution('alice','operation',{API_KEY:'secret'},deps)).status).toBe('rolled_back');
     expect(deps.rollback).toHaveBeenCalledWith('alice','operation');
+  });
+  test('a cancelled queued job never writes credentials or starts a package',async()=>{
+    const deps=dependencies();deps.repository.get.mockResolvedValue({cancel_requested:true});
+    expect((await runAcquisitionExecution('alice','operation',{API_KEY:'secret'},deps)).status).toBe('cancelled');
+    expect(deps.putSecret).not.toHaveBeenCalled();expect(deps.stage).not.toHaveBeenCalled();
+  });
+  test('prepared execution closure can run only once',async()=>{
+    const deps=dependencies(),execute=await prepareAcquisitionExecution('alice','operation',{API_KEY:'secret'},deps);
+    expect((await execute!()).status).toBe('ready');expect((await execute!()).status).toBe('not_claimed');
+    expect(deps.putSecret).toHaveBeenCalledTimes(1);expect(deps.stage).toHaveBeenCalledTimes(1);
   });
 });

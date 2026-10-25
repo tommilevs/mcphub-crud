@@ -5,6 +5,8 @@ import { AcquisitionInputError, proposeMcpServers } from '../services/mcpAcquisi
 import { getAppDataSource } from '../db/connection.js';
 import { AcquisitionPlanRepository, buildAcquisitionManifest } from '../services/mcpAcquisitionPlan.js';
 import { AcquisitionOperationRepository } from '../services/mcpAcquisitionOperation.js';
+import { enqueueAcquisitionExecution } from '../services/mcpAcquisitionExecutionQueue.js';
+import { AcquisitionExecutionUnavailable } from '../services/mcpAcquisitionExecution.js';
 
 /** Admin route: complete configured names are used only for duplicate exclusion. */
 export async function proposeMcpAcquisition(req: Request, res: Response): Promise<void> {
@@ -115,3 +117,25 @@ async function operationRequest(req: Request, res: Response, cancel: boolean): P
 }
 export const getMcpAcquisitionOperation = (req: Request, res: Response) => operationRequest(req, res, false);
 export const cancelMcpAcquisitionOperation = (req: Request, res: Response) => operationRequest(req, res, true);
+
+export async function executeMcpAcquisitionOperation(req: Request, res: Response): Promise<void> {
+  if (!(req as any).user?.isAdmin || !['jwt', 'session'].includes((req as any).authMethod)) {
+    res.status(403).json({ success: false, message: 'Dashboard administrator authentication is required' }); return;
+  }
+  const owner = ownerOf(req);
+  if (!owner) { res.status(401).json({ success: false, message: 'Authenticated owner is required' }); return; }
+  const body = req.body ?? {};
+  if (typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => key !== 'credentials')) {
+    res.status(400).json({ success: false, message: 'Only reviewed credentials may be supplied' }); return;
+  }
+  try {
+    const credentials = Object.prototype.hasOwnProperty.call(body, 'credentials') ? body.credentials : {};
+    const result = await enqueueAcquisitionExecution(owner, req.params.id as string, credentials);
+    if (!result.accepted) { res.status(409).json({ success: false, message: 'Operation is unavailable, expired or already started' }); return; }
+    res.status(202).json({ success: true, data: { operationId: req.params.id, status: 'accepted' } });
+  } catch (error) {
+    if (error instanceof AcquisitionInputError) { res.status(400).json({ success: false, message: error.message }); return; }
+    if (error instanceof AcquisitionExecutionUnavailable) { res.status(503).json({ success: false, message: error.message }); return; }
+    res.status(503).json({ success: false, message: 'Unable to start acquisition execution' });
+  } finally { req.body = {}; }
+}
