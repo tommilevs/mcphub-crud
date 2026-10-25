@@ -16,6 +16,8 @@ mod installer_jobs;
 #[cfg(windows)]
 mod installed_package;
 #[cfg(windows)]
+mod settings_lock;
+#[cfg(windows)]
 static INSTALLER_JOBS: std::sync::OnceLock<installer_jobs::InstallerJobs> = std::sync::OnceLock::new();
 #[cfg(windows)]
 static OPTIONS: std::sync::OnceLock<options::Options> = std::sync::OnceLock::new();
@@ -98,6 +100,9 @@ fn spawn_gateway() -> Option<(Child, Instant)> {
     });
     std::fs::create_dir_all(&data_dir).ok()?;
     let settings = data_dir.join("mcp_settings.json");
+    if !settings_lock::reconcile(&settings).ok()? {
+        return None;
+    }
     if !settings.exists() {
         let initial = serde_json::json!({
             "mcpServers": {},
