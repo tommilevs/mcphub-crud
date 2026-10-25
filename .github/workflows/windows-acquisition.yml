@@ -29,6 +29,19 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Build native service
         run: ./native/build-windows.ps1 -Action service
+      - uses: actions/checkout@v4
+        with:
+          repository: pgvector/pgvector
+          ref: v0.8.2
+          path: work/pgvector
+      - name: Build pinned pgvector for the disposable PostgreSQL cluster
+        run: |
+          $vswhere=Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
+          $vs=& $vswhere -latest -products * -property installationPath
+          $devCmd=Join-Path $vs 'Common7\Tools\VsDevCmd.bat'
+          $source=Join-Path $PWD 'work\pgvector'
+          & cmd.exe /d /c "call `"$devCmd`" -arch=x64 >nul && cd /d `"$source`" && nmake /F Makefile.win && nmake /F Makefile.win install"
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot build the pinned PostgreSQL vector extension.' }
       - name: Verify offline acquisition with isolated SCM and PostgreSQL
         timeout-minutes: 6
         run: ./native/test-acquisition-windows.ps1

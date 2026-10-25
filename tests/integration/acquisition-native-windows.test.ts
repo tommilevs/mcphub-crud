@@ -44,7 +44,9 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     process.env.MCPHUB_NATIVE_PIPE = process.env.MCPHUB_NATIVE_TEST_PIPE;
     const config = { host: '127.0.0.1', port: Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT),
       user: 'postgres', password: process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD, database: 'postgres' };
-    admin = new PgClient(config); await admin.connect(); await admin.query(`CREATE SCHEMA ${schema}`);
+    admin = new PgClient(config); await admin.connect();
+    await admin.query('CREATE EXTENSION IF NOT EXISTS vector');
+    await admin.query(`CREATE SCHEMA ${schema}`);
     pool = new Pool({ ...config, options: `-c search_path=${schema},public` });
     mockAcquisitionDb = { isInitialized: true, query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
     await ensureMcpAcquisitionSchema(mockAcquisitionDb);
