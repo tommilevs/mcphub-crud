@@ -268,8 +268,10 @@ using the configured Visual Studio/Windows SDK environment and existing staging.
 ### Clean Windows installer acceptance
 
 On a fresh Windows checkout, build the backend and frontend, then run
-`native/stage-runtime-windows.ps1`. It deploys production dependencies with pinned
-pnpm 10.12.4 and copies the selected Node executable. An existing staging directory
+`native/stage-runtime-windows.ps1`. It installs hoisted production dependencies
+with pinned pnpm 10.12.4 and the frozen lockfile, copies the package hook and
+selected Node executable, and avoids staging-store junctions in the bundle.
+An existing staging directory
 is rejected, never deleted or overwritten.
 
 The `Windows installer acceptance` Actions workflow builds with Tauri CLI 2.12.4

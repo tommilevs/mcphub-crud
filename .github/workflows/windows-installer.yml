@@ -33,6 +33,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           pnpm frontend:build
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # Stage portable hoisted dependencies rather than deployment junctions.
           ./native/stage-runtime-windows.ps1
       - name: Install pinned Tauri CLI
         run: cargo install tauri-cli --version 2.12.4 --locked

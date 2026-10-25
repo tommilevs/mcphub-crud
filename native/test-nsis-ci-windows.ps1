@@ -33,10 +33,16 @@ function Assert-Login([string]$Password){
 }
 try{
   Invoke-Installer
-  Wait-Gateway
   foreach($file in @('mcphub-tray.exe','mcphub-runtime-service.exe','runtime-install.ps1','runtime\node.exe','runtime\dist\index.js','runtime\frontend\dist\index.html')){
     if(-not(Test-Path -LiteralPath (Join-Path $install $file))){throw "Installed bundle is missing $file"}
   }
+  Push-Location (Join-Path $install 'runtime')
+  try{
+    # Probe installed files, not the build tree. No settings or credentials read.
+    & ./node.exe -e "try { for (const name of ['express','pg','bcryptjs','gpt-tokenizer']) require(name); console.log('Installed dependency imports passed.'); } catch(e) { console.error('Installed dependency import failed: '+e.code); process.exit(1); }"
+    if($LASTEXITCODE -ne 0){throw 'Installed production dependencies are not loadable.'}
+  }finally{Pop-Location}
+  Wait-Gateway
   $registration=Get-CimInstance Win32_Service -Filter "Name='MCPHub'"
   if($registration.State -ne 'Running' -or -not $registration.PathName.StartsWith('"'+(Join-Path $install 'mcphub-runtime-service.exe')+'" ')){
     throw 'Installed service registration does not target this bundle.'
