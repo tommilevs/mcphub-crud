@@ -1,0 +1,6 @@
+{
+  "name": "mcphub-acquisition-fixture",
+  "version": "1.0.0",
+  "bin": { "mcphub-acquisition-fixture": "index.cjs" },
+  "files": ["index.cjs"]
+}

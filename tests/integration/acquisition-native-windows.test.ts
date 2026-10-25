@@ -1,0 +1,136 @@
+jest.mock('openid-client', () => ({}));
+// Substitute only the isolated database connection and local catalog. The HTTP
+// auth, queue, repositories, npm/DPAPI IPC, MCP SDK and activation are real.
+let mockAcquisitionDb: any;
+jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => mockAcquisitionDb }));
+jest.mock('../../src/services/marketService.js', () => ({ getMarketServers: () => ({
+  'native-acquisition-fixture': { name: 'native-acquisition-fixture', installations: {
+    npm: { type: 'npm', command: 'npx', args: ['-y', 'mcphub-acquisition-fixture'] },
+  }, arguments: { FIXTURE_KEY: { required: true } } },
+}) }));
+import fs from 'node:fs';
+import path from 'node:path';
+import http from 'node:http';
+import { randomUUID, createHash } from 'node:crypto';
+import { Client as PgClient, Pool } from 'pg';
+import express from 'express';
+import request from 'supertest';
+import { ensureMcpAcquisitionSchema } from '../../src/db/mcpAcquisitionSchema.js';
+import { ensureToolResultHistorySchema } from '../../src/db/toolResultHistorySchema.js';
+import { clearSettingsCache } from '../../src/config/index.js';
+import { JsonFileDaoFactory, setDaoFactory } from '../../src/dao/DaoFactory.js';
+import { auth } from '../../src/middlewares/auth.js';
+import { requireAdminMiddleware } from '../../src/utils/requireAdmin.js';
+import { createUserToken } from '../utils/testHelpers.js';
+import { createMcpAcquisitionPlan, authorizeMcpAcquisitionPlan, executeMcpAcquisitionOperation,
+  getMcpAcquisitionOperation, cancelMcpAcquisitionOperation } from '../../src/controllers/mcpAcquisitionController.js';
+import { getServerByName, cleanupAllServers, initializeClientsFromSettings } from '../../src/services/mcpService.js';
+import { deleteNativeRuntimeSecret, forgetNativeInstall, getNativeRuntimeStatus } from '../../src/services/nativeRuntimeSecretService.js';
+
+const suite = process.platform === 'win32' && process.env.MCPHUB_ACQUISITION_TEST_ROOT &&
+  process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
+suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
+  const root = process.env.MCPHUB_ACQUISITION_TEST_ROOT!;
+  const schema = `native_acquisition_${randomUUID().replace(/-/g, '')}`;
+  const prefix = '/api/market/acquisition';
+  let admin: PgClient, pool: Pool, registry: http.Server, app: express.Express;
+  let id: string | undefined;
+  const original = { settings: process.env.MCPHUB_SETTING_PATH, useDb: process.env.USE_DB,
+    native: process.env.MCPHUB_NATIVE_RUNTIME_ENABLED, pipe: process.env.MCPHUB_NATIVE_PIPE };
+  beforeAll(async () => {
+    process.env.MCPHUB_SETTING_PATH = path.join(root, 'settings.json');
+    process.env.USE_DB = 'false';
+    process.env.MCPHUB_NATIVE_RUNTIME_ENABLED = 'true';
+    process.env.MCPHUB_NATIVE_PIPE = process.env.MCPHUB_NATIVE_TEST_PIPE;
+    const config = { host: '127.0.0.1', port: Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT),
+      user: 'postgres', password: process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD, database: 'postgres' };
+    admin = new PgClient(config); await admin.connect(); await admin.query(`CREATE SCHEMA ${schema}`);
+    pool = new Pool({ ...config, options: `-c search_path=${schema},public` });
+    mockAcquisitionDb = { isInitialized: true, query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
+    await ensureMcpAcquisitionSchema(mockAcquisitionDb);
+    await ensureToolResultHistorySchema(mockAcquisitionDb);
+    const settings = { mcpServers: {}, users: ['alice', 'bob'].map(username => ({ username, password: 'unused', isAdmin: true })),
+      groups: [{ id: 'fixture-group', name: 'fixture-group', owner: 'alice', visibility: 'private', servers: [] }],
+      systemConfig: { smartRouting: { enabled: false }, oauthServer: { enabled: false },
+        routing: { skipAuth: false, enableBearerAuth: false } } };
+    fs.writeFileSync(process.env.MCPHUB_SETTING_PATH, JSON.stringify(settings));
+    clearSettingsCache(); JsonFileDaoFactory.getInstance().resetInstances(); setDaoFactory(JsonFileDaoFactory.getInstance());
+    await initializeClientsFromSettings(true);
+    const tarball = fs.readFileSync(process.env.MCPHUB_ACQUISITION_TEST_TARBALL!);
+    const registryPort = Number(process.env.MCPHUB_ACQUISITION_REGISTRY_PORT);
+    registry = http.createServer((req, res) => {
+      if (req.url === '/fixture.tgz') { res.setHeader('Content-Type', 'application/octet-stream'); res.end(tarball); return; }
+      if (req.url === '/mcphub-acquisition-fixture') {
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ name: 'mcphub-acquisition-fixture', 'dist-tags': { latest: '1.0.0' }, versions: {
+          '1.0.0': { name: 'mcphub-acquisition-fixture', version: '1.0.0',
+            bin: { 'mcphub-acquisition-fixture': 'index.cjs' }, dist: {
+              tarball: `http://127.0.0.1:${registryPort}/fixture.tgz`, shasum: createHash('sha1').update(tarball).digest('hex'),
+            } },
+        } })); return;
+      }
+      res.statusCode = 404; res.end('{}');
+    });
+    await new Promise<void>((resolve, reject) => { registry.once('error', reject); registry.listen(registryPort, '127.0.0.1', resolve); });
+    app = express(); app.use(express.json()); app.use('/api', auth, requireAdminMiddleware);
+    app.post(`${prefix}/plans`, createMcpAcquisitionPlan);
+    app.post(`${prefix}/plans/:id/authorize`, authorizeMcpAcquisitionPlan);
+    app.post(`${prefix}/operations/:id/execute`, executeMcpAcquisitionOperation);
+    app.get(`${prefix}/operations/:id`, getMcpAcquisitionOperation);
+    app.post(`${prefix}/operations/:id/cancel`, cancelMcpAcquisitionOperation);
+  }, 30000);
+  afterAll(async () => {
+    const info = getServerByName('native-acquisition-fixture');
+    await info?.transport?.close(); await info?.client?.close(); cleanupAllServers();
+    if (id) {
+      await deleteNativeRuntimeSecret(`acq-${createHash('sha256').update(`alice\0${id}\0FIXTURE_KEY`).digest('hex')}`);
+      await forgetNativeInstall(id);
+    }
+    if (registry) await new Promise<void>(resolve => registry.close(() => resolve()));
+    if (pool) await pool.end();
+    if (admin) { await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); await admin.end(); }
+    for (const [name, value] of Object.entries({ MCPHUB_SETTING_PATH: original.settings, USE_DB: original.useDb,
+      MCPHUB_NATIVE_RUNTIME_ENABLED: original.native, MCPHUB_NATIVE_PIPE: original.pipe })) {
+      if (value === undefined) delete process.env[name]; else process.env[name] = value;
+    }
+    clearSettingsCache(); JsonFileDaoFactory.getInstance().resetInstances();
+  }, 30000);
+
+  test('JWT owner executes once, retains RAW, publishes and activates a credential-backed package', async () => {
+    const token = createUserToken('alice', true), bob = createUserToken('bob', true);
+    await request(app).post(`${prefix}/plans`).send({}).expect(401);
+    const plan = (await request(app).post(`${prefix}/plans`).set('x-auth-token', token)
+      .send({ serverName: 'native-acquisition-fixture', version: '1.0.0', targetGroup: 'fixture-group', probeTool: 'fixture_probe' }).expect(201)).body.data;
+    const operation = (await request(app).post(`${prefix}/plans/${plan.plan_id}/authorize`).set('x-auth-token', token)
+      .send({ digest: plan.manifest_digest, idempotencyKey: randomUUID() }).expect(200)).body.data;
+    id = operation.operation_id;
+    const endpoint = `${prefix}/operations/${id}`;
+    await request(app).post(`${endpoint}/execute`).set('x-auth-token', bob).send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(409);
+    const accepted = await request(app).post(`${endpoint}/execute`).set('x-auth-token', token)
+      .send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(202);
+    expect(JSON.stringify(accepted.body)).not.toContain('synthetic-acquisition-only');
+    await request(app).post(`${endpoint}/execute`).set('x-auth-token', token).send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(409);
+    const deadline = Date.now() + 90000;
+    let observed: any;
+    do {
+      observed = (await request(app).get(endpoint).set('x-auth-token', token).expect(200)).body.data;
+      if (['ready', 'failed', 'rolled_back', 'cancelled'].includes(observed.state) || observed.requires_reconciliation) break;
+      await new Promise(resolve => setTimeout(resolve, 250));
+    } while (Date.now() < deadline);
+    expect(observed).toMatchObject({ state: 'ready', verification: 'functional', execution_started: true, requires_reconciliation: false });
+    await request(app).get(endpoint).set('x-auth-token', bob).expect(404);
+    const raw = await pool.query('SELECT raw,status,payload_available FROM tool_results WHERE result_id=$1 AND username=$2', [observed.probe_result_id, 'alice']);
+    expect(raw.rows).toHaveLength(1); expect(raw.rows[0]).toMatchObject({ status: 'success', payload_available: true });
+    expect(JSON.stringify(raw.rows[0].raw)).toContain('credentialPresent');
+    expect(JSON.stringify(raw.rows[0].raw)).not.toContain('synthetic-acquisition-only');
+    const stored = fs.readFileSync(process.env.MCPHUB_SETTING_PATH!, 'utf8');
+    expect(stored).not.toContain('synthetic-acquisition-only');
+    expect(JSON.parse(stored).groups[0].servers).toEqual([{ name: 'native-acquisition-fixture', tools: ['check_environment', 'fixture_probe'], prompts: [], resources: [] }]);
+    const info = getServerByName('native-acquisition-fixture');
+    expect(info?.status).toBe('connected');
+    const called = await info!.client!.callTool({ name: 'check_environment', arguments: {} });
+    expect(called.content).toEqual([{ type: 'text', text: '{"credentialPresent":true}' }]);
+    expect(fs.readFileSync(path.join(root, 'acquisitions', id!, 'probe-calls.txt'), 'utf8')).toBe('probe\n');
+    expect(JSON.stringify(await getNativeRuntimeStatus())).not.toContain('synthetic-acquisition-only');
+  }, 100000);
+});
