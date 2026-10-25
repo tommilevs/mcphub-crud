@@ -53,12 +53,19 @@ try{
   $password=[Text.Encoding]::UTF8.GetString($plain);[Array]::Clear($plain,0,$plain.Length)
   Assert-Login $password
   if($CheckTray){
-    $tray=Start-Process -FilePath (Join-Path $install 'mcphub-tray.exe') -ArgumentList '--open-dashboard' -WindowStyle Hidden -PassThru
+    $trayStart=[Diagnostics.ProcessStartInfo]::new((Join-Path $install 'mcphub-tray.exe'))
+    $trayStart.ArgumentList.Add('--open-dashboard')
+    $trayStart.UseShellExecute=$false
+    $trayStart.CreateNoWindow=$true
+    $trayStart.WindowStyle=[Diagnostics.ProcessWindowStyle]::Hidden
+    $trayStart.RedirectStandardError=$true
+    $tray=[Diagnostics.Process]::Start($trayStart)
+    $trayErrors=$tray.StandardError.ReadToEndAsync()
     try{
       $deadline=[DateTime]::UtcNow.AddSeconds(60)
       do{
         $tray.Refresh()
-        if($tray.HasExited){throw 'Installed tray exited before opening its dashboard.'}
+        if($tray.HasExited){throw "Installed tray exited before opening its dashboard (code $($tray.ExitCode))."}
         if($tray.MainWindowHandle -ne [IntPtr]::Zero -and $tray.MainWindowTitle -match 'MCPHub'){break}
         Start-Sleep -Milliseconds 250
       }while([DateTime]::UtcNow -lt $deadline)
@@ -70,7 +77,7 @@ try{
       do{
         Start-Sleep -Milliseconds 100
         $tray.Refresh()
-        if($tray.HasExited){throw 'Closing the dashboard terminated the tray.'}
+        if($tray.HasExited){throw "Closing the dashboard terminated the tray (code $($tray.ExitCode))."}
         if($tray.MainWindowHandle -eq [IntPtr]::Zero){break}
       }while([DateTime]::UtcNow -lt $deadline)
       if($tray.MainWindowHandle -ne [IntPtr]::Zero){throw 'Closing the dashboard did not hide its window.'}
@@ -79,6 +86,13 @@ try{
       Write-Output 'Installed tray passed: dashboard window created, close hides without exiting, service gateway and login remain available.'
     }finally{
       if(-not $tray.HasExited){$tray.Kill();$tray.WaitForExit(10000)|Out-Null}
+      # Only extract known failure categories; never publish arbitrary stderr.
+      if($trayErrors.IsCompleted){
+        $stderr=$trayErrors.GetAwaiter().GetResult()
+        $categories=[regex]::Matches($stderr,'(?i)WebView2|tray icon|error while running tauri application|panicked|access denied|os error [0-9]+|0x[0-9a-f]{8}') | ForEach-Object {$_.Value} | Select-Object -Unique
+        if($categories){Write-Output ('Tray diagnostic categories: '+($categories -join ', '))}
+        $stderr=$null
+      }
       $tray.Dispose()
     }
   }
