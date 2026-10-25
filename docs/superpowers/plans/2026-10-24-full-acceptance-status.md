@@ -7,7 +7,7 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | Required area | Existing evidence | Remaining gate |
 | --- | --- | --- |
 | Upstream compatibility | v1.1.8 baseline; legacy routing and group tests | Final deployed configuration acceptance |
-| Immutable RAW, IDs, retention, pins | Production schema initialized twice on PostgreSQL; immutable UPDATE rejection; independent state; 10,005 owner rows pruned to 10,000 plus pins, another owner preserved, expired chunks cascaded | Representative payload-size/search workload and deployed data acceptance |
+| Immutable RAW, IDs, retention, pins | Production schema initialized twice on PostgreSQL; immutable UPDATE rejection; HTTP RAW/range/admin/pin checks; 10,005 owner rows pruned to 10,000 plus pins, another owner preserved, expired chunks cascaded | Representative payload-size/search workload and deployed data acceptance |
 | Hybrid history retrieval | Real PostgreSQL regressions plus 10k indexed rows with 1536-dimensional vectors: unique scoped hits, correct final pagination, oldest pin protected | Mixed real-payload retrieval quality and deployed data acceptance |
 | Objective-aware large replies | Exact-source BM25, vector fusion, token budgets, immutable capture proof, structured outputs, JSON/diff boundaries and bounded file-header context; dispatcher tests and local 1 MB logs/JSON/diff smoke benchmark | Live vector/provider acceptance and representative workload calibration |
 | Per-tool policies | Controller persistence/validation tests; actual browser add/save/remove and bounds checks | Deployed settings acceptance |
@@ -102,3 +102,16 @@ the authentication implementation, MCP routing, upstream transport and PostgreSQ
 nonce storage are real. The isolated schema is dropped and checked absent. This
 closes the fixture-authentication gap for this path, while external deployment and
 an adapter consuming actual provider responses remain unverified.
+
+The History HTTP run
+[40172124338](https://github.com/tommilevs/mcphub-crud/actions/runs/40172124338)
+passes 30 integration tests. Application authentication and History controllers
+read actual PostgreSQL records: anonymous RAW access returns 401, non-admin RAW
+and pin access return 403, filtered metadata lists omit RAW, and administrator RAW
+matches the retained serialized string exactly. An octet-stream range splitting
+an emoji returns the original bytes with the exact Content-Range; invalid ranges
+return 400, omitted payloads return 409 and an absent result returns 404. Pin and
+usage updates preserve RAW and its digest. The disposable schema includes public
+in its search path for the pgvector extension, and is dropped and checked absent.
+These are synthetic records through real HTTP/authentication/controllers/storage,
+not browser or deployed-data acceptance.
