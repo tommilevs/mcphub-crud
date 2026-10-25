@@ -214,3 +214,21 @@ environment gates (339 suites / 3,150 tests total). The direct command was
 `node node_modules/jest/bin/jest.js --runInBand --silent` and exited 0 in 164.873 s.
 This closes the earlier missing full regression rerun after the corrected
 LoopGuard expectation. Skipped database/deployment gates remain separate evidence.
+
+The clean Windows run 40188903444 built the official 52.97 MiB NSIS bundle and
+passed occupied-port preflight, but full installation failed its gateway health
+gate. It therefore did not establish successful install/upgrade/uninstall.
+Earlier clean runs exposed build-helper environment bugs: PATH expanded before
+VsDevCmd selected Git's link.exe; a manually selected SDK LIB then lacked
+kernel32.lib. The helper now preserves both initialized selections. Its local
+check and all 24 native core/service tests pass.
+
+Fresh pinned `pnpm deploy` staging passed the isolated helper lifecycle before
+bundling, but its package entries were junctions into the staging virtual store.
+Commit dcc39ab switches to frozen-lockfile hoisted installation, including the
+package hook required by the lockfile checksum. Fresh portable staging has real
+package directories and passed install/login/upgrade/data retention/uninstall,
+plus imports of express, pg, bcryptjs and gpt-tokenizer. The full installer test
+now probes those dependencies from the installed directory before checking health.
+Run 40190705042 is the new full-NSIS acceptance gate; its result is still pending.
+The packaging hypothesis is not considered resolved until that gate passes.
