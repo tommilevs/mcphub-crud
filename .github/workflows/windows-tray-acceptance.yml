@@ -1,0 +1,28 @@
+name: Windows installed tray acceptance
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/tool-result-history]
+    paths: ['.github/workflows/windows-tray-acceptance.yml']
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  tray:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # Reuse the exact bundle that passed full installation; do not rebuild it.
+      - uses: actions/download-artifact@v4
+        with:
+          name: MCPHub-Windows-tested-installer
+          run-id: 40190705042
+          github-token: ${{ github.token }}
+          path: tested-installer
+      - name: Verify installed tray on disposable Windows
+        shell: pwsh
+        run: ./native/test-nsis-ci-windows.ps1 -InstallerPath tested-installer/MCPHub_1.1.8_x64-setup.exe -CheckTray

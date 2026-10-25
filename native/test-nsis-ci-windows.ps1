@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$InstallerPath)
+param([Parameter(Mandatory=$true)][string]$InstallerPath,[switch]$CheckTray)
 $ErrorActionPreference='Stop'
 # This test installs the real default service. It must never run on a user's PC
 # or a self-hosted runner that could contain an existing installation.
@@ -52,6 +52,36 @@ try{
   $plain=[Security.Cryptography.ProtectedData]::Unprotect($encrypted,$null,[Security.Cryptography.DataProtectionScope]::LocalMachine)
   $password=[Text.Encoding]::UTF8.GetString($plain);[Array]::Clear($plain,0,$plain.Length)
   Assert-Login $password
+  if($CheckTray){
+    $tray=Start-Process -FilePath (Join-Path $install 'mcphub-tray.exe') -WindowStyle Hidden -PassThru
+    try{
+      $deadline=[DateTime]::UtcNow.AddSeconds(60)
+      do{
+        $tray.Refresh()
+        if($tray.HasExited){throw 'Installed tray exited before opening its dashboard.'}
+        if($tray.MainWindowHandle -ne [IntPtr]::Zero){break}
+        Start-Sleep -Milliseconds 250
+      }while([DateTime]::UtcNow -lt $deadline)
+      if($tray.MainWindowHandle -eq [IntPtr]::Zero -or $tray.MainWindowTitle -notmatch 'MCPHub'){
+        throw 'Installed tray did not create its dashboard window.'
+      }
+      if(-not $tray.CloseMainWindow()){throw 'Installed dashboard did not accept a close request.'}
+      $deadline=[DateTime]::UtcNow.AddSeconds(10)
+      do{
+        Start-Sleep -Milliseconds 100
+        $tray.Refresh()
+        if($tray.HasExited){throw 'Closing the dashboard terminated the tray.'}
+        if($tray.MainWindowHandle -eq [IntPtr]::Zero){break}
+      }while([DateTime]::UtcNow -lt $deadline)
+      if($tray.MainWindowHandle -ne [IntPtr]::Zero){throw 'Closing the dashboard did not hide its window.'}
+      Wait-Gateway
+      Assert-Login $password
+      Write-Output 'Installed tray passed: dashboard window created, close hides without exiting, service gateway and login remain available.'
+    }finally{
+      if(-not $tray.HasExited){$tray.Kill();$tray.WaitForExit(10000)|Out-Null}
+      $tray.Dispose()
+    }
+  }
   $shortcutRoots=@([Environment]::GetFolderPath('CommonPrograms'),[Environment]::GetFolderPath('Programs'))
   $links=@($shortcutRoots | Where-Object {$_ -and (Test-Path -LiteralPath $_)} | ForEach-Object {Get-ChildItem -LiteralPath $_ -Filter 'MCPHub.lnk' -Recurse})
   $shell=New-Object -ComObject WScript.Shell
