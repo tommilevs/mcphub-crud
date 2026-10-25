@@ -4,6 +4,7 @@ import { ensureAttributionContextSchema } from '../../src/db/attributionContextS
 import { AttributionContextRepository } from '../../src/db/repositories/AttributionContextRepository.js';
 import { AttributionContextService } from '../../src/services/attributionContextService.js';
 import type { Request, Response } from 'express';
+import express from 'express';
 let mockSummaryDb: { query: (sql: string, parameters?: unknown[]) => Promise<any>;transaction?:(work:(db:any)=>Promise<any>)=>Promise<any> };
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => mockSummaryDb }));
 import { getAttributionSummary } from '../../src/controllers/attributionController.js';
@@ -126,6 +127,81 @@ suite('attribution PostgreSQL isolated schema', () => {
       if(oldKeys===undefined)delete process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;else process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=oldKeys;
     }
   });
+  test('isolates concurrent loopback HTTP clients and consumes signed replay proof once', async () => {
+    const oldMode=process.env.MCPHUB_ATTRIBUTION_MODE,oldKeys=process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;
+    const secret='synthetic-http-adapter-key-at-least-32-characters';
+    process.env.MCPHUB_ATTRIBUTION_MODE='compatible';
+    process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=JSON.stringify({httpFixture:secret});
+    // Fixture authentication assigns trusted identities. Request payload claims
+    // never choose the owner. This tests HTTP/runtime/PG, not production auth.
+    const identities:Record<string,{username:string;keyId:string}>={
+      'fixture-a':{username:'http-alice',keyId:'key-a'},
+      'fixture-b':{username:'http-alice',keyId:'key-b'},
+      'fixture-c':{username:'http-bob',keyId:'key-c'},
+    };
+    const app=express();app.use(express.json());
+    app.post('/invoke',async(req,res)=>{
+      const owner=identities[req.headers.authorization?.replace(/^Bearer /,'')??''];
+      if(!owner){res.sendStatus(401);return;}
+      try{
+        const response=await RequestContextService.getInstance().runWithCustomRequestContext({headers:{},...owner,remoteAddress:req.socket.remoteAddress},()=>
+          runWithAttribution({params:req.body.params},async(cleaned)=>{
+            const before=getCallAttribution();
+            await new Promise(resolve=>setTimeout(resolve,req.body.id%3*5));
+            return {before,after:getCallAttribution(),forwarded:cleaned.params.arguments};
+          },req.body.id));
+        res.json(response);
+      }catch{res.sendStatus(500);}
+    });
+    const server=app.listen(0,'127.0.0.1');
+    try{
+      await new Promise<void>((resolve,reject)=>{server.once('listening',resolve);server.once('error',reject);});
+      const address=server.address();
+      if(!address||typeof address==='string')throw new Error('HTTP fixture did not bind');
+      const base=`http://127.0.0.1:${address.port}`;
+      const invoke=async(token:string,request:any)=>{
+        const response=await fetch(`${base}/invoke`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify(request)});
+        expect(response.status).toBe(200);return response.json();
+      };
+      const request=(id:number,hub_context:any)=>({id,params:{name:'call_tool',arguments:{toolName:'demo',hub_context}}});
+      const starts=await Promise.all(['fixture-a','fixture-a','fixture-b','fixture-c'].map((token,index)=>
+        invoke(token,request(index+1,{action:'start',model_claim:'shared-model',client_name_claim:index%2?'Codex':'other-client',task_hint:`task-${index}`}))));
+      expect(new Set(starts.map(value=>value.before.taskId)).size).toBe(4);
+      expect(new Set(starts.map(value=>value.before.callId)).size).toBe(4);
+      for(const result of starts){
+        expect(result.before).toEqual(result.after);
+        expect(result.before.identity).toMatchObject({modelId:'shared-model',source:'self_reported',verified:false});
+        expect(result.forwarded).toEqual({toolName:'demo'});
+      }
+      const key=starts[0]._meta['dev.mcphub/context'].trace_key;
+      const continued=await Promise.all([invoke('fixture-a',request(11,{trace_key:key})),invoke('fixture-a',request(12,{trace_key:key}))]);
+      expect(continued.map(value=>value.before.contextId)).toEqual([starts[0].before.contextId,starts[0].before.contextId]);
+      expect(continued[0].before.callId).not.toBe(continued[1].before.callId);
+      const foreign=await Promise.all(['fixture-b','fixture-c'].map(token=>invoke(token,request(13,{trace_key:key}))));
+      expect(foreign.every(value=>value.before.contextId===null&&value.before.identity.source==='unknown')).toBe(true);
+      const forked=await invoke('fixture-a',request(14,{action:'fork',trace_key:key}));
+      expect(forked.before.traceId).toBe(starts[0].before.traceId);
+      expect(forked.before.taskId).toBe(starts[0].before.taskId);
+      expect(forked.before.branchId).not.toBe(starts[0].before.branchId);
+
+      const signed:any=request(21,{action:'start',model_claim:'shared-model'});
+      const provider={id:'http-response',model:'shared-model',choices:[{message:{tool_calls:[{id:'http-tool-call',type:'function',function:{name:'call_tool',arguments:JSON.stringify(signed.params.arguments)}}]}}]};
+      signed.params._meta={'dev.mcphub/provenance':createGatewayProof(provider,'http-tool-call',signed,
+        {adapterId:'httpFixture',principal:JSON.stringify(['http-alice','key-a']),secret})};
+      const replayed=await Promise.all([invoke('fixture-a',signed),invoke('fixture-a',signed)]);
+      expect(replayed.filter(value=>value.before.identity.verified)).toHaveLength(1);
+      const winner=replayed.find(value=>value.before.identity.verified)!;
+      expect(winner.before.identity.source).toBe('gateway_observed');
+      expect(winner.before).toEqual(winner.after);
+      const unsigned=await invoke('fixture-a',request(22,{trace_key:winner._meta['dev.mcphub/context'].trace_key}));
+      expect(unsigned.before.identity).toMatchObject({source:'self_reported',verified:false});
+    }finally{
+      await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+      if(oldMode===undefined)delete process.env.MCPHUB_ATTRIBUTION_MODE;else process.env.MCPHUB_ATTRIBUTION_MODE=oldMode;
+      if(oldKeys===undefined)delete process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;else process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=oldKeys;
+    }
+  });
+
   test('rolls back context issuance when its identity event cannot be saved', async () => {
     const before = (await pool.query('SELECT count(*) FROM attribution_contexts')).rows[0].count;
     await pool.query(`CREATE FUNCTION reject_test_event() RETURNS trigger LANGUAGE plpgsql AS $$
