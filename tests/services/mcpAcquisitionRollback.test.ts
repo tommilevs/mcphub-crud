@@ -1,6 +1,8 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { AsyncResource } from 'node:async_hooks';
+import { withJsonDaoTransaction } from '../../src/services/jsonDaoTransaction.js';
 import { rollbackPublishedJsonAcquisition } from '../../src/services/mcpAcquisitionRollback.js';
 import { publishJsonAcquisition } from '../../src/services/mcpAcquisitionJsonPublication.js';
 
@@ -42,5 +44,17 @@ describe('publication rollback continuation',()=>{
     const deps=dependencies();deps.cleanup.mockRejectedValue(new Error('native stop unavailable'));
     expect((await rollbackPublishedJsonAcquisition('alice','operation',target,deps)).status).toBe('reconciliation_required');
     expect(deps.repository.completePublicationRollback).not.toHaveBeenCalled();
+  });
+  test('cleanup can drain DAO work created outside the rollback context',async()=>{
+    const deps=dependencies(),background=new AsyncResource('existing-embedding-task');
+    deps.cleanup.mockImplementation(async()=>{
+      let timer:NodeJS.Timeout|undefined;
+      try{
+        await Promise.race([background.runInAsyncScope(()=>withJsonDaoTransaction(async()=>undefined)),
+          new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('DAO queue deadlocked')),300);})]);
+      }finally{if(timer)clearTimeout(timer);}
+    });
+    try{expect((await rollbackPublishedJsonAcquisition('alice','operation',target,deps)).status).toBe('rolled_back');}
+    finally{background.emitDestroy();}
   });
 });

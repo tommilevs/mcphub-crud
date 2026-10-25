@@ -3,7 +3,6 @@ import { getAppDataSource } from '../db/connection.js';
 import { AcquisitionOperationRepository } from './mcpAcquisitionOperation.js';
 import { rollbackJsonAcquisition, type JsonPublicationReservation } from './mcpAcquisitionJsonPublication.js';
 import type { PublicationReceipt } from './mcpAcquisitionPublicationSettings.js';
-import { withJsonDaoTransaction } from './jsonDaoTransaction.js';
 import { withJsonSettingsFileLock } from './jsonSettingsFileLock.js';
 
 /** Stop only this operation's runtime, drain embedding work and verify removal. Package staging is retained. */
@@ -51,13 +50,15 @@ export async function rollbackPublishedJsonAcquisition(owner: string, operationI
     if (publication.receipt.operationId !== operationId || publication.receipt.server.owner !== owner) {
       throw new Error('Rollback does not match the publication owner');
     }
-    await withJsonDaoTransaction(() => withJsonSettingsFileLock(target, async () => {
+    // Do not hold the DAO queue while draining runtime/embedding work: an earlier
+    // embedding task may itself need that queue. The file lock still excludes writers.
+    await withJsonSettingsFileLock(target, async () => {
       const result = await rollbackJsonAcquisition(target, publication);
       await cleanup(publication.receipt);
       if (!await repository.completePublicationRollback(owner, operationId, claim.rollback_claim_id, result.digest)) {
         throw new Error('Rollback outcome could not be committed');
       }
-    }));
+    });
     return { status: 'rolled_back' as const };
   } catch {
     let checkpointSaved = false;
