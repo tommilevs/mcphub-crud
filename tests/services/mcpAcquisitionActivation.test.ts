@@ -1,4 +1,6 @@
 import { observeAcquisitionRuntime } from '../../src/services/mcpAcquisitionActivation.js';
+import { Client } from '@modelcontextprotocol/client';
+import { Server, InMemoryTransport } from '@modelcontextprotocol/server';
 
 describe('acquisition runtime observation',()=>{
   const receipt:any={operationId:'operation',serverName:'fixture',server:{owner:'alice'},entry:{tools:['ping']}};
@@ -34,5 +36,21 @@ describe('acquisition runtime observation',()=>{
   test('rejects cyclic pagination without treating a partial list as complete',async()=>{
     const deps=dependencies();deps.info.client.listTools.mockResolvedValue({tools:[{name:'ping',inputSchema:{type:'object'}}],nextCursor:'again'});
     await expect(observeAcquisitionRuntime(receipt,deps)).rejects.toThrow('pagination');
+  });
+  test('uses a real paginated SDK exchange and never repeats a functional tool call',async()=>{
+    const server=new Server({name:'activation-fixture',version:'1'},{capabilities:{tools:{}}});
+    const list=jest.fn().mockImplementation(async request=>request.params?.cursor
+      ? {tools:[{name:'ping',inputSchema:{type:'object'}}]}
+      : {tools:[{name:'other',inputSchema:{type:'object'}}],nextCursor:'second'});
+    const call=jest.fn().mockResolvedValue({content:[]});
+    server.setRequestHandler('tools/list',list);server.setRequestHandler('tools/call',call);
+    const client=new Client({name:'activation-client',version:'1'},{capabilities:{}});
+    const [clientTransport,serverTransport]=InMemoryTransport.createLinkedPair();
+    try{
+      await server.connect(serverTransport);await client.connect(clientTransport);
+      const deps=dependencies();deps.info.client=client;
+      expect(await observeAcquisitionRuntime(receipt,deps)).toMatchObject({tools:['other','ping'],indexStatus:'verified'});
+      expect(list).toHaveBeenCalledTimes(2);expect(call).not.toHaveBeenCalled();
+    }finally{await client.close();await server.close();}
   });
 });
