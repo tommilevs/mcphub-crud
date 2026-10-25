@@ -50,6 +50,9 @@ export async function ensureMcpAcquisitionSchema(db: { query(sql: string): Promi
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS activation_claim_id uuid;
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS activation jsonb;
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS activated_at timestamptz;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS rollback_claim_id uuid;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS rollback_digest char(64);
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS rolled_back_at timestamptz;
     CREATE OR REPLACE FUNCTION protect_mcp_acquisition_publication() RETURNS trigger AS $$
       BEGIN
         IF OLD.publication IS NOT NULL AND

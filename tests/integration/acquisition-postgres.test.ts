@@ -166,6 +166,14 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect(await operations.recordPublicationApplied('alice',id,claim.claim_id,'c'.repeat(64))).toBe(false);
     expect((await restarted.getPublication('alice',id)).publication_applied_digest).toBe('b'.repeat(64));
     await expect(pool.query('UPDATE mcp_acquisition_operations SET publication_applied_digest=NULL WHERE operation_id=$1',[id])).rejects.toThrow('immutable');
+    expect(await operations.transition('alice',id,claim.claim_id,'verifying','rolled_back')).toBeNull();
+    expect(await operations.claimPublicationRollback('bob',id)).toBeNull();
+    const rollbacks=(await Promise.all(Array.from({length:5},()=>operations.claimPublicationRollback('alice',id)))).filter(Boolean);
+    expect(rollbacks).toHaveLength(1);
+    expect(await operations.completePublicationRollback('alice',id,randomUUID(),'c'.repeat(64))).toBe(false);
+    expect(await operations.completePublicationRollback('alice',id,rollbacks[0].rollback_claim_id,'c'.repeat(64))).toBe(true);
+    expect((await operations.get('alice',id)).state).toBe('rolled_back');
+    expect(await operations.claimPublicationRollback('alice',id)).toBeNull();
   });
 
   test('ready requires one activation claim after publication and verified tool coverage', async () => {

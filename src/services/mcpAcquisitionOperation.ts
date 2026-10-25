@@ -112,6 +112,7 @@ export class AcquisitionOperationRepository {
       WHERE operation_id=$1 AND owner=$2 AND claim_id=$3 AND state=$4
       AND (NOT cancel_requested OR $5 IN ('failed','rolled_back'))
       AND (NOT requires_reconciliation OR $5 IN ('failed','rolled_back'))
+      AND ($5 <> 'rolled_back' OR publication IS NULL)
       RETURNING operation_id,state,cancel_requested`, [operationId, owner, claimId, from, to, failureCode]);
     return rows[0] ?? null;
   }
@@ -122,9 +123,33 @@ export class AcquisitionOperationRepository {
     const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET activation_claim_id=$3,updated_at=NOW()
       WHERE operation_id=$1 AND owner=$2 AND state='verifying' AND claim_id IS NOT NULL
       AND publication IS NOT NULL AND publication_applied_digest IS NOT NULL AND activation_claim_id IS NULL
-      AND NOT cancel_requested AND NOT requires_reconciliation
+      AND NOT cancel_requested AND NOT requires_reconciliation AND rollback_claim_id IS NULL
       RETURNING claim_id,activation_claim_id,publication,publication_applied_digest`, [operationId, owner, activationClaim]);
     return rows[0] ?? null;
+  }
+
+  async claimPublicationRollback(owner: string, operationId: string) {
+    if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
+    const token = randomUUID();
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET rollback_claim_id=$3,updated_at=NOW()
+      WHERE operation_id=$1 AND owner=$2 AND state IN ('verifying','failed')
+      AND claim_id IS NOT NULL AND publication IS NOT NULL AND rollback_claim_id IS NULL
+      AND (cancel_requested OR requires_reconciliation OR state='failed')
+      AND (activation_claim_id IS NULL OR requires_reconciliation)
+      AND (publication_applied_digest IS NOT NULL OR requires_reconciliation)
+      RETURNING claim_id,rollback_claim_id,publication`, [operationId, owner, token]);
+    return rows[0] ?? null;
+  }
+
+  async completePublicationRollback(owner: string, operationId: string, token: string, digest: string) {
+    if (!uuid.test(operationId) || !uuid.test(token) || !/^[a-f0-9]{64}$/.test(digest)) {
+      throw new AcquisitionInputError('Invalid publication rollback outcome');
+    }
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET state='rolled_back',rollback_digest=$4,
+      rolled_back_at=NOW(),requires_reconciliation=FALSE,updated_at=NOW()
+      WHERE operation_id=$1 AND owner=$2 AND rollback_claim_id=$3 AND state IN ('verifying','failed')
+      AND publication IS NOT NULL AND rollback_digest IS NULL RETURNING operation_id`, [operationId, owner, token, digest]);
+    return rows.length > 0;
   }
 
   /** Only the runtime/index coordinator supplies this evidence, after observing actual activation. */
@@ -154,7 +179,7 @@ export class AcquisitionOperationRepository {
   async requireReconciliation(owner: string, operationId: string, claimId: string) {
     const rows = await this.db.query(`UPDATE mcp_acquisition_operations
       SET requires_reconciliation=TRUE,failure_code='native_state_unknown',updated_at=NOW()
-      WHERE operation_id=$1 AND owner=$2 AND claim_id=$3 AND state IN ('staging','starting','verifying')
+      WHERE operation_id=$1 AND owner=$2 AND claim_id=$3 AND state IN ('staging','starting','verifying','failed')
       RETURNING operation_id`, [operationId, owner, claimId]);
     return rows.length > 0;
   }
