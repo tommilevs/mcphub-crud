@@ -123,3 +123,12 @@ distinguish absent, lexical-only and vector-ready indexes for the exact result;
 another result's vectors do not enable the request. The chunks endpoint reports
 the retained version and embedding dimensions. Controller tests also verify that
 hybrid search still requests an embedding when vectors are ready.
+
+[40172626694](https://github.com/tommilevs/mcphub-crud/actions/runs/40172626694)
+passes the same 30-test integration set with additional History HTTP assertions:
+equal RAW digests compare equal, omitted payloads do not; comparison metadata
+excludes RAW; invalid comparison sizes and non-admin requests are rejected.
+Owner-filtered statistics match record/pin/payload/byte counts and expose retrieval
+counters. Session and conversation timelines return both linked results without
+RAW, and lineage resolves the retained parent. Browser and deployed-data
+acceptance remain separate gates.
