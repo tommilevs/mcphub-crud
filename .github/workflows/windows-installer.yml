@@ -37,7 +37,7 @@ jobs:
       - name: Install pinned Tauri CLI
         run: cargo install tauri-cli --version 2.12.4 --locked
       - name: Build official NSIS bundle
-        # Build helper preserves the MSVC environment after VsDevCmd initializes it.
+        # Preserve VsDevCmd's matching MSVC PATH and Windows SDK LIB selection.
         run: ./native/build-windows.ps1 -Action bundle
       - name: Verify fresh-install port preflight
         run: ./native/test-installer-preflight-windows.ps1
