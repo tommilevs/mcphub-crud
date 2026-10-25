@@ -13,7 +13,7 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | Per-tool policies | Controller persistence/validation tests; actual browser add/save/remove and bounds checks | Deployed settings acceptance |
 | Result Explorer | Browser timeline pagination, stale-response rejection, network recovery and exact chunk-to-RAW highlighting; source compare/chunks/metrics | Complete Smart/RAW/Chunks/Related acceptance with deployed data |
 | MCP-Zero | Hierarchical retrieval, scope/fallback and RRF dedup tests; offline paired evaluation reporter with ranking metrics and measured latency/token summaries | Representative live/recorded precision/recall, cold/warm latency and token-cost benchmark |
-| Model attribution | Real PostgreSQL concurrent rotation, nonce winner, call-bound proof and review concurrency tests; concurrent loopback HTTP clients with per-key/task isolation and one-time signed replay | External concurrent-client and trusted gateway deployment acceptance |
+| Model attribution | Real PostgreSQL concurrent rotation, nonce winner, call-bound proof and review concurrency tests; concurrent loopback HTTP and SDK Streamable HTTP clients with per-key/task isolation and signed invocation IDs | External concurrent-client and trusted gateway deployment acceptance |
 | LoopGuard / ToolPilot | Failure loops, explicit unchanged-success tools, repeat-intent exclusions, scoped feedback, bounded metadata-only provider tests; PostgreSQL branch/feedback/reaction isolation; isolated browser acceptance of unchanged-success settings and advice | Full deployed settings/detail acceptance; independently verified reactions/outcomes |
 | Experience Memory | Scope/evidence tests and reviewed manual advice | Broader verified strategies and deployment acceptance; optional adapters remain optional |
 | Dataset / Skills | Reviewed SFT, recorded trajectories, DPO, split registry and miner tests; PostgreSQL preview/export tenant/latest-consent gates and current independent Experience evidence | Broader deployed export/skills acceptance; no fabricated original conversation |
@@ -77,3 +77,15 @@ Concurrent reuse of one signed invocation yields exactly one verified call, whil
 an unsigned continuation remains self-reported. Fixture authentication assigns
 synthetic principals and the upstream handler is a stub. This does not establish
 production authentication, full MCP transport or external provider integration.
+
+The follow-up
+[40171455169](https://github.com/tommilevs/mcphub-crud/actions/runs/40171455169)
+passes 25 PostgreSQL integration tests, including two real MCP SDK clients over
+Streamable HTTP. SDK calls retain distinct owner/task contexts, reject another
+key's trace and strip hub arguments before forwarding. An adapter inserts proof
+at the client transport's send boundary using the actual JSON-RPC invocation ID;
+the server passes the SDK's original request ID to the attribution runtime and
+successfully verifies the proof. An unsigned continuation remains self-reported.
+The SDK, TCP transport, runtime and PostgreSQL are real; authentication and the
+upstream tool remain fixtures. Production routing/authentication and an external
+provider adapter still require deployment acceptance.
