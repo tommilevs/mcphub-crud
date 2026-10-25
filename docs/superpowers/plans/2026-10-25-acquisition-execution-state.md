@@ -152,3 +152,19 @@ authorization/history dependencies, not a deployed installation. Real-PG coverag
 adds competing probe claims and owner-bound RAW evidence attachment; CI pending.
 Next: coordinate starting->verifying and persist discovery/probe evidence, owner
 credential references, staged publication/rollback receipt and full execution UI.
+
+Verification continuation now atomically claims starting->verifying before any
+MCP initialization; competing continuations cannot repeat the call. It passes the
+authenticated owner to inspection and stores a one-time receipt containing only
+verification level, tool names and probe result_id. SQL rechecks available owner
+RAW/status/tool/objective for functional evidence, and accepts discovery_only only
+when the immutable plan did not request a probe. Failed functional evidence moves
+to failed; persistence or transport uncertainty retains the claim for reconciliation.
+Neither success path sets ready or publishes tools. UI distinguishes completed
+discovery from passed verification awaiting publication.
+
+Local evidence:27 targeted tests and backend/frontend typechecks pass. Added PG
+acceptance for competing verification continuations, unavailable evidence rejection,
+receipt persistence and no receipt overwrite; current source CI pending. Prior
+commitc02a602 real-PG run40215724564/job121236311791 passed39tests/5suites, including
+single concurrent probe and owner-bound immutable RAW attachment.

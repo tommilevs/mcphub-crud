@@ -23,7 +23,8 @@ export interface AcquisitionPlan {
     probe?: { tool: string };
   };
 }
-export interface AcquisitionOperation { operation_id: string; state: string; cancel_requested?: boolean; requires_reconciliation?: boolean; failure_code?: string | null }
+export interface AcquisitionOperation { operation_id: string; state: string; cancel_requested?: boolean; requires_reconciliation?: boolean; failure_code?: string | null;
+  verification?: 'discovery_only' | 'functional' | 'functional_failed' | null }
 
 export async function findAcquisitionCandidates(objective: string) {
   return apiPost<ApiResponse<{ candidates: AcquisitionCandidate[] }>>('/market/acquisition/proposals', { objective });

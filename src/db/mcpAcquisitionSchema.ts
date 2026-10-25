@@ -39,5 +39,9 @@ export async function ensureMcpAcquisitionSchema(db: { query(sql: string): Promi
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS failure_code varchar(64);
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS probe_claim_id uuid;
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS probe_result_id uuid;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS inspection jsonb;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS inspected_at timestamptz;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS verification varchar(32)
+      CHECK (verification IN ('discovery_only','functional','functional_failed'));
   `);
 }

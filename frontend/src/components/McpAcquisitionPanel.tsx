@@ -112,6 +112,10 @@ export default function McpAcquisitionPanel() {
           ? t('acquisition.notStarted', 'Nothing has been installed. This screen records authorization only.')
           : operation.requires_reconciliation
             ? t('acquisition.uncertain', 'Execution state is uncertain. Review is required before retrying; no automatic restart will occur.')
+          : operation.state === 'verifying' && operation.verification === 'functional'
+            ? t('acquisition.verifiedPending', 'Verification passed. Publication of tools is pending.')
+          : operation.state === 'verifying' && operation.verification === 'discovery_only'
+            ? t('acquisition.discoveredPending', 'Tool discovery completed. No functional call was authorized and tools have not been published.')
           : operation.state === 'authorized'
             ? t('acquisition.authorizedPending', 'Authorization saved. Installation has not started; the execution worker is not connected yet.')
             : operation.state === 'cancelled'

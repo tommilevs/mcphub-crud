@@ -20,7 +20,7 @@ export class AcquisitionOperationRepository {
   async get(owner: string, operationId: string) {
     if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
     const rows = await this.db.query(`SELECT operation_id,plan_id,manifest_digest,state,cancel_requested,requires_reconciliation,failure_code,
-      probe_claim_id IS NOT NULL AS probe_started,probe_result_id,authorized_at,updated_at
+      probe_claim_id IS NOT NULL AS probe_started,probe_result_id,verification,inspection,inspected_at,authorized_at,updated_at
       FROM mcp_acquisition_operations WHERE operation_id=$1 AND owner=$2`, [operationId, owner]);
     return rows[0] ?? null;
   }
@@ -68,6 +68,32 @@ export class AcquisitionOperationRepository {
       AND NOT cancel_requested AND NOT requires_reconciliation AND probe_claim_id IS NULL
       RETURNING probe_claim_id`, [operationId, owner, claimId, digest]);
     return rows[0]?.probe_claim_id ?? null;
+  }
+
+  async beginVerification(owner: string, operationId: string) {
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations o SET state='verifying',updated_at=NOW()
+      FROM mcp_acquisition_plans p WHERE o.operation_id=$1 AND o.owner=$2 AND o.state='starting'
+      AND o.claim_id IS NOT NULL AND NOT o.cancel_requested AND NOT o.requires_reconciliation
+      AND p.plan_id=o.plan_id RETURNING o.claim_id,p.manifest`, [operationId, owner]);
+    return rows[0] ?? null;
+  }
+
+  async recordInspection(owner: string, operationId: string, claimId: string, evidence: {
+    verification: 'discovery_only' | 'functional' | 'functional_failed'; tools: string[]; resultId?: string;
+  }) {
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations o
+      SET inspection=$4::jsonb,verification=$5,inspected_at=NOW(),updated_at=NOW()
+      FROM mcp_acquisition_plans p WHERE o.operation_id=$1 AND o.owner=$2 AND o.claim_id=$3
+      AND o.state='verifying' AND NOT o.cancel_requested AND NOT o.requires_reconciliation
+      AND o.inspection IS NULL AND p.plan_id=o.plan_id
+      AND (($5='discovery_only' AND NOT (p.manifest ? 'probe') AND o.probe_claim_id IS NULL)
+        OR ($5 IN ('functional','functional_failed') AND o.probe_result_id=$6 AND EXISTS(
+          SELECT 1 FROM tool_results r WHERE r.result_id=$6 AND r.username=$2 AND r.key_id IS NULL
+          AND r.payload_available AND r.raw IS NOT NULL AND r.objective=('acquisition:'||o.operation_id::text)
+          AND r.server=p.manifest->>'serverName' AND r.tool=p.manifest->'probe'->>'tool'
+          AND r.status=CASE WHEN $5='functional' THEN 'success' ELSE 'error' END)))
+      RETURNING operation_id`, [operationId, owner, claimId, JSON.stringify(evidence), evidence.verification, evidence.resultId ?? null]);
+    return rows.length > 0;
   }
 
   async completeProbe(owner: string, operationId: string, claimId: string, resultId: string) {

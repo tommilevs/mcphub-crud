@@ -27,6 +27,7 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
     await ensureMcpAcquisitionSchema(db);
     await ensureMcpAcquisitionSchema(db); // startup/restart must preserve existing schema
+    await ensureToolResultHistorySchema(db);
     repository = new AcquisitionPlanRepository(db);
   });
   afterAll(async () => {
@@ -130,7 +131,6 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
 
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
     const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
-    await ensureToolResultHistorySchema(db);
     const operations = new AcquisitionOperationRepository(db);
     const manifest = buildAcquisitionManifest({ name: 'fixture', installations: {
       npm: { type: 'npm', command: 'npx', args: ['-y', 'fixture'] },
@@ -139,7 +139,9 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     const operation = await repository.authorize('alice', plan.plan_id, plan.manifest_digest, randomUUID());
     const claim = await operations.claim('alice', operation.operation_id);
     await operations.transition('alice', operation.operation_id, claim.claim_id, 'staging', 'starting');
-    await operations.transition('alice', operation.operation_id, claim.claim_id, 'starting', 'verifying');
+    expect(await operations.beginVerification('bob', operation.operation_id)).toBeNull();
+    const continuations = (await Promise.all(Array.from({ length: 5 }, () => operations.beginVerification('alice', operation.operation_id)))).filter(Boolean);
+    expect(continuations).toHaveLength(1);
     expect(await operations.claimProbe('bob', operation.operation_id, plan.manifest_digest)).toBeNull();
     const claims = (await Promise.all(Array.from({ length: 5 }, () => operations.claimProbe('alice', operation.operation_id, plan.manifest_digest)))).filter(Boolean);
     expect(claims).toHaveLength(1);
@@ -153,10 +155,22 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     };
     expect(await operations.completeProbe('alice', operation.operation_id, claims[0], await save('bob'))).toBe(false);
     const resultId = await save('alice');
+    expect(await operations.recordInspection('alice', operation.operation_id, claim.claim_id, {
+      verification: 'functional', tools: ['fixture_ping'], resultId,
+    })).toBe(false);
     expect(await operations.completeProbe('alice', operation.operation_id, claims[0], resultId)).toBe(true);
     expect(await operations.completeProbe('alice', operation.operation_id, claims[0], resultId)).toBe(true);
     expect(await operations.completeProbe('alice', operation.operation_id, claims[0], await save('alice'))).toBe(false);
     expect((await operations.get('alice', operation.operation_id)).probe_result_id).toBe(resultId);
     expect(await operations.claimProbe('alice', operation.operation_id, plan.manifest_digest)).toBeNull();
+    expect(await operations.recordInspection('alice', operation.operation_id, claim.claim_id, {
+      verification: 'functional', tools: ['fixture_ping'], resultId,
+    })).toBe(true);
+    const recorded = await operations.get('alice', operation.operation_id);
+    expect(recorded.verification).toBe('functional');
+    expect(recorded.inspection.resultId).toBe(resultId);
+    expect(await operations.recordInspection('alice', operation.operation_id, claim.claim_id, {
+      verification: 'discovery_only', tools: ['fixture_ping'],
+    })).toBe(false);
   });
 });
