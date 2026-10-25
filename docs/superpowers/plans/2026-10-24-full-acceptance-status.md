@@ -9,12 +9,12 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | Upstream compatibility | v1.1.8 baseline; legacy routing and group tests | Final deployed configuration acceptance |
 | Immutable RAW, IDs, retention, pins | Production schema initialized twice on PostgreSQL; immutable UPDATE rejection; independent state; 10,005 owner rows pruned to 10,000 plus pins, another owner preserved, expired chunks cascaded | Representative payload-size/search workload and deployed data acceptance |
 | Hybrid history retrieval | Real PostgreSQL regressions plus 10k indexed rows with 1536-dimensional vectors: unique scoped hits, correct final pagination, oldest pin protected | Mixed real-payload retrieval quality and deployed data acceptance |
-| Objective-aware large replies | Exact-source BM25, vector fusion, token budgets, capture proof, dispatcher tests; local 1 MB logs/JSON/diff smoke benchmark | Live vector/provider acceptance, representative workload calibration and richer structural chunking |
+| Objective-aware large replies | Exact-source BM25, vector fusion, token budgets, immutable capture proof, structured outputs, JSON/diff boundaries and bounded file-header context; dispatcher tests and local 1 MB logs/JSON/diff smoke benchmark | Live vector/provider acceptance and representative workload calibration |
 | Per-tool policies | Controller persistence/validation tests; actual browser add/save/remove and bounds checks | Deployed settings acceptance |
 | Result Explorer | Browser timeline pagination, stale-response rejection, network recovery and exact chunk-to-RAW highlighting; source compare/chunks/metrics | Complete Smart/RAW/Chunks/Related acceptance with deployed data |
 | MCP-Zero | Hierarchical retrieval, scope/fallback and RRF dedup tests | Precision/recall, cold/warm latency and token-cost benchmark |
 | Model attribution | Real PostgreSQL concurrent rotation, nonce winner, call-bound proof and review concurrency tests | Real concurrent-client and trusted gateway deployment acceptance |
-| LoopGuard / ToolPilot | Failure loops, explicit unchanged-success tools, repeat-intent exclusions, scoped feedback, bounded metadata-only provider tests; PostgreSQL branch/feedback/reaction isolation | New unchanged-success UI acceptance; independently verified reactions/outcomes |
+| LoopGuard / ToolPilot | Failure loops, explicit unchanged-success tools, repeat-intent exclusions, scoped feedback, bounded metadata-only provider tests; PostgreSQL branch/feedback/reaction isolation; isolated browser acceptance of unchanged-success settings and advice | Full deployed settings/detail acceptance; independently verified reactions/outcomes |
 | Experience Memory | Scope/evidence tests and reviewed manual advice | Broader verified strategies and deployment acceptance; optional adapters remain optional |
 | Dataset / Skills | Reviewed SFT, recorded trajectories, DPO, split registry and miner tests; PostgreSQL preview/export tenant/latest-consent gates and current independent Experience evidence | Broader deployed export/skills acceptance; no fabricated original conversation |
 | Windows service / stdio | Actual isolated SCM, Job Objects, duplex streams, managed tools and interactive broker acceptance | Full installer wizard acceptance and production switch |
@@ -48,3 +48,19 @@ rejected; do not retry it without new information. Production cutover was reject
 by automatic approval review; do not repackage an equivalent migration attempt.
 These constraints do not prevent independent source work. Keep the entire goal
 active until all required acceptance gates have authoritative evidence.
+
+On October 25, the browser exercised the actual unchanged-success settings label,
+blur handler, SettingsContext updater and result advice paragraph extracted from
+source into an isolated fixture. Saving trimmed nonempty server/tool lines sent
+one PUT; an unchanged blur sent none; clearing sent an empty list. The success
+advice explicitly avoided inferring task failure. At 540 px there was no horizontal
+overflow. Translation and API responses were stubbed, so this does not establish
+deployed localization, backend persistence or whole-page acceptance. The fixture
+server and its browser tab were closed after verification.
+
+The refreshed official Windows bundle contains runtime source through `746dcd2`
+(HEAD `d1f2994` changes only a test expectation). Backend build, frontend typecheck
+and frontend build passed; all six current index assets occur in the generated
+NSIS manifest. The 58.11 MiB installer SHA-256 is
+`CB4BD24BFDD9749618B6022B179213E8E06407141930A941486A385C925CB138`.
+Packaging success does not establish wizard or production installation acceptance.
