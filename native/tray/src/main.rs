@@ -248,6 +248,17 @@ fn main() {
                 .build(app)?;
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("failed to run MCPHub tray");
+        .build(tauri::generate_context!())
+        .expect("failed to build MCPHub tray")
+        .run(|app, event| {
+            // The runtime can separately request exit after its last native
+            // window closes. Keep the tray alive; app.exit(0) from Exit tray
+            // carries an explicit code and must still be honored.
+            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+                api.prevent_exit();
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.hide();
+                }
+            }
+        });
 }
