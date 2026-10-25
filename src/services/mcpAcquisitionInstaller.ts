@@ -12,7 +12,7 @@ interface InstallerDependencies {
 }
 
 /** Installation phase only. A staged package is not a verified or published MCP server. */
-export async function stageAcquisitionPackage(owner: string, operationId: string, overrides?: InstallerDependencies) {
+export async function stageAcquisitionPackage(owner: string, operationId: string, overrides?: InstallerDependencies, executionToken?: string) {
   const dependencies: InstallerDependencies = overrides ?? {
     repository: new AcquisitionOperationRepository(getAppDataSource()),
     native: {
@@ -29,7 +29,7 @@ export async function stageAcquisitionPackage(owner: string, operationId: string
     sleep: ms => new Promise(resolve => setTimeout(resolve, ms)), now: Date.now,
   };
   const { repository, native, sleep, now } = dependencies;
-  const claim = await repository.claim(owner, operationId);
+  const claim = await repository.claim(owner, operationId, executionToken);
   if (!claim) return { status: 'not_claimed' as const };
   const reconcile = async () => {
     let checkpointSaved = false;

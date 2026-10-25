@@ -18,6 +18,7 @@ describe('claimed acquisition execution pipeline',()=>{
     expect(reference).toMatch(/^acq-/);expect(value).toBe('private-fixture-value');
     expect(deps.verify).toHaveBeenCalledWith('alice','operation',{API_KEY:reference});
     expect(deps.publish).toHaveBeenCalledWith('alice','operation',{API_KEY:reference});
+    expect(deps.stage).toHaveBeenCalledWith('alice','operation','execution');
     expect(JSON.stringify(deps.verify.mock.calls)).not.toContain('private-fixture-value');
     expect(deps.repository.claimExecution.mock.invocationCallOrder[0]).toBeLessThan(deps.putSecret.mock.invocationCallOrder[0]);
   });

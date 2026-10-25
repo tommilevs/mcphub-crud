@@ -303,6 +303,32 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect(await operations.claim('alice',id)).toBeNull();
   });
 
+  test('accepted execution survives queue delay past expiry only with its original lease', async () => {
+    const operations=new AcquisitionOperationRepository({query:async(sql,args)=>(await pool.query(sql,args)).rows});
+    const manifest=buildAcquisitionManifest({name:'queued-fixture',installations:{npm:{type:'npm',command:'npx',args:['-y','fixture']}}} as unknown as MarketServer,'1.0.0','fixture-group');
+    const {acquisitionManifestDigest}=await import('../../src/services/mcpAcquisitionPlan.js');
+    const digest=acquisitionManifestDigest(manifest),planId=randomUUID(),id=randomUUID(),token=randomUUID();
+    // Historical accepted job: immutable plan expired after execution was accepted.
+    await pool.query(`INSERT INTO mcp_acquisition_plans(plan_id,owner,manifest,manifest_digest,created_at,expires_at)
+      VALUES($1,'alice',$2::jsonb,$3,NOW()-INTERVAL '2 hours',NOW()-INTERVAL '1 hour')`,[planId,JSON.stringify(manifest),digest]);
+    await pool.query(`INSERT INTO mcp_acquisition_operations(operation_id,plan_id,owner,manifest_digest,idempotency_key,execution_claim_id,execution_started_at)
+      VALUES($1,$2,'alice',$3,$4,$5,NOW()-INTERVAL '90 minutes')`,[id,planId,digest,randomUUID(),token]);
+    expect(await operations.executionCandidate('alice',id)).toBeNull();
+    expect(await operations.claimExecution('alice',id,digest)).toBeNull();
+    expect(await operations.claim('alice',id)).toBeNull();
+    expect(await operations.claim('alice',id,randomUUID())).toBeNull();
+    expect(await operations.claim('bob',id,token)).toBeNull();
+    const claims=(await Promise.all(Array.from({length:5},()=>operations.claim('alice',id,token)))).filter(Boolean);
+    expect(claims).toHaveLength(1);expect(claims[0].manifest).toEqual(manifest);
+    expect(await operations.claim('alice',id,token)).toBeNull();
+    const late=randomUUID(),latePlan=randomUUID(),lateToken=randomUUID();
+    await pool.query(`INSERT INTO mcp_acquisition_plans(plan_id,owner,manifest,manifest_digest,created_at,expires_at)
+      VALUES($1,'alice',$2::jsonb,$3,NOW()-INTERVAL '2 hours',NOW()-INTERVAL '1 hour')`,[latePlan,JSON.stringify(manifest),digest]);
+    await pool.query(`INSERT INTO mcp_acquisition_operations(operation_id,plan_id,owner,manifest_digest,idempotency_key,execution_claim_id,execution_started_at)
+      VALUES($1,$2,'alice',$3,$4,$5,NOW())`,[late,latePlan,digest,randomUUID(),lateToken]);
+    expect(await operations.claim('alice',late,lateToken)).toBeNull();
+  });
+
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
     const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
     const operations = new AcquisitionOperationRepository(db);

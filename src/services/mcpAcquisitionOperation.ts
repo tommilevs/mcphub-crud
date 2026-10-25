@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { AcquisitionPlanRepository, type AcquisitionPlanDb } from './mcpAcquisitionPlan.js';
+import { acquisitionManifestDigest, type AcquisitionPlanDb } from './mcpAcquisitionPlan.js';
 import { AcquisitionInputError } from './mcpAcquisitionService.js';
 import type { JsonPublicationReservation } from './mcpAcquisitionJsonPublication.js';
 import type { PostgresPublicationReservation } from './mcpAcquisitionPublicationSettings.js';
@@ -122,19 +122,27 @@ export class AcquisitionOperationRepository {
     return rows.length > 0;
   }
 
-  async claim(owner: string, operationId: string) {
-    const operation = await this.get(owner, operationId);
-    if (!operation || operation.state !== 'authorized') return null;
-    const plan = await new AcquisitionPlanRepository(this.db).get(owner, operation.plan_id);
-    if (!plan || plan.manifest_digest !== operation.manifest_digest) return null;
+  async claim(owner: string, operationId: string, executionToken?: string) {
+    if (!uuid.test(operationId) || (executionToken !== undefined && !uuid.test(executionToken))) {
+      throw new AcquisitionInputError('Invalid execution claim');
+    }
     const claimId = randomUUID();
+    // Expiry gates acceptance. An already accepted queue entry keeps its exact lease,
+    // but neither another worker nor a restarted process may take it over.
     const rows = await this.db.query(`UPDATE mcp_acquisition_operations o
       SET state='staging',claim_id=$3,updated_at=NOW()
       FROM mcp_acquisition_plans p WHERE o.operation_id=$1 AND o.owner=$2
-      AND o.state='authorized' AND o.claim_id IS NULL AND NOT o.cancel_requested
-      AND p.plan_id=o.plan_id AND p.manifest_digest=o.manifest_digest AND p.expires_at>NOW()
-      RETURNING o.operation_id,o.state,o.claim_id`, [operationId, owner, claimId]);
-    return rows.length ? { ...rows[0], manifest: plan.manifest } : null;
+      AND o.state='authorized' AND o.claim_id IS NULL AND NOT o.cancel_requested AND NOT o.requires_reconciliation
+      AND p.plan_id=o.plan_id AND p.owner=o.owner AND p.manifest_digest=o.manifest_digest
+      AND (($4::uuid IS NULL AND o.execution_claim_id IS NULL AND p.expires_at>NOW())
+        OR ($4::uuid IS NOT NULL AND o.execution_claim_id=$4::uuid AND o.execution_started_at<p.expires_at))
+      RETURNING o.operation_id,o.state,o.claim_id,p.manifest,p.manifest_digest`, [operationId, owner, claimId, executionToken ?? null]);
+    if (!rows.length) return null;
+    if (acquisitionManifestDigest(rows[0].manifest) !== rows[0].manifest_digest) {
+      await this.requireReconciliation(owner, operationId, claimId);
+      throw new Error('Acquisition plan integrity check failed');
+    }
+    return rows[0];
   }
 
   async transition(owner: string, operationId: string, claimId: string, from: string, to: string, failureCode: string | null = null) {

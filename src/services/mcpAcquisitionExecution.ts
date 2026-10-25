@@ -16,7 +16,7 @@ interface ExecutionDependencies {
   enabled(): boolean;
   repository: Pick<AcquisitionOperationRepository, 'executionCandidate' | 'claimExecution' | 'requireExecutionReconciliation' | 'get'>;
   putSecret(id: string, value: string): Promise<unknown>;
-  stage(owner: string, id: string): Promise<PhaseResult>;
+  stage(owner: string, id: string, executionToken: string): Promise<PhaseResult>;
   verify(owner: string, id: string, references: Record<string, string>): Promise<PhaseResult>;
   publish(owner: string, id: string, references: Record<string, string>): Promise<PhaseResult>;
   activate(owner: string, id: string): Promise<PhaseResult>;
@@ -38,7 +38,7 @@ export async function prepareAcquisitionExecution(owner: string, operationId: st
   }
   const deps: ExecutionDependencies = overrides ?? { enabled: () => process.platform === 'win32' && process.env.MCPHUB_NATIVE_RUNTIME_ENABLED === 'true',
     repository: new AcquisitionOperationRepository(getAppDataSource()), putSecret: putNativeRuntimeSecret,
-    stage: stageAcquisitionPackage, verify: verifyAcquisitionOperation, publish: publishVerifiedAcquisition,
+    stage: (owner, id, token) => stageAcquisitionPackage(owner, id, undefined, token), verify: verifyAcquisitionOperation, publish: publishVerifiedAcquisition,
     activate: activateAcquisition, rollback: rollbackPublishedAcquisition };
   if (!deps.enabled()) throw new AcquisitionExecutionUnavailable('Installed Windows native runtime is required');
   const candidate = await deps.repository.executionCandidate(owner, operationId);
@@ -74,7 +74,7 @@ export async function prepareAcquisitionExecution(owner: string, operationId: st
       const id = `acq-${createHash('sha256').update(`${owner}\0${operationId}\0${name}`).digest('hex')}`;
       await deps.putSecret(id, values[name]); references[name] = id; delete values[name];
     }
-    const staged = await deps.stage(owner, operationId);
+    const staged = await deps.stage(owner, operationId, claim.execution_claim_id);
     if (staged.status !== 'package_staged') return ['failed', 'cancelled', 'reconciliation_required'].includes(staged.status) ? staged : reconcile();
     const verified = await deps.verify(owner, operationId, references);
     if (verified.status !== 'inspected') return verified.status === 'failed' ? verified : reconcile();
