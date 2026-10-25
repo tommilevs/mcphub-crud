@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { Client as PgClient, Pool } from 'pg';
 import type { Server as HttpServer } from 'node:http';
 import express from 'express';
 import request from 'supertest';
@@ -31,6 +32,14 @@ import {
 import type { McpSettings } from '../../src/types/index.js';
 import { MCP_APPS_CAPABILITIES } from '../../src/utils/mcpApps.js';
 import { createUserToken } from '../utils/testHelpers.js';
+import { ensureAttributionContextSchema } from '../../src/db/attributionContextSchema.js';
+import { createGatewayProof } from '../../src/services/gatewayProvenance.js';
+
+let mockAttributionDb: {query:(sql:string,parameters?:unknown[])=>Promise<any>} | undefined;
+jest.mock('../../src/db/connection.js',()=>{
+  const actual=jest.requireActual('../../src/db/connection.js');
+  return {...actual,getAppDataSource:()=>mockAttributionDb??actual.getAppDataSource()};
+});
 
 jest.mock('../../src/services/oauthService.js', () => ({ initializeAllOAuthClients: jest.fn() }));
 jest.mock('../../src/services/mcpOAuthProvider.js', () => ({ createOAuthProvider: jest.fn() }));
@@ -235,6 +244,60 @@ const connect = async (username: string, route = '') => {
   );
   return client;
 };
+
+const postgresTest=process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD?test:test.skip;
+postgresTest('production MCP auth binds signed adapter evidence to the authenticated bearer owner',async()=>{
+  const schema=`mcp_auth_attribution_${randomBytes(12).toString('hex')}`;
+  const config={host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST??'127.0.0.1',port:Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT??5432),
+    user:process.env.MCPHUB_ATTRIBUTION_TEST_USER,password:process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,
+    database:process.env.MCPHUB_ATTRIBUTION_TEST_DB??'postgres',connectionTimeoutMillis:5000};
+  const admin=new PgClient(config);let pool:Pool|undefined;
+  const oldMode=process.env.MCPHUB_ATTRIBUTION_MODE,oldKeys=process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;
+  const secret='synthetic-production-route-adapter-key-32-characters';
+  const ownedClients:Client[]=[];
+  try{
+    await admin.connect();await admin.query(`CREATE SCHEMA ${schema}`);
+    pool=new Pool({...config,options:`-c search_path=${schema}`});
+    await ensureAttributionContextSchema(pool);
+    mockAttributionDb={query:async(sql,parameters)=>(await pool!.query(sql,parameters)).rows};
+    process.env.MCPHUB_ATTRIBUTION_MODE='compatible';
+    process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=JSON.stringify({routeFixture:secret});
+    for(const username of [alice,bob]){
+      const client=new Client({name:'attribution-auth-route',version:'1'});
+      ownedClients.push(client);
+      const transport=new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp`),{requestInit:{headers:{Authorization:`Bearer ${username}-bearer`}}});
+      const send=transport.send.bind(transport);
+      transport.send=async(message,options)=>{
+        if('method' in message&&message.method==='tools/call'){
+          const params=message.params as any;
+          const provider={id:`response-${username}`,model:'synthetic-observed-model',choices:[{message:{tool_calls:[{
+            id:'route-tool-call',type:'function',function:{name:params.name,arguments:JSON.stringify(params.arguments)},
+          }]}}]};
+          // Both adapters claim Alice: only her authenticated key may verify it.
+          const proof=createGatewayProof(provider,'route-tool-call',message as any,
+            {adapterId:'routeFixture',principal:JSON.stringify([alice,'apps-personal-0']),secret});
+          message={...message,params:{...params,_meta:{...params._meta,'dev.mcphub/provenance':proof}}};
+        }
+        return send(message,options);
+      };
+      await client.connect(transport);
+    }
+    const results:any[]=await Promise.all(ownedClients.map(client=>client.callTool({name:`shared${getNameSeparator()}identity`,arguments:{}})));
+    expect(results.every(result=>!result.isError)).toBe(true);
+    expect(results[0]._meta?.['dev.mcphub/provenance']).toMatchObject({modelId:'synthetic-observed-model',identity_source:'gateway_observed',verified:true,causalCorrelationVerified:true});
+    expect(results[1]._meta?.['dev.mcphub/provenance']).toBeUndefined();
+    expect((await pool.query("SELECT count(*)::int AS n FROM attribution_gateway_nonces WHERE adapter_id='routeFixture'")).rows[0].n).toBe(1);
+  }finally{
+    await Promise.all(ownedClients.map(client=>client.close()));
+    mockAttributionDb=undefined;
+    if(oldMode===undefined)delete process.env.MCPHUB_ATTRIBUTION_MODE;else process.env.MCPHUB_ATTRIBUTION_MODE=oldMode;
+    if(oldKeys===undefined)delete process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;else process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=oldKeys;
+    if(pool)await pool.end();
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);
+    await admin.end();
+  }
+});
 
 test.each(['', '/mixed'])(
   'Apps clients can call a qualified private OpenAPI tool after listing mixed personal children (%s)',
