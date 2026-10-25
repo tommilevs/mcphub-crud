@@ -21,6 +21,8 @@ public static class WizardButtons {
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr window);
   [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+  [DllImport("user32.dll")] private static extern IntPtr GetParent(IntPtr window);
+  [DllImport("user32.dll")] private static extern int GetDlgCtrlID(IntPtr window);
   [DllImport("user32.dll", EntryPoint="GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr size, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
   [DllImport("user32.dll", SetLastError=true)]
@@ -55,6 +57,12 @@ public static class WizardButtons {
     UIntPtr result;
     if(SendMessageTimeout(window,0x00F5,UIntPtr.Zero,null,2,1000,out result)==IntPtr.Zero)return false;
     return !CheckedBox(window);
+  }
+  public static bool NotifyButtonClick(IntPtr button) {
+    // Deliver the same BN_CLICKED notification to this observed control's own
+    // dialog, avoiding BM_CLICK's active-dialog dependency on a hosted desktop.
+    var parent=GetParent(button);int id=GetDlgCtrlID(button);
+    return parent!=IntPtr.Zero && id>0 && PostMessage(parent,0x0111,(IntPtr)id,button);
   }
 }
 '@
@@ -120,7 +128,8 @@ try{
           }
           [WizardButtons]::SetForegroundWindow($window)|Out-Null
           $handle=[IntPtr]$button
-          if($handle -eq [IntPtr]::Zero -or -not [WizardButtons]::PostMessage($handle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)){
+          $posted=if($label -eq 'Finish'){[WizardButtons]::NotifyButtonClick($handle)}else{[WizardButtons]::PostMessage($handle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)}
+          if($handle -eq [IntPtr]::Zero -or -not $posted){
             throw 'Wizard button activation failed.'
           }
           if($isPassword){$passwordAcknowledged=$true}
