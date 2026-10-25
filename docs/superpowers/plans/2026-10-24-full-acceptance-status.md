@@ -159,8 +159,9 @@ browser against controlled HTTP responses. Saving sends a draft edit at revision
 1; approval is a separate request at revision 2. Unsaved edits disable review,
 approval and download; the saved-version list renders revisions 3/2/1. A 409
 export revalidation error is shown to the user. Key scope is preserved on requests.
-The export POST succeeded, but the browser extension did not deliver its download
-event, so file persistence was not verified. Translation/auth/fetch boundaries and
+The export POST succeeded. Although the browser extension did not deliver its
+download event, the resulting SKILL.md file was independently verified against
+the saved fixture's SHA-256 and removed after verification. Translation/auth/fetch boundaries and
 API responses were fixtures, not an integrated deployed backend.
 
 This check exposed a shared textarea styling bug: `.hub-input` forced every field
