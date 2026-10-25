@@ -81,9 +81,10 @@ shown in result details. It distinguishes trusted, unverified, unknown,
 conflicted and excluded attribution, and lists missing consent, reviewed
 outcome, discovery context, redaction review or available payload.
 Verified host/gateway claims additionally require server-verified causal
-correlation. Request metadata cannot supply these review gates. Until trusted
-adapters and remaining per-call evidence are implemented, records remain ineligible for
-model-specific training. This assessment does not export data or create SFT/DPO
+correlation. Request metadata cannot supply these review gates. A record becomes
+eligible only when the persisted evidence satisfies every gate; the presence of
+an adapter or a successful call alone is insufficient. This assessment does not
+export data or create SFT/DPO
 examples, and successful tool execution never substitutes for an assessed outcome.
 
 Administrators can explicitly review a task outcome and grant or withdraw training
