@@ -5,6 +5,9 @@ import { AttributionContextRepository } from '../../src/db/repositories/Attribut
 import { AttributionContextService } from '../../src/services/attributionContextService.js';
 import type { Request, Response } from 'express';
 import express from 'express';
+import { Client as McpClient, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { Server as McpServer } from '@modelcontextprotocol/server';
+import { NodeStreamableHTTPServerTransport } from '@modelcontextprotocol/node';
 let mockSummaryDb: { query: (sql: string, parameters?: unknown[]) => Promise<any>;transaction?:(work:(db:any)=>Promise<any>)=>Promise<any> };
 jest.mock('../../src/db/connection.js', () => ({ getAppDataSource: () => mockSummaryDb }));
 import { getAttributionSummary } from '../../src/controllers/attributionController.js';
@@ -196,6 +199,74 @@ suite('attribution PostgreSQL isolated schema', () => {
       const unsigned=await invoke('fixture-a',request(22,{trace_key:winner._meta['dev.mcphub/context'].trace_key}));
       expect(unsigned.before.identity).toMatchObject({source:'self_reported',verified:false});
     }finally{
+      await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
+      if(oldMode===undefined)delete process.env.MCPHUB_ATTRIBUTION_MODE;else process.env.MCPHUB_ATTRIBUTION_MODE=oldMode;
+      if(oldKeys===undefined)delete process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;else process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=oldKeys;
+    }
+  });
+
+  test('preserves attribution and signed invocation IDs through SDK Streamable HTTP', async () => {
+    const oldMode=process.env.MCPHUB_ATTRIBUTION_MODE,oldKeys=process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;
+    const secret='synthetic-sdk-http-adapter-key-at-least-32-characters';
+    process.env.MCPHUB_ATTRIBUTION_MODE='compatible';
+    process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=JSON.stringify({sdkHttp:secret});
+    const app=express();app.use(express.json());
+    const clients:McpClient[]=[];
+    app.post('/mcp',async(req,res)=>{
+      const keyId=req.headers.authorization==='Bearer fixture-sdk-a'?'sdk-a':req.headers.authorization==='Bearer fixture-sdk-b'?'sdk-b':undefined;
+      if(!keyId){res.sendStatus(401);return;}
+      const mcp=new McpServer({name:'attribution-sdk-fixture',version:'1'},{capabilities:{tools:{}}});
+      const transport=new NodeStreamableHTTPServerTransport({sessionIdGenerator:undefined});
+      res.on('close',()=>{void transport.close();void mcp.close();});
+      mcp.setRequestHandler('tools/call',async(request,extra)=>
+        RequestContextService.getInstance().runWithCustomRequestContext({headers:{},username:'sdk-user',keyId},()=>
+          runWithAttribution(request,async(cleaned)=>{
+            const before=getCallAttribution();
+            await new Promise(resolve=>setTimeout(resolve,5));
+            return {content:[{type:'text' as const,text:JSON.stringify({before,after:getCallAttribution(),forwarded:cleaned.params.arguments})}]};
+          },extra?.mcpReq?.id??extra?.requestId)));
+      try{await mcp.connect(transport);await transport.handleRequest(req,res,req.body);}
+      catch{if(!res.headersSent)res.sendStatus(500);}
+    });
+    const server=app.listen(0,'127.0.0.1');
+    try{
+      await new Promise<void>((resolve,reject)=>{server.once('listening',resolve);server.once('error',reject);});
+      const address=server.address();if(!address||typeof address==='string')throw new Error('SDK fixture did not bind');
+      let signNext=false;
+      const transports=['a','b'].map(suffix=>new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${address.port}/mcp`),{requestInit:{headers:{authorization:`Bearer fixture-sdk-${suffix}`}}}));
+      const send=transports[0].send.bind(transports[0]);
+      transports[0].send=async(message,options)=>{
+        if(signNext&&'method' in message&&message.method==='tools/call'){
+          signNext=false;
+          const provider={id:'sdk-http-response',model:'sdk-observed',choices:[{message:{tool_calls:[{id:'sdk-http-call',type:'function',function:{name:(message.params as any).name,arguments:JSON.stringify((message.params as any).arguments)}}]}}]};
+          const proof=createGatewayProof(provider,'sdk-http-call',message as any,{adapterId:'sdkHttp',principal:JSON.stringify(['sdk-user','sdk-a']),secret});
+          message={...message,params:{...message.params,_meta:{...(message.params as any)?._meta,'dev.mcphub/provenance':proof}}};
+        }
+        return send(message,options);
+      };
+      for(let i=0;i<2;i++)clients.push(new McpClient({name:`sdk-client-${i}`,version:'1'}));
+      await Promise.all(clients.map((client,index)=>client.connect(transports[index])));
+      const call=async(index:number,hub_context:any)=>{
+        const result:any=await clients[index].callTool({name:'call_tool',arguments:{toolName:'demo',hub_context}});
+        expect(result.isError).not.toBe(true);
+        return {...JSON.parse(result.content[0].text),meta:result._meta};
+      };
+      const started=await Promise.all([call(0,{action:'start',model_claim:'shared-model'}),call(1,{action:'start',model_claim:'shared-model'})]);
+      expect(started[0].before.taskId).not.toBe(started[1].before.taskId);
+      expect(started[0].before.callId).not.toBe(started[1].before.callId);
+      for(const result of started){expect(result.before).toEqual(result.after);expect(result.forwarded).toEqual({toolName:'demo'});}
+      const key=started[0].meta['dev.mcphub/context'].trace_key;
+      const foreign=await call(1,{trace_key:key});expect(foreign.before.contextId).toBeNull();
+      const own=await call(0,{trace_key:key});expect(own.before.contextId).toBe(started[0].before.contextId);
+      signNext=true;
+      const signed=await call(0,{action:'start',model_claim:'sdk-observed'});
+      expect(signed.before.identity).toMatchObject({source:'gateway_observed',verified:true,modelId:'sdk-observed'});
+      expect(signed.before).toEqual(signed.after);
+      expect(signed.meta['dev.mcphub/provenance'].causalCorrelationVerified).toBe(true);
+      const unsigned=await call(0,{trace_key:signed.meta['dev.mcphub/context'].trace_key});
+      expect(unsigned.before.identity).toMatchObject({source:'self_reported',verified:false});
+    }finally{
+      await Promise.all(clients.map(client=>client.close()));
       await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
       if(oldMode===undefined)delete process.env.MCPHUB_ATTRIBUTION_MODE;else process.env.MCPHUB_ATTRIBUTION_MODE=oldMode;
       if(oldKeys===undefined)delete process.env.MCPHUB_GATEWAY_ADAPTER_KEYS;else process.env.MCPHUB_GATEWAY_ADAPTER_KEYS=oldKeys;
