@@ -115,3 +115,11 @@ usage updates preserve RAW and its digest. The disposable schema includes public
 in its search path for the pgvector extension, and is dropped and checked absent.
 These are synthetic records through real HTTP/authentication/controllers/storage,
 not browser or deployed-data acceptance.
+
+The follow-up [40172441867](https://github.com/tommilevs/mcphub-crud/actions/runs/40172441867)
+also passes all 30 integration tests. Before chunk vectors exist, the HTTP search
+returns lexical hits without calling the embedding provider. PostgreSQL checks
+distinguish absent, lexical-only and vector-ready indexes for the exact result;
+another result's vectors do not enable the request. The chunks endpoint reports
+the retained version and embedding dimensions. Controller tests also verify that
+hybrid search still requests an embedding when vectors are ready.
