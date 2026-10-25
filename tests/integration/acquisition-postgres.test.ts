@@ -1,0 +1,68 @@
+import { randomUUID } from 'node:crypto';
+import { Client, Pool } from 'pg';
+import { ensureMcpAcquisitionSchema } from '../../src/db/mcpAcquisitionSchema.js';
+import { AcquisitionPlanRepository, buildAcquisitionManifest } from '../../src/services/mcpAcquisitionPlan.js';
+import type { MarketServer } from '../../src/types/index.js';
+
+const postgresDescribe = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
+postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
+  const schema = `acquisition_${randomUUID().replace(/-/g, '')}`;
+  let admin: Client;
+  let pool: Pool;
+  let repository: AcquisitionPlanRepository;
+  beforeAll(async () => {
+    const config = {
+      host: process.env.MCPHUB_ATTRIBUTION_TEST_HOST ?? '127.0.0.1',
+      port: Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT ?? 5432),
+      user: process.env.MCPHUB_ATTRIBUTION_TEST_USER ?? 'postgres',
+      password: process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,
+      database: process.env.MCPHUB_ATTRIBUTION_TEST_DB ?? 'mcphub_history_test',
+    };
+    admin = new Client(config);
+    await admin.connect();
+    await admin.query(`CREATE SCHEMA ${schema}`);
+    pool = new Pool({ ...config, options: `-c search_path=${schema},public` });
+    const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
+    await ensureMcpAcquisitionSchema(db);
+    await ensureMcpAcquisitionSchema(db); // startup/restart must preserve existing schema
+    repository = new AcquisitionPlanRepository(db);
+  });
+  afterAll(async () => {
+    if (pool) await pool.end();
+    if (admin) {
+      await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1', [schema])).rowCount).toBe(0);
+      await admin.end();
+    }
+  });
+
+  test('persists exact plan across repository instances and isolates owners', async () => {
+    const manifest = buildAcquisitionManifest({ name: 'synthetic', installations: {
+      npm: { type: 'npm', command: 'npx', args: ['-y', '@fixture/mcp'] },
+    }, arguments: {} } as unknown as MarketServer, '1.2.3', 'fixture-group');
+    const created = await repository.create('alice', manifest);
+    const restarted = new AcquisitionPlanRepository({ query: async (sql, args) => (await pool.query(sql, args)).rows });
+    expect((await restarted.get('alice', created.plan_id))?.manifest).toEqual(manifest);
+    expect(await restarted.get('bob', created.plan_id)).toBeNull();
+    await expect(pool.query('UPDATE mcp_acquisition_plans SET owner=$1 WHERE plan_id=$2', ['bob', created.plan_id]))
+      .rejects.toThrow('immutable');
+    await expect(pool.query('UPDATE mcp_acquisition_plans SET manifest=$1 WHERE plan_id=$2', ['{}', created.plan_id]))
+      .rejects.toThrow('immutable');
+    expect((await restarted.get('alice', created.plan_id))?.manifest_digest).toBe(created.manifest_digest);
+  });
+
+  test('expired plans are unavailable without changing immutable data', async () => {
+    const id = randomUUID();
+    await pool.query(`INSERT INTO mcp_acquisition_plans(plan_id,owner,manifest,manifest_digest,created_at,expires_at)
+      VALUES($1,'alice','{}',$2,NOW()-INTERVAL '2 hours',NOW()-INTERVAL '1 hour')`, [id, 'a'.repeat(64)]);
+    expect(await repository.get('alice', id)).toBeNull();
+  });
+
+  test('refuses a persisted payload whose digest does not match', async () => {
+    const id = randomUUID();
+    await pool.query(`INSERT INTO mcp_acquisition_plans(plan_id,owner,manifest,manifest_digest,expires_at)
+      VALUES($1,'alice','{}',$2,NOW()+INTERVAL '1 hour')`, [id, 'a'.repeat(64)]);
+    await expect(repository.get('alice', id)).rejects.toThrow('integrity');
+    expect(await repository.get('bob', id)).toBeNull();
+  });
+});

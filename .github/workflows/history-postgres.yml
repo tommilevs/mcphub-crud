@@ -57,4 +57,4 @@ jobs:
         run: |
           node -e "const {Client}=require('pg');(async()=>{const db=new Client({host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST,user:process.env.MCPHUB_ATTRIBUTION_TEST_USER,password:process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,database:process.env.MCPHUB_ATTRIBUTION_TEST_DB});try{await db.connect();await db.query('CREATE EXTENSION IF NOT EXISTS vector')}finally{await db.end()}})().catch(error=>{console.error(error);process.exitCode=1})"
       - name: Verify history, attribution, reviewed evidence and dataset storage
-        run: pnpm exec jest --runInBand tests/integration/history-search-postgres.test.ts tests/integration/history-retention-postgres.test.ts tests/integration/attribution-postgres.test.ts tests/integration/mcp-apps-openapi-routing.test.ts
+        run: pnpm exec jest --runInBand tests/integration/history-search-postgres.test.ts tests/integration/history-retention-postgres.test.ts tests/integration/attribution-postgres.test.ts tests/integration/mcp-apps-openapi-routing.test.ts tests/integration/acquisition-postgres.test.ts
