@@ -7,13 +7,48 @@ $expected=Join-Path $env:RUNNER_TEMP 'MCPHub-Installer-Acceptance'
 if([IO.Path]::GetFullPath($Destination) -ne [IO.Path]::GetFullPath($expected) -or (Test-Path -LiteralPath $Destination)){
   throw 'Wizard destination must be the fresh acceptance directory.'
 }
-Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes
 Add-Type -TypeDefinition @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class WizardButtons {
+  private delegate bool EnumWindow(IntPtr window, IntPtr state);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumWindow callback, IntPtr state);
+  [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumWindow callback, IntPtr state);
+  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint process);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr window, StringBuilder name, int count);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr window);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr window);
+  [DllImport("user32.dll", EntryPoint="GetWindowLongW")] private static extern int GetWindowLong(IntPtr window, int index);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(IntPtr window, uint message, UIntPtr size, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
   [DllImport("user32.dll", SetLastError=true)]
   public static extern bool PostMessage(IntPtr window, uint message, IntPtr wParam, IntPtr lParam);
+  public static IntPtr[] Windows(int owner) {
+    var handles=new List<IntPtr>();
+    EnumWindows((window,state)=>{uint process;GetWindowThreadProcessId(window,out process);if(process==owner)handles.Add(window);return true;},IntPtr.Zero);
+    return handles.ToArray();
+  }
+  public static IntPtr[] Children(IntPtr parent) {
+    var handles=new List<IntPtr>();
+    EnumChildWindows(parent,(window,state)=>{handles.Add(window);return true;},IntPtr.Zero);
+    return handles.ToArray();
+  }
+  public static string Class(IntPtr window) {var name=new StringBuilder(128);GetClassName(window,name,name.Capacity);return name.ToString();}
+  public static string ControlText(IntPtr window) {
+    var kind=Class(window);
+    if(kind!="Button" && kind!="Edit")throw new InvalidOperationException("Only button and directory-edit text may be inspected.");
+    var text=new StringBuilder(32768);UIntPtr result;
+    if(SendMessageTimeout(window,0x000D,(UIntPtr)text.Capacity,text,2,1000,out result)==IntPtr.Zero)return "";
+    return text.ToString();
+  }
+  public static bool CheckedBox(IntPtr window) {
+    int style=GetWindowLong(window,-16)&15;
+    if(style!=2 && style!=3 && style!=5 && style!=6)return false;
+    UIntPtr result;SendMessageTimeout(window,0x00F0,UIntPtr.Zero,null,2,1000,out result);
+    return result.ToUInt64()!=0;
+  }
 }
 '@
 # This is the interactive UI under test on a disposable runner, not a background
@@ -38,21 +73,17 @@ try{
     } | ForEach-Object {[int]$_.ProcessId})
     $owners+=$passwordOwners
     foreach($ownerId in $owners){
-      $condition=[Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty,$ownerId)
-      $windows=[Windows.Automation.AutomationElement]::RootElement.FindAll([Windows.Automation.TreeScope]::Children,$condition)
+      $windows=@([WizardButtons]::Windows($ownerId))
       $windowCount=$windows.Count
       foreach($window in $windows){
-        $buttons=@($window.FindAll([Windows.Automation.TreeScope]::Descendants,
-          [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Button)))
+        $controls=@([WizardButtons]::Children($window))
+        $buttons=@($controls | Where-Object {[WizardButtons]::Class($_) -eq 'Button'})
         # Never enumerate Text controls or read the bootstrap-password dialog.
         $isPassword=$passwordOwners -contains $ownerId
         $edits=@()
         if(-not $isPassword){
-          foreach($edit in $window.FindAll([Windows.Automation.TreeScope]::Descendants,
-            [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::Edit))){
-            $valuePattern=$null
-            if($edit.TryGetCurrentPattern([Windows.Automation.ValuePattern]::Pattern,[ref]$valuePattern)){
-              $value=$valuePattern.Current.Value
+          foreach($edit in @($controls | Where-Object {[WizardButtons]::Class($_) -eq 'Edit'})){
+              $value=[WizardButtons]::ControlText($edit)
               $edits+=$value
               if($value -match '^[A-Za-z]:\\'){
                 if(-not [string]::Equals($value.TrimEnd('\'),$Destination.TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)){
@@ -60,27 +91,25 @@ try{
                 }
                 $destinationObserved=$true
               }
-            }
           }
         }
-        $active=@($buttons | Where-Object {$_.Current.IsEnabled -and -not $_.Current.IsOffscreen})
+        $active=@($buttons | Where-Object {[WizardButtons]::IsWindowEnabled($_) -and [WizardButtons]::IsWindowVisible($_)})
         $visibleButtonCount=$active.Count
-        $pageKey=(@($window.Current.NativeWindowHandle,$isPassword)+@($active | ForEach-Object {$_.Current.Name})+$edits) -join '|'
+        $pageKey=(@($window,$isPassword)+@($active | ForEach-Object {[WizardButtons]::ControlText($_)})+$edits) -join '|'
         if($pageKey -eq $lastPage){continue}
         foreach($button in $active){
-          $label=$button.Current.Name.Replace('&','').Trim()
+          $label=[WizardButtons]::ControlText($button).Replace('&','').Trim()
           if($isPassword){if($label -ne 'OK'){continue}}
           elseif($label -notin @('OK','Next >','Next','I Agree','Install','Finish')){continue}
           if($label -in @('Install','Finish') -and -not $destinationObserved){throw 'Wizard never confirmed the acceptance destination.'}
           if($label -eq 'Finish'){
-            foreach($checkbox in $window.FindAll([Windows.Automation.TreeScope]::Descendants,
-              [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty,[Windows.Automation.ControlType]::CheckBox))){
-              $toggle=$null
-              if($checkbox.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern,[ref]$toggle) -and $toggle.Current.ToggleState -eq [Windows.Automation.ToggleState]::On){$toggle.Toggle()}
+            foreach($checkbox in @($buttons | Where-Object {[WizardButtons]::CheckedBox($_)})){
+              if(-not [WizardButtons]::PostMessage($checkbox,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)){throw 'Cannot clear Finish-page checkbox.'}
             }
             $finished=$true
           }
-          $handle=[IntPtr]$button.Current.NativeWindowHandle
+          [WizardButtons]::SetForegroundWindow($window)|Out-Null
+          $handle=[IntPtr]$button
           if($handle -eq [IntPtr]::Zero -or -not [WizardButtons]::PostMessage($handle,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)){
             throw 'Wizard button activation failed.'
           }
