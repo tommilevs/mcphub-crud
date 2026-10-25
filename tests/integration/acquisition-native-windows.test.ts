@@ -26,6 +26,7 @@ import { createMcpAcquisitionPlan, authorizeMcpAcquisitionPlan, executeMcpAcquis
   getMcpAcquisitionOperation, cancelMcpAcquisitionOperation } from '../../src/controllers/mcpAcquisitionController.js';
 import { getServerByName, cleanupAllServers, initializeClientsFromSettings } from '../../src/services/mcpService.js';
 import { deleteNativeRuntimeSecret, forgetNativeInstall, getNativeRuntimeStatus } from '../../src/services/nativeRuntimeSecretService.js';
+import * as inspectionModule from '../../src/services/mcpAcquisitionInspection.js';
 
 const suite = process.platform === 'win32' && process.env.MCPHUB_ACQUISITION_TEST_ROOT &&
   process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
@@ -42,13 +43,25 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     process.env.USE_DB = 'false';
     process.env.MCPHUB_NATIVE_RUNTIME_ENABLED = 'true';
     process.env.MCPHUB_NATIVE_PIPE = process.env.MCPHUB_NATIVE_TEST_PIPE;
+    const inspect = inspectionModule.inspectAcquiredMcp;
+    jest.spyOn(inspectionModule, 'inspectAcquiredMcp').mockImplementation(async (...args) => {
+      try { return await inspect(...args); }
+      catch (error) {
+        // Entire harness is synthetic. Keep diagnostics here, never in production logs.
+        console.error('Synthetic acquisition inspection failed:', error instanceof Error ? error.message : 'unknown');
+        throw error;
+      }
+    });
     const config = { host: '127.0.0.1', port: Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT),
       user: 'postgres', password: process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD, database: 'postgres' };
     admin = new PgClient(config); await admin.connect();
     await admin.query('CREATE EXTENSION IF NOT EXISTS vector');
     await admin.query(`CREATE SCHEMA ${schema}`);
     pool = new Pool({ ...config, options: `-c search_path=${schema},public` });
-    mockAcquisitionDb = { isInitialized: true, query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
+    mockAcquisitionDb = { isInitialized: true, query: async (sql: string, args?: any[]) => {
+      try { return (await pool.query(sql, args)).rows; }
+      catch (error: any) { console.error('Synthetic database failure:', error.code, error.message); throw error; }
+    } };
     await ensureMcpAcquisitionSchema(mockAcquisitionDb);
     await ensureToolResultHistorySchema(mockAcquisitionDb);
     const settings = { mcpServers: {}, users: ['alice', 'bob'].map(username => ({ username, password: 'unused', isAdmin: true })),
@@ -130,6 +143,10 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
       if (['ready', 'failed', 'rolled_back', 'cancelled'].includes(observed.state) || observed.requires_reconciliation) break;
       await new Promise(resolve => setTimeout(resolve, 250));
     } while (Date.now() < deadline);
+    if (observed.state !== 'ready') {
+      console.error('Synthetic acquisition phase:', JSON.stringify(observed));
+      console.error('Synthetic probe journal:', (await pool.query('SELECT probe_claim_id,probe_result_id FROM mcp_acquisition_operations WHERE operation_id=$1', [id])).rows);
+    }
     expect(observed).toMatchObject({ state: 'ready', verification: 'functional', execution_started: true, requires_reconciliation: false });
     await request(app).get(endpoint).set('x-auth-token', bob).expect(404);
     const raw = await pool.query('SELECT raw,status,payload_available FROM tool_results WHERE result_id=$1 AND username=$2', [observed.probe_result_id, 'alice']);
