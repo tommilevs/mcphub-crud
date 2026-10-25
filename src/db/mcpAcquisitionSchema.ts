@@ -43,5 +43,27 @@ export async function ensureMcpAcquisitionSchema(db: { query(sql: string): Promi
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS inspected_at timestamptz;
     ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS verification varchar(32)
       CHECK (verification IN ('discovery_only','functional','functional_failed'));
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS publication jsonb;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS publication_reserved_at timestamptz;
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS publication_applied_digest char(64);
+    ALTER TABLE mcp_acquisition_operations ADD COLUMN IF NOT EXISTS publication_applied_at timestamptz;
+    CREATE OR REPLACE FUNCTION protect_mcp_acquisition_publication() RETURNS trigger AS $$
+      BEGIN
+        IF OLD.publication IS NOT NULL AND
+          (NEW.publication IS DISTINCT FROM OLD.publication OR
+           NEW.publication_reserved_at IS DISTINCT FROM OLD.publication_reserved_at) THEN
+          RAISE EXCEPTION 'MCP acquisition publication reservation is immutable';
+        END IF;
+        IF OLD.publication_applied_digest IS NOT NULL AND
+          (NEW.publication_applied_digest IS DISTINCT FROM OLD.publication_applied_digest OR
+           NEW.publication_applied_at IS DISTINCT FROM OLD.publication_applied_at) THEN
+          RAISE EXCEPTION 'MCP acquisition publication outcome is immutable';
+        END IF;
+        RETURN NEW;
+      END;
+    $$ LANGUAGE plpgsql;
+    DROP TRIGGER IF EXISTS mcp_acquisition_publication_immutable ON mcp_acquisition_operations;
+    CREATE TRIGGER mcp_acquisition_publication_immutable BEFORE UPDATE ON mcp_acquisition_operations
+      FOR EACH ROW EXECUTE FUNCTION protect_mcp_acquisition_publication();
   `);
 }

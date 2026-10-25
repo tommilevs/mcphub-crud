@@ -5,6 +5,7 @@ import { AcquisitionPlanRepository, buildAcquisitionManifest } from '../../src/s
 import type { MarketServer } from '../../src/types/index.js';
 import { AcquisitionOperationRepository } from '../../src/services/mcpAcquisitionOperation.js';
 import { ensureToolResultHistorySchema } from '../../src/db/toolResultHistorySchema.js';
+import { prepareAcquisitionPublication } from '../../src/services/mcpAcquisitionPublicationSettings.js';
 
 const postgresDescribe = process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
 postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
@@ -129,6 +130,41 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect((await operations.get('alice', operation.operation_id)).requires_reconciliation).toBe(false);
   });
 
+  test('publication reservation is single-owner, immutable and survives a repository restart', async () => {
+    const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
+    const operations = new AcquisitionOperationRepository(db);
+    const manifest = buildAcquisitionManifest({ name: 'fixture', installations: {
+      npm: { type: 'npm', command: 'npx', args: ['-y', 'fixture'] },
+    } } as unknown as MarketServer, '1.0.0', 'fixture-group');
+    const plan = await repository.create('alice', manifest);
+    const operation = await repository.authorize('alice', plan.plan_id, plan.manifest_digest, randomUUID());
+    const id=operation.operation_id;
+    const claim = await operations.claim('alice', id);
+    await operations.transition('alice', id, claim.claim_id, 'staging', 'starting');
+    await operations.beginVerification('alice', id);
+    const prepared=prepareAcquisitionPublication({mcpServers:{},groups:[{id:'fixture-group',name:'Fixture',servers:[]}]},
+      manifest,id,'alice',{command:'node.exe',args:['fixture.js'],cwd:'owned'},['ping']);
+    const reservation={storage:'json' as const,settingsPath:'/synthetic/settings.json',baseDigest:'a'.repeat(64),receipt:prepared.receipt};
+    expect(await operations.reservePublication('alice',id,claim.claim_id,reservation)).toBe(false);
+    expect(await operations.recordInspection('alice',id,claim.claim_id,{verification:'discovery_only',tools:['ping']})).toBe(true);
+    await expect(operations.reservePublication('bob',id,claim.claim_id,reservation)).rejects.toThrow('Invalid publication');
+    expect(await operations.reservePublication('alice',id,randomUUID(),reservation)).toBe(false);
+    const altered=structuredClone(reservation); altered.receipt.entry.tools=['unverified'];
+    expect(await operations.reservePublication('alice',id,claim.claim_id,altered)).toBe(false);
+    const claims=await Promise.all(Array.from({length:5},()=>operations.reservePublication('alice',id,claim.claim_id,reservation)));
+    expect(claims.filter(Boolean)).toHaveLength(1);
+    const restarted=new AcquisitionOperationRepository(db);
+    expect((await restarted.getPublication('alice',id)).publication).toEqual(reservation);
+    expect(await restarted.getPublication('bob',id)).toBeNull();
+    expect(await restarted.reservePublication('alice',id,claim.claim_id,reservation)).toBe(false);
+    await expect(pool.query('UPDATE mcp_acquisition_operations SET publication=NULL WHERE operation_id=$1',[id])).rejects.toThrow('immutable');
+    await operations.cancel('alice',id);
+    expect(await operations.recordPublicationApplied('alice',id,claim.claim_id,'b'.repeat(64))).toBe(true);
+    expect(await operations.recordPublicationApplied('alice',id,claim.claim_id,'c'.repeat(64))).toBe(false);
+    expect((await restarted.getPublication('alice',id)).publication_applied_digest).toBe('b'.repeat(64));
+    await expect(pool.query('UPDATE mcp_acquisition_operations SET publication_applied_digest=NULL WHERE operation_id=$1',[id])).rejects.toThrow('immutable');
+  });
+
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
     const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
     const operations = new AcquisitionOperationRepository(db);
@@ -172,5 +208,10 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect(await operations.recordInspection('alice', operation.operation_id, claim.claim_id, {
       verification: 'discovery_only', tools: ['fixture_ping'],
     })).toBe(false);
+    const prepared=prepareAcquisitionPublication({mcpServers:{},groups:[{id:'fixture-group',name:'Fixture',servers:[]}]},
+      manifest,operation.operation_id,'alice',{command:'node.exe',args:['fixture.js'],cwd:'owned'},['fixture_ping']);
+    const reservation={storage:'json' as const,settingsPath:'/synthetic/settings.json',baseDigest:'a'.repeat(64),receipt:prepared.receipt};
+    await pool.query('UPDATE tool_results SET payload_available=FALSE,raw=NULL WHERE result_id=$1',[resultId]);
+    expect(await operations.reservePublication('alice',operation.operation_id,claim.claim_id,reservation)).toBe(false);
   });
 });
