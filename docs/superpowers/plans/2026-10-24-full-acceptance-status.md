@@ -207,3 +207,10 @@ Changing key scope immediately cleared both old receipts and pairs; subsequent
 requests carried the new key and rendered empty history. No horizontal overflow
 occurred. This is controlled browser evidence, not integrated backend acceptance.
 The owned tab and in-memory server were closed without creating fixture files.
+
+Full local Jest regression at `5e9847a` completed successfully on October 25:
+332 suites and 3,102 tests passed; 7 suites / 48 tests were skipped by their
+environment gates (339 suites / 3,150 tests total). The direct command was
+`node node_modules/jest/bin/jest.js --runInBand --silent` and exited 0 in 164.873 s.
+This closes the earlier missing full regression rerun after the corrected
+LoopGuard expectation. Skipped database/deployment gates remain separate evidence.
