@@ -8,9 +8,6 @@ on:
         required: true
         default: '40193083656'
         type: string
-  push:
-    branches: [feat/tool-result-history]
-    paths: ['.github/workflows/windows-wizard-acceptance.yml']
 
 permissions:
   contents: read
@@ -25,7 +22,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: MCPHub-Windows-tested-installer
-          run-id: ${{ inputs.installerRunId || '40193083656' }}
+          run-id: ${{ inputs.installerRunId }}
           github-token: ${{ github.token }}
           path: tested-installer
       - name: Verify wizard completion and exact dashboard close request

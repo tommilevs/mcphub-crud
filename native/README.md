@@ -285,8 +285,13 @@ self-hosted execution and refuses a runner with existing MCPHub data/service.
 The separate manual `Windows installed tray acceptance` workflow can reuse a
 retained installer by its successful run ID, without recompiling. Artifacts expire
 after three days; supply a newer successful run when necessary.
-These checks do not verify the interactive installer wizard, password dialog,
-tray menu interactions or real user logon/reboot.
+The manual `Windows installer wizard acceptance` workflow reuses the same retained
+artifact and runs the visible wizard on its disposable runner. It verifies the
+chosen destination, acknowledges the initial-password dialog without reading its
+contents, clears Finish-page launch options, completes Finish and then exercises
+the installed runtime, tray hide, upgrade and uninstall. Native button/edit
+inspection is scoped to the installer process tree; password text is never read.
+Tray menu interactions and real user logon/reboot remain separate checks.
 
 
 Installer upgrades preserve the registered data directory, gateway port, pipe name and runtime directory when those parameters are omitted. Explicit lifecycle arguments still override the existing registration. The acceptance test upgrades with only the install directory and isolated service name to exercise the same defaulting behavior as NSIS.

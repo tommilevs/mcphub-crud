@@ -258,3 +258,17 @@ Windows Computer Use against an isolated static HTTP fixture; the owned tray,
 agent and fixture server were stopped and verified absent afterward. That fixture
 does not prove real backend integration. Tray-menu reopen/exit, interactive wizard,
 real user logon/reboot and production migration remain unverified.
+
+The same retained artifact subsequently passed the complete interactive wizard
+and installed-runtime chain in run 40198610514 / job 121184775760. The visible
+wizard confirmed its isolated destination, displayed and acknowledged the initial
+password dialog without reading its text, verified both Finish options unchecked
+and actually exited after Finish. Installed imports, service health/login,
+dashboard creation and exact-HWND hide without tray exit, Start Menu shortcut,
+upgrade/data retention and uninstall then passed in that same run. Earlier
+wizard-driver failures were traced to inaccessible legacy UIAutomation controls,
+stale page handles and undelivered button activation; native owned controls and
+the observed Finish button's BN_CLICKED notification resolved those test issues.
+The tray check also now targets WM_CLOSE at the original observed HWND directly.
+The wizard workflow is manual after acceptance, accepts a retained successful
+installer run ID and never recompiles the package. No production cutover was made.
