@@ -51,6 +51,11 @@ public static class WizardButtons {
     UIntPtr result;SendMessageTimeout(window,0x00F0,UIntPtr.Zero,null,2,1000,out result);
     return result.ToUInt64()!=0;
   }
+  public static bool ClearCheckedBox(IntPtr window) {
+    UIntPtr result;
+    if(SendMessageTimeout(window,0x00F5,UIntPtr.Zero,null,2,1000,out result)==IntPtr.Zero)return false;
+    return !CheckedBox(window);
+  }
 }
 '@
 # This is the interactive UI under test on a disposable runner, not a background
@@ -65,7 +70,7 @@ try{
     if($process.HasExited){break}
     $owners=@($process.Id)
     # NSIS may keep its launcher alive while a child owns the actual wizard.
-    $processTree=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId)
+    $processTree=@(Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,Name)
     do{
       $children=@($processTree | Where-Object {$owners -contains [int]$_.ParentProcessId -and $owners -notcontains [int]$_.ProcessId} | ForEach-Object {[int]$_.ProcessId})
       $owners+=$children
@@ -74,9 +79,10 @@ try{
       $_.ExecutablePath -eq (Join-Path $Destination 'mcphub-runtime-service.exe') -and $_.CommandLine -match '--show-initial-password'
     } | ForEach-Object {[int]$_.ProcessId})
     $owners+=$passwordOwners
+    $windowCount=0;$visibleButtonCount=0
     foreach($ownerId in $owners){
       $windows=@([WizardButtons]::Windows($ownerId))
-      $windowCount=$windows.Count
+      $windowCount+=$windows.Count
       foreach($window in $windows){
         $controls=@([WizardButtons]::Children($window))
         $buttons=@($controls | Where-Object {[WizardButtons]::Class($_) -eq 'Button'})
@@ -96,7 +102,7 @@ try{
           }
         }
         $active=@($buttons | Where-Object {[WizardButtons]::IsWindowEnabled($_) -and [WizardButtons]::IsWindowVisible($_)})
-        $visibleButtonCount=$active.Count
+        $visibleButtonCount+=$active.Count
         $pageKey=(@($window,$isPassword)+@($active | ForEach-Object {[WizardButtons]::ControlText($_)})+$edits) -join '|'
         if($pageKey -eq $lastPage){continue}
         foreach($button in $active){
@@ -105,9 +111,11 @@ try{
           elseif($label -notin @('OK','Next >','Next','I Agree','Install','Finish')){continue}
           if($label -in @('Install','Finish') -and -not $destinationObserved){throw 'Wizard never confirmed the acceptance destination.'}
           if($label -eq 'Finish'){
-            foreach($checkbox in @($buttons | Where-Object {[WizardButtons]::CheckedBox($_)})){
-              if(-not [WizardButtons]::PostMessage($checkbox,0x00F5,[IntPtr]::Zero,[IntPtr]::Zero)){throw 'Cannot clear Finish-page checkbox.'}
+            $checked=@($active | Where-Object {[WizardButtons]::CheckedBox($_)})
+            foreach($checkbox in $checked){
+              if(-not [WizardButtons]::ClearCheckedBox($checkbox)){throw 'Cannot confirm cleared Finish-page checkbox.'}
             }
+            Write-Output "Finish-page checked options cleared and verified: $($checked.Count)."
             $finished=$true
           }
           [WizardButtons]::SetForegroundWindow($window)|Out-Null
@@ -125,7 +133,10 @@ try{
     }
     Start-Sleep -Milliseconds 250
   }
-  if(-not $process.HasExited){throw "Wizard acceptance timed out: windows=$windowCount, visibleButtons=$visibleButtonCount, actions=$actionCount, last=$lastAction, destination=$destinationObserved, passwordAcknowledged=$passwordAcknowledged."}
+  if(-not $process.HasExited){
+    $ownedNames=(@($processTree | Where-Object {$owners -contains [int]$_.ProcessId} | Group-Object Name | ForEach-Object {"$($_.Name):$($_.Count)"}) -join ',')
+    throw "Wizard acceptance timed out: windows=$windowCount, visibleButtons=$visibleButtonCount, actions=$actionCount, last=$lastAction, destination=$destinationObserved, passwordAcknowledged=$passwordAcknowledged, owned=$ownedNames."
+  }
   if($process.ExitCode -ne 0 -or -not $finished -or -not $destinationObserved -or -not $passwordAcknowledged){
     throw "Wizard acceptance incomplete: exit=$($process.ExitCode), destination=$destinationObserved, finish=$finished, passwordAcknowledged=$passwordAcknowledged."
   }
