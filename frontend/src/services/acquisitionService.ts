@@ -24,7 +24,26 @@ export interface AcquisitionPlan {
   };
 }
 export interface AcquisitionOperation { operation_id: string; state: string; cancel_requested?: boolean; requires_reconciliation?: boolean; failure_code?: string | null;
-  verification?: 'discovery_only' | 'functional' | 'functional_failed' | null }
+  verification?: 'discovery_only' | 'functional' | 'functional_failed' | null; plan_id?: string;
+  execution_started?: boolean; publication_started?: boolean; publication_applied_at?: string | null }
+
+export const acquisitionTerminal = (operation: AcquisitionOperation) => ['ready', 'failed', 'rolled_back', 'cancelled'].includes(operation.state);
+export function acquisitionOperationStatus(operation: AcquisitionOperation) {
+  if (operation.requires_reconciliation) return { key: 'uncertain', text: 'Installation needs review. It will not restart automatically.' };
+  if (operation.cancel_requested && !acquisitionTerminal(operation)) return { key: 'cancelling', text: 'Cancellation requested. Waiting for the current step to stop.' };
+  if (operation.state === 'authorized') return operation.execution_started
+    ? { key: 'queued', text: 'Queued or preparing required configuration.' }
+    : { key: 'authorized', text: 'Authorization saved. Enter required values, then choose Start installation.' };
+  if (operation.state === 'staging') return { key: 'installing', text: 'Installing the pinned package.' };
+  if (operation.state === 'starting') return { key: 'checking', text: 'Package installed. Checking the MCP server.' };
+  if (operation.state === 'verifying') return operation.publication_applied_at
+    ? { key: 'activating', text: 'Starting the server and updating the tool index.' }
+    : { key: 'verifying', text: 'Checking available tools and saving server configuration.' };
+  if (operation.state === 'ready') return { key: 'ready', text: 'Server is ready in the selected group.' };
+  if (operation.state === 'rolled_back') return { key: 'rolledBack', text: 'Server registration was rolled back.' };
+  if (operation.state === 'cancelled') return { key: 'cancelled', text: 'Installation cancelled before execution.' };
+  return { key: 'failed', text: 'Installation stopped. Review its status before trying again.' };
+}
 
 export async function findAcquisitionCandidates(objective: string) {
   return apiPost<ApiResponse<{ candidates: AcquisitionCandidate[] }>>('/market/acquisition/proposals', { objective });
@@ -43,4 +62,10 @@ export async function getAcquisitionOperation(id: string) {
 }
 export async function cancelAcquisitionOperation(id: string) {
   return apiPost<ApiResponse<AcquisitionOperation>>(`/market/acquisition/operations/${encodeURIComponent(id)}/cancel`);
+}
+export async function executeAcquisitionOperation(id: string, credentials: Record<string, string>) {
+  return apiPost<ApiResponse<{ operationId: string; status: 'accepted' }>>(`/market/acquisition/operations/${encodeURIComponent(id)}/execute`, { credentials });
+}
+export async function getAcquisitionPlan(id: string) {
+  return apiGet<ApiResponse<AcquisitionPlan>>(`/market/acquisition/plans/${encodeURIComponent(id)}`);
 }
