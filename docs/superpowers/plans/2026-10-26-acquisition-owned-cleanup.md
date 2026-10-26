@@ -76,5 +76,19 @@ Journal source `feb6631` passed real PostgreSQL run `40305423287`, job
 `121513215713` (49 tests across six suites, logs read). New tests cover eight
 concurrent claims, owner/FK isolation, step ordering, eligibility exclusions,
 partial review fencing and preservation of the original operation failure.
-The read-only native path preflight remains uncommitted implementation work;
-there is no cleanup actuator or public endpoint yet.
+Read-only native ownership preflight `c77d8dd` passed Windows run `40306912393`,
+job `121518171775`: inspection refuses a running installer and wrong package
+identity, then accepts the exact cancelled job without removing its directory.
+It also rejects nested junctions in the native fixtures.
+
+Settings reference guards `2e304c4` passed PostgreSQL run `40309403737`, job
+`121526519294` (50 tests across six suites, logs read). Disabled/renamed adoption
+prevents work; a real concurrent server UPDATE times out while guarded work is
+pending. JSON uses the existing settings file lock across asynchronous work.
+Local fixtures prove real Windows junction aliases are detected and unrelated
+target contents survive. The guard includes operation/secret references and
+canonical absolute paths plus relative arguments under the configured working
+directory. Unreadable or stalled lookups refuse cleanup with static errors.
+
+These are prerequisites. There is still no cleanup actuator or public endpoint;
+live-runtime/index checks, native durable receipts and the coordinator remain.
