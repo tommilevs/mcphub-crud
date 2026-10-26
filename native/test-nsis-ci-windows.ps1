@@ -59,11 +59,27 @@ try{
   if($CheckTray){
     Add-Type -TypeDefinition @'
 using System;
+using System.Text;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class TrayWindowEvidence {
   [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr handle);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr handle);
   [DllImport("user32.dll", SetLastError=true)] public static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam);
+  private delegate bool EnumCallback(IntPtr handle, IntPtr parameter);
+  [DllImport("user32.dll")] private static extern bool EnumWindows(EnumCallback callback, IntPtr parameter);
+  [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr handle, out uint processId);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetClassName(IntPtr handle, StringBuilder text, int count);
+  public static string Describe(IntPtr handle) {
+    uint pid; GetWindowThreadProcessId(handle,out pid);
+    var name=new StringBuilder(128); GetClassName(handle,name,name.Capacity);
+    return "hwnd="+handle+", pid="+pid+", class="+name+", exists="+IsWindow(handle)+", visible="+IsWindowVisible(handle);
+  }
+  public static string[] OwnedWindows(uint pid) {
+    var result=new List<string>();
+    EnumWindows((handle,parameter)=>{uint owner;GetWindowThreadProcessId(handle,out owner);if(owner==pid)result.Add(Describe(handle));return true;},IntPtr.Zero);
+    return result.ToArray();
+  }
 }
 '@
     $trayStart=[Diagnostics.ProcessStartInfo]::new((Join-Path $install 'mcphub-tray.exe'))
@@ -86,6 +102,7 @@ public static class TrayWindowEvidence {
         throw 'Installed tray did not create its dashboard window.'
       }
       $dashboardHandle=$tray.MainWindowHandle
+      Write-Output ('Dashboard close target: '+[TrayWindowEvidence]::Describe($dashboardHandle))
       if(-not $tray.WaitForInputIdle(10000) -or -not [TrayWindowEvidence]::IsWindowVisible($dashboardHandle)){
         throw 'Installed dashboard did not become visible and ready.'
       }
@@ -104,6 +121,7 @@ public static class TrayWindowEvidence {
       $retained=[TrayWindowEvidence]::IsWindow($dashboardHandle)
       $visible=[TrayWindowEvidence]::IsWindowVisible($dashboardHandle)
       if(-not $retained -or $visible){
+        [TrayWindowEvidence]::OwnedWindows([uint32]$tray.Id) | ForEach-Object {Write-Output ('Remaining tray window: '+$_)}
         throw "Closing the dashboard did not retain its hidden window: retained=$retained, visible=$visible."
       }
       Wait-Gateway

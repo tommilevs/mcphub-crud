@@ -10,7 +10,7 @@ on:
         type: string
   push:
     branches: [feat/tool-result-history]
-    paths: ['.github/workflows/windows-wizard-acceptance.yml']
+    paths: ['.github/workflows/windows-wizard-acceptance.yml', 'native/test-nsis-ci-windows.ps1']
 
 permissions:
   contents: read
