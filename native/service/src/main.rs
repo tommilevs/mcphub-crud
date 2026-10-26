@@ -6,6 +6,8 @@ use mcphub_runtime_core::secret_store::SecretStore;
 #[cfg(windows)]
 mod interactive;
 #[cfg(windows)]
+mod agent_inventory;
+#[cfg(windows)]
 mod options;
 #[cfg(windows)]
 mod pipe_access;

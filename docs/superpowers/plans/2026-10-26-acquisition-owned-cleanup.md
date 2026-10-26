@@ -203,3 +203,17 @@ filesystem fixtures cover this replay fence and failed-proof refusal; terminal
 job records in these adapter fixtures are explicitly synthetic (the separate
 one-shot suites test real process proof). The adapter is still internal and cannot
 be exposed through IPC until all interactive supervisors are reserved too.
+
+The cross-session prerequisite now includes bounded native named-pipe discovery
+for all `mcphub-user-*` names, including custom agent names. It neither connects
+to nor controls an agent. Results are untrusted, sorted and deduplicated; scan
+errors, unsupported names and bounds fail closed. Actual Windows create/close
+tests prove discovery and absence after the owned pipe handle closes. The pipe
+namespace reports ERROR_NO_MORE_FILES on an empty initial search, which is
+handled alongside ERROR_FILE_NOT_FOUND. Search handles use FindClose.
+
+Discovery remains internal and is NOT an exhaustive reservation: a global launch
+barrier, authenticated same-handle agent connections and supervisor locks must
+cover discovery through deletion before the cleanup actuator can be enabled.
+Ruling: inventory includes custom pipe names rather than guessing session IDs
+from names; session and executable ownership must be checked on the opened pipe.
