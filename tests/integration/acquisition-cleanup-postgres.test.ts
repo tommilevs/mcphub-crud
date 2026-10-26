@@ -4,11 +4,14 @@ import {ensureMcpAcquisitionSchema} from '../../src/db/mcpAcquisitionSchema.js';
 import {AcquisitionPlanRepository,buildAcquisitionManifest} from '../../src/services/mcpAcquisitionPlan.js';
 import {AcquisitionCleanupJournal} from '../../src/services/mcpAcquisitionCleanupJournal.js';
 import type {MarketServer} from '../../src/types/index.js';
+import {DataSource} from 'typeorm';
+import {Server} from '../../src/db/entities/Server.js';
+import {withPostgresCleanupSettings} from '../../src/services/mcpAcquisitionCleanupSettings.js';
 
 const suite=process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD?describe:describe.skip;
 suite('owned acquisition cleanup journal in PostgreSQL',()=>{
   const schema=`cleanup_${randomUUID().replace(/-/g,'')}`;
-  let admin:Client,pool:Pool,journal:AcquisitionCleanupJournal,plans:AcquisitionPlanRepository;
+  let admin:Client,pool:Pool,journal:AcquisitionCleanupJournal,plans:AcquisitionPlanRepository,settingsDb:DataSource;
   beforeAll(async()=>{
     const config={host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST??'127.0.0.1',
       port:Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT??5432),user:process.env.MCPHUB_ATTRIBUTION_TEST_USER??'postgres',
@@ -18,8 +21,12 @@ suite('owned acquisition cleanup journal in PostgreSQL',()=>{
     const db={query:async(sql:string,args?:any[])=>(await pool.query(sql,args)).rows};
     await ensureMcpAcquisitionSchema(db);await ensureMcpAcquisitionSchema(db);
     journal=new AcquisitionCleanupJournal(db);plans=new AcquisitionPlanRepository(db);
+    settingsDb=new DataSource({type:'postgres',...config,username:config.user,schema,entities:[Server],synchronize:true,
+      extra:{options:`-c search_path=${schema},public`}});
+    await settingsDb.initialize();
   });
   afterAll(async()=>{
+    if(settingsDb?.isInitialized)await settingsDb.destroy();
     if(pool)await pool.end();
     if(admin){await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await admin.end();}
   });
@@ -74,4 +81,26 @@ suite('owned acquisition cleanup journal in PostgreSQL',()=>{
       files_removed_at:expect.any(Date),secrets_removed_at:null});
     await expect(pool.query(`UPDATE mcp_acquisition_cleanup SET status='complete',review_code=NULL WHERE operation_id=$1`,[id])).rejects.toThrow();
   });
+  test('settings adoption is blocked and concurrent writes wait for the complete guarded operation',async()=>{
+    const id=randomUUID(),secret='acq-'+'a'.repeat(64);
+    const target={operationId:id,directory:`C:\\data\\acquisitions\\${id}`,secretIds:[secret]};
+    const stored=settingsDb.getRepository(Server);
+    const adopted=await stored.save(stored.create({name:'renamed-disabled',enabled:false,nativeSecretRefs:{TOKEN:secret}}));
+    const work=jest.fn();
+    await expect(withPostgresCleanupSettings(settingsDb,target,work)).rejects.toThrow('references');
+    expect(work).not.toHaveBeenCalled();
+    await stored.delete(adopted.id);
+    await stored.save(stored.create({name:'unrelated',enabled:false}));
+    let release!:()=>void,entered!:()=>void;
+    const waiting=new Promise<void>(resolve=>{release=resolve;});
+    const inside=new Promise<void>(resolve=>{entered=resolve;});
+    const guarded=withPostgresCleanupSettings(settingsDb,target,async()=>{entered();await waiting;});
+    const writer=await pool.connect();
+    try{
+      await inside;
+      await writer.query("SET lock_timeout='100ms'");
+      await expect(writer.query("UPDATE servers SET name=name WHERE name='unrelated'")).rejects.toMatchObject({code:'55P03'});
+    }finally{release();await guarded;await writer.query("SET lock_timeout='0'");writer.release();}
+    expect((await stored.find()).map(server=>server.name)).toEqual(['unrelated']);
+  },10000);
 });
