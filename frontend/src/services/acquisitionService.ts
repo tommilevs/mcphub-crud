@@ -25,11 +25,12 @@ export interface AcquisitionPlan {
 }
 export interface AcquisitionOperation { operation_id: string; state: string; cancel_requested?: boolean; requires_reconciliation?: boolean; failure_code?: string | null;
   verification?: 'discovery_only' | 'functional' | 'functional_failed' | null; plan_id?: string;
-  execution_started?: boolean; publication_started?: boolean; publication_applied_at?: string | null }
+  execution_started?: boolean; execution_stale?: boolean; publication_started?: boolean; publication_applied_at?: string | null }
 
 export const acquisitionTerminal = (operation: AcquisitionOperation) => ['ready', 'failed', 'rolled_back', 'cancelled'].includes(operation.state);
 export function acquisitionOperationStatus(operation: AcquisitionOperation) {
   if (operation.requires_reconciliation) return { key: 'uncertain', text: 'Installation needs review. It will not restart automatically.' };
+  if (operation.execution_stale) return { key: 'stale', text: 'No recent worker activity. Refresh status or mark this installation for review.' };
   if (operation.cancel_requested && !acquisitionTerminal(operation)) return { key: 'cancelling', text: 'Cancellation requested. Waiting for the current step to stop.' };
   if (operation.state === 'authorized') return operation.execution_started
     ? { key: 'queued', text: 'Queued or preparing required configuration.' }
@@ -68,4 +69,7 @@ export async function executeAcquisitionOperation(id: string, credentials: Recor
 }
 export async function getAcquisitionPlan(id: string) {
   return apiGet<ApiResponse<AcquisitionPlan>>(`/market/acquisition/plans/${encodeURIComponent(id)}`);
+}
+export async function reviewInterruptedAcquisition(id: string) {
+  return apiPost<ApiResponse<AcquisitionOperation>>(`/market/acquisition/operations/${encodeURIComponent(id)}/review-interrupted`, {});
 }

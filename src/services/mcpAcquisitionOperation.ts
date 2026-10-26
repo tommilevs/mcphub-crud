@@ -26,7 +26,10 @@ export class AcquisitionOperationRepository {
     const rows = await this.db.query(`SELECT operation_id,plan_id,manifest_digest,state,cancel_requested,requires_reconciliation,failure_code,
       probe_claim_id IS NOT NULL AS probe_started,probe_result_id,verification,inspection,inspected_at,authorized_at,updated_at,
       publication IS NOT NULL AS publication_started,publication_applied_at,
-      execution_claim_id IS NOT NULL AS execution_started,execution_started_at
+      execution_claim_id IS NOT NULL AS execution_started,execution_started_at,
+      (execution_claim_id IS NOT NULL AND NOT requires_reconciliation
+        AND state IN ('authorized','staging','starting','verifying')
+        AND COALESCE(execution_heartbeat_at,execution_started_at)<NOW()-INTERVAL '120 seconds') AS execution_stale
       FROM mcp_acquisition_operations WHERE operation_id=$1 AND owner=$2`, [operationId, owner]);
     return rows[0] ?? null;
   }
@@ -43,7 +46,7 @@ export class AcquisitionOperationRepository {
   async claimExecution(owner: string, operationId: string, digest: string) {
     const token = randomUUID();
     const rows = await this.db.query(`UPDATE mcp_acquisition_operations o SET execution_claim_id=$4,
-      execution_started_at=NOW(),updated_at=NOW() FROM mcp_acquisition_plans p
+      execution_started_at=NOW(),execution_heartbeat_at=NOW(),updated_at=NOW() FROM mcp_acquisition_plans p
       WHERE o.operation_id=$1 AND o.owner=$2 AND o.manifest_digest=$3 AND o.state='authorized'
       AND o.execution_claim_id IS NULL AND NOT o.cancel_requested AND NOT o.requires_reconciliation
       AND p.plan_id=o.plan_id AND p.manifest_digest=o.manifest_digest AND p.expires_at>NOW()
@@ -51,10 +54,31 @@ export class AcquisitionOperationRepository {
     return rows[0] ?? null;
   }
 
+  async heartbeatExecution(owner: string, operationId: string, token: string) {
+    if (!uuid.test(operationId) || !uuid.test(token)) throw new AcquisitionInputError('Invalid execution claim');
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET execution_heartbeat_at=NOW()
+      WHERE operation_id=$1 AND owner=$2 AND execution_claim_id=$3 AND NOT requires_reconciliation
+      AND state IN ('authorized','staging','starting','verifying') RETURNING operation_id`, [operationId, owner, token]);
+    return rows.length > 0;
+  }
+
+  /** Explicit owner review only: never reclaim a token, replay npm or delete resources. */
+  async reviewInterruptedExecution(owner: string, operationId: string) {
+    if (!uuid.test(operationId)) throw new AcquisitionInputError('Invalid operation identifier');
+    const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET requires_reconciliation=TRUE,
+      state=CASE WHEN state='authorized' THEN 'failed' ELSE state END,
+      failure_code='execution_heartbeat_lost',updated_at=NOW()
+      WHERE operation_id=$1 AND owner=$2 AND execution_claim_id IS NOT NULL AND NOT requires_reconciliation
+      AND state IN ('authorized','staging','starting','verifying')
+      AND COALESCE(execution_heartbeat_at,execution_started_at)<NOW()-INTERVAL '120 seconds'
+      RETURNING operation_id`, [operationId, owner]);
+    return rows.length > 0;
+  }
+
   async requireExecutionReconciliation(owner: string, operationId: string, token: string) {
     const rows = await this.db.query(`UPDATE mcp_acquisition_operations SET requires_reconciliation=TRUE,
       state=CASE WHEN state='authorized' THEN 'failed' ELSE state END,
-      failure_code='execution_outcome_unknown',updated_at=NOW()
+      failure_code=COALESCE(failure_code,'execution_outcome_unknown'),updated_at=NOW()
       WHERE operation_id=$1 AND owner=$2 AND execution_claim_id=$3
       AND state NOT IN ('ready','rolled_back','cancelled') RETURNING operation_id`, [operationId, owner, token]);
     return rows.length > 0;

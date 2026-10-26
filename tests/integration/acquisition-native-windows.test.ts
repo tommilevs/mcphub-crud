@@ -23,7 +23,8 @@ import { auth } from '../../src/middlewares/auth.js';
 import { requireAdminMiddleware } from '../../src/utils/requireAdmin.js';
 import { createUserToken } from '../utils/testHelpers.js';
 import { createMcpAcquisitionPlan, authorizeMcpAcquisitionPlan, executeMcpAcquisitionOperation,
-  getMcpAcquisitionOperation, cancelMcpAcquisitionOperation } from '../../src/controllers/mcpAcquisitionController.js';
+  getMcpAcquisitionOperation, cancelMcpAcquisitionOperation, reviewInterruptedMcpAcquisition } from '../../src/controllers/mcpAcquisitionController.js';
+import { AcquisitionOperationRepository } from '../../src/services/mcpAcquisitionOperation.js';
 import { getServerByName, cleanupAllServers, initializeClientsFromSettings } from '../../src/services/mcpService.js';
 import { deleteNativeRuntimeSecret, forgetNativeInstall, getNativeRuntimeStatus } from '../../src/services/nativeRuntimeSecretService.js';
 import * as inspectionModule from '../../src/services/mcpAcquisitionInspection.js';
@@ -100,6 +101,7 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     app.post(`${prefix}/operations/:id/execute`, executeMcpAcquisitionOperation);
     app.get(`${prefix}/operations/:id`, getMcpAcquisitionOperation);
     app.post(`${prefix}/operations/:id/cancel`, cancelMcpAcquisitionOperation);
+    app.post(`${prefix}/operations/:id/review-interrupted`, reviewInterruptedMcpAcquisition);
   }, 30000);
   afterAll(async () => {
     const info = getServerByName('native-acquisition-fixture');
@@ -138,6 +140,20 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     await request(app).post(`${prefix}/operations/${cancelId}/execute`).set('x-auth-token', token)
       .send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(409);
     expect(fs.existsSync(path.join(root, 'acquisitions', cancelId))).toBe(false);
+    const stalePlan = (await request(app).post(`${prefix}/plans`).set('x-auth-token', token)
+      .send({ serverName: 'native-acquisition-fixture', version: '1.0.0', targetGroup: 'fixture-group' }).expect(201)).body.data;
+    const staleId = (await request(app).post(`${prefix}/plans/${stalePlan.plan_id}/authorize`).set('x-auth-token', token)
+      .send({ digest: stalePlan.manifest_digest, idempotencyKey: randomUUID() }).expect(200)).body.data.operation_id;
+    const operations = new AcquisitionOperationRepository(mockAcquisitionDb);
+    expect(await operations.claimExecution('alice', staleId, stalePlan.manifest_digest)).toBeTruthy();
+    await request(app).post(`${prefix}/operations/${staleId}/review-interrupted`).set('x-auth-token', token).send({}).expect(409);
+    await pool.query(`UPDATE mcp_acquisition_operations SET execution_heartbeat_at=NOW()-INTERVAL '3 minutes' WHERE operation_id=$1`, [staleId]);
+    await request(app).post(`${prefix}/operations/${staleId}/review-interrupted`).set('x-auth-token', bob).send({}).expect(409);
+    const reviewed = await request(app).post(`${prefix}/operations/${staleId}/review-interrupted`).set('x-auth-token', token).send({}).expect(200);
+    expect(reviewed.body.data).toMatchObject({ state: 'failed', requires_reconciliation: true });
+    await request(app).post(`${prefix}/operations/${staleId}/execute`).set('x-auth-token', token)
+      .send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(409);
+    expect(fs.existsSync(path.join(root, 'acquisitions', staleId))).toBe(false);
     await request(app).post(`${endpoint}/execute`).set('x-auth-token', bob).send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(409);
     const accepted = await request(app).post(`${endpoint}/execute`).set('x-auth-token', token)
       .send({ credentials: { FIXTURE_KEY: 'synthetic-acquisition-only' } }).expect(202);

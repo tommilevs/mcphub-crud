@@ -329,6 +329,45 @@ postgresDescribe('immutable MCP acquisition plans in PostgreSQL', () => {
     expect(await operations.claim('alice',late,lateToken)).toBeNull();
   });
 
+  test('only stale owner-scoped executions can be marked for review without replay',async()=>{
+    const operations=new AcquisitionOperationRepository({query:async(sql,args)=>(await pool.query(sql,args)).rows});
+    const manifest=buildAcquisitionManifest({name:'heartbeat-fixture',installations:{npm:{type:'npm',command:'npx',args:['-y','fixture']}}} as unknown as MarketServer,'1.0.0','fixture-group');
+    const plan=await repository.create('alice',manifest);
+    const {operation_id:id}=await repository.authorize('alice',plan.plan_id,plan.manifest_digest,randomUUID());
+    const claim=await operations.claimExecution('alice',id,plan.manifest_digest);
+    expect(await operations.heartbeatExecution('bob',id,claim.execution_claim_id)).toBe(false);
+    expect(await operations.heartbeatExecution('alice',id,randomUUID())).toBe(false);
+    expect(await operations.reviewInterruptedExecution('alice',id)).toBe(false);
+    expect((await operations.get('alice',id)).execution_stale).toBe(false);
+    await pool.query(`UPDATE mcp_acquisition_operations SET execution_heartbeat_at=NOW()-INTERVAL '3 minutes' WHERE operation_id=$1`,[id]);
+    expect((await operations.get('alice',id)).execution_stale).toBe(true);
+    expect(await operations.reviewInterruptedExecution('bob',id)).toBe(false);
+    expect(await operations.reviewInterruptedExecution('alice',id)).toBe(true);
+    expect(await operations.get('alice',id)).toMatchObject({state:'failed',requires_reconciliation:true,execution_stale:false,failure_code:'execution_heartbeat_lost'});
+    expect(await operations.heartbeatExecution('alice',id,claim.execution_claim_id)).toBe(false);
+    expect(await operations.claimExecution('alice',id,plan.manifest_digest)).toBeNull();
+    expect(await operations.claim('alice',id,claim.execution_claim_id)).toBeNull();
+    expect(await operations.reviewInterruptedExecution('alice',id)).toBe(false);
+    expect(await operations.requireExecutionReconciliation('alice',id,claim.execution_claim_id)).toBe(true);
+    expect((await operations.get('alice',id)).failure_code).toBe('execution_heartbeat_lost');
+  });
+
+  test('heartbeat refresh and stale review have exactly one winner, including legacy missing timestamps',async()=>{
+    const operations=new AcquisitionOperationRepository({query:async(sql,args)=>(await pool.query(sql,args)).rows});
+    const manifest=buildAcquisitionManifest({name:'heartbeat-race',installations:{npm:{type:'npm',command:'npx',args:['-y','fixture']}}} as unknown as MarketServer,'1.0.0','fixture-group');
+    for(let attempt=0;attempt<5;attempt++){
+      const plan=await repository.create('alice',manifest);
+      const {operation_id:id}=await repository.authorize('alice',plan.plan_id,plan.manifest_digest,randomUUID());
+      const claim=await operations.claimExecution('alice',id,plan.manifest_digest);
+      await pool.query(`UPDATE mcp_acquisition_operations SET execution_heartbeat_at=NULL,execution_started_at=NOW()-INTERVAL '3 minutes' WHERE operation_id=$1`,[id]);
+      expect((await operations.get('alice',id)).execution_stale).toBe(true);
+      const results=await Promise.all([operations.heartbeatExecution('alice',id,claim.execution_claim_id),operations.reviewInterruptedExecution('alice',id)]);
+      expect(results.filter(Boolean)).toHaveLength(1);
+      const current=await operations.get('alice',id);
+      expect(current.requires_reconciliation).toBe(results[1]);expect(current.execution_stale).toBe(false);
+    }
+  });
+
   test('one exact authorized probe attaches only its owner-scoped RAW evidence', async () => {
     const db = { query: async (sql: string, args?: any[]) => (await pool.query(sql, args)).rows };
     const operations = new AcquisitionOperationRepository(db);

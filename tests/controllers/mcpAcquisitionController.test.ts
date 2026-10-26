@@ -1,7 +1,7 @@
 import express from 'express';
 import request from 'supertest';
 import { proposeMcpAcquisition, createMcpAcquisitionPlan, getMcpAcquisitionPlan, authorizeMcpAcquisitionPlan,
-  getMcpAcquisitionOperation, cancelMcpAcquisitionOperation, executeMcpAcquisitionOperation } from '../../src/controllers/mcpAcquisitionController.js';
+  getMcpAcquisitionOperation, cancelMcpAcquisitionOperation, executeMcpAcquisitionOperation, reviewInterruptedMcpAcquisition } from '../../src/controllers/mcpAcquisitionController.js';
 import { enqueueAcquisitionExecution } from '../../src/services/mcpAcquisitionExecutionQueue.js';
 import { loadSettings } from '../../src/config/configManager.js';
 import { getMarketServers } from '../../src/services/marketService.js';
@@ -25,7 +25,31 @@ app.post('/plans/:id/authorize', authorizeMcpAcquisitionPlan);
 app.get('/operations/:id', getMcpAcquisitionOperation);
 app.post('/operations/:id/cancel', cancelMcpAcquisitionOperation);
 app.post('/operations/:id/execute', executeMcpAcquisitionOperation);
+app.post('/operations/:id/review-interrupted', reviewInterruptedMcpAcquisition);
 beforeEach(() => { jest.resetAllMocks(); username = undefined; authMethod = undefined; });
+
+test('interrupted review requires dashboard identity and never accepts caller timestamps or commands',async()=>{
+  username='alice';authMethod='bearer';
+  const endpoint='/operations/00000000-0000-4000-8000-000000000000/review-interrupted';
+  await request(app).post(endpoint).send({}).expect(403);
+  authMethod='jwt';
+  await request(app).post(endpoint).send({heartbeat:'old',command:'reinstall'}).expect(400);
+  expect(mockQuery).not.toHaveBeenCalled();expect(enqueueAcquisitionExecution).not.toHaveBeenCalled();
+});
+
+test('interrupted review refuses a fresh or unavailable operation and is owner-bound',async()=>{
+  username='alice';authMethod='jwt';mockQuery.mockResolvedValue([]);
+  await request(app).post('/operations/00000000-0000-4000-8000-000000000000/review-interrupted').send({}).expect(409);
+  expect(mockQuery.mock.calls[0][1][1]).toBe('alice');expect(enqueueAcquisitionExecution).not.toHaveBeenCalled();
+});
+
+test('interrupted review returns committed review state without enqueueing execution',async()=>{
+  username='alice';authMethod='session';
+  mockQuery.mockResolvedValueOnce([{operation_id:'operation'}]).mockResolvedValueOnce([{operation_id:'operation',state:'failed',requires_reconciliation:true}]);
+  const result=await request(app).post('/operations/00000000-0000-4000-8000-000000000000/review-interrupted').send({}).expect(200);
+  expect(result.body.data).toMatchObject({state:'failed',requires_reconciliation:true});
+  expect(enqueueAcquisitionExecution).not.toHaveBeenCalled();
+});
 
 test('execution requires dashboard authentication and rejects caller-selected commands',async()=>{
   username='alice';authMethod='apiKey';

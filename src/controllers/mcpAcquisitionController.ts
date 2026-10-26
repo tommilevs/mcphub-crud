@@ -118,6 +118,28 @@ async function operationRequest(req: Request, res: Response, cancel: boolean): P
 export const getMcpAcquisitionOperation = (req: Request, res: Response) => operationRequest(req, res, false);
 export const cancelMcpAcquisitionOperation = (req: Request, res: Response) => operationRequest(req, res, true);
 
+export async function reviewInterruptedMcpAcquisition(req: Request, res: Response): Promise<void> {
+  if (!(req as any).user?.isAdmin || !['jwt', 'session'].includes((req as any).authMethod)) {
+    res.status(403).json({ success: false, message: 'Dashboard administrator authentication is required' }); return;
+  }
+  const owner = ownerOf(req);
+  if (!owner) { res.status(401).json({ success: false, message: 'Authenticated owner is required' }); return; }
+  const body = req.body ?? {};
+  if (typeof body !== 'object' || Array.isArray(body) || Object.keys(body).length) {
+    res.status(400).json({ success: false, message: 'Review does not accept execution parameters' }); return;
+  }
+  try {
+    const repository = new AcquisitionOperationRepository(getAppDataSource());
+    if (!await repository.reviewInterruptedExecution(owner, req.params.id as string)) {
+      res.status(409).json({ success: false, message: 'Operation is unavailable or still has recent worker activity' }); return;
+    }
+    res.json({ success: true, data: await repository.get(owner, req.params.id as string) });
+  } catch (error) {
+    if (error instanceof AcquisitionInputError) { res.status(400).json({ success: false, message: error.message }); return; }
+    res.status(503).json({ success: false, message: 'Interrupted execution review is unavailable' });
+  }
+}
+
 export async function executeMcpAcquisitionOperation(req: Request, res: Response): Promise<void> {
   if (!(req as any).user?.isAdmin || !['jwt', 'session'].includes((req as any).authMethod)) {
     res.status(403).json({ success: false, message: 'Dashboard administrator authentication is required' }); return;

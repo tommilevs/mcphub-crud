@@ -4,7 +4,7 @@ import { useAuth } from '../contexts/AuthContext';
 import type { Group } from '../types';
 import { findAcquisitionCandidates, acquisitionGroups, prepareAcquisitionPlan, approveAcquisitionPlan,
   getAcquisitionOperation, cancelAcquisitionOperation, executeAcquisitionOperation, getAcquisitionPlan,
-  acquisitionOperationStatus, acquisitionTerminal,
+  acquisitionOperationStatus, acquisitionTerminal, reviewInterruptedAcquisition,
   type AcquisitionCandidate, type AcquisitionPlan, type AcquisitionOperation } from '../services/acquisitionService';
 
 /** Explicit review surface. Authorization is separate from installation execution. */
@@ -122,16 +122,16 @@ export default function McpAcquisitionPanel() {
     setCredentials({}); setStatusError(false);
     setOperation({ ...operation, execution_started: true }); setRefreshEpoch(value => value + 1);
   });
-  const updateOperation = (cancel = false) => perform(async () => {
+  const updateOperation = (cancel: boolean | 'review' = false) => perform(async () => {
     if (!operation) return;
-    const result = await (cancel ? cancelAcquisitionOperation : getAcquisitionOperation)(operation.operation_id);
+    const result = await (cancel === 'review' ? reviewInterruptedAcquisition : cancel ? cancelAcquisitionOperation : getAcquisitionOperation)(operation.operation_id);
     if (scopeOwner.current !== storageKey) return;
     if (!result.success || !result.data) throw new Error(result.message || t('app.error'));
     setOperation(result.data); setStatusError(false); setRefreshEpoch(value => value + 1);
   });
   return <details ref={details} className="mb-5 rounded-lg border border-[var(--hub-line)] bg-[var(--hub-surface)] p-4">
     <summary className="cursor-pointer text-sm font-medium">{t('acquisition.title', 'Find a missing capability')}
-      {polling && <span className="ml-2 text-xs text-[var(--hub-ink-3)]">{t('acquisition.inProgress', 'Installation in progress')}</span>}</summary>
+      {polling && !operation?.execution_stale && <span className="ml-2 text-xs text-[var(--hub-ink-3)]">{t('acquisition.inProgress', 'Installation in progress')}</span>}</summary>
     <div className="mt-3 space-y-3 text-sm">
       <p className="text-[var(--hub-ink-3)]">{t('acquisition.help', 'Describe what you need. Catalog matches are suggestions, not verified capabilities. Searching and preparing a plan do not install anything.')}</p>
       {(!operation || acquisitionTerminal(operation)) && <fieldset disabled={busy} className="space-y-3 min-w-0">
@@ -195,6 +195,8 @@ export default function McpAcquisitionPanel() {
           </div>}
         {operation && <div className="flex flex-wrap gap-2">
           <button type="button" className="hub-btn" disabled={busy} onClick={() => updateOperation()}>{t('acquisition.refresh', 'Refresh status')}</button>
+          {operation.execution_stale && !operation.requires_reconciliation && !acquisitionTerminal(operation) &&
+            <button type="button" className="hub-btn" disabled={busy} onClick={() => updateOperation('review')}>{t('acquisition.reviewInterrupted', 'Mark interrupted installation for review')}</button>}
           {['authorized', 'staging', 'starting', 'verifying'].includes(operation.state) &&
             <button type="button" className="hub-btn" disabled={busy || operation.cancel_requested} onClick={() => updateOperation(true)}>{t('acquisition.cancel', 'Cancel installation')}</button>}
         </div>}

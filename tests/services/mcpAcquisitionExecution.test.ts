@@ -7,6 +7,7 @@ describe('claimed acquisition execution pipeline',()=>{
   const dependencies=()=>({enabled:()=>true,repository:{
     executionCandidate:jest.fn().mockResolvedValue({manifest,manifest_digest:acquisitionManifestDigest(manifest)}),
     claimExecution:jest.fn().mockResolvedValue({execution_claim_id:'execution'}),
+    heartbeatExecution:jest.fn().mockResolvedValue(true),
     requireExecutionReconciliation:jest.fn().mockResolvedValue(true),get:jest.fn().mockResolvedValue({cancel_requested:false}),
   },putSecret:jest.fn().mockResolvedValue({}),stage:jest.fn().mockResolvedValue({status:'package_staged'}),
     verify:jest.fn().mockResolvedValue({status:'inspected'}),publish:jest.fn().mockResolvedValue({status:'published'}),
@@ -57,5 +58,48 @@ describe('claimed acquisition execution pipeline',()=>{
     const deps=dependencies(),execute=await prepareAcquisitionExecution('alice','operation',{API_KEY:'secret'},deps);
     expect((await execute!()).status).toBe('ready');expect((await execute!()).status).toBe('not_claimed');
     expect(deps.putSecret).toHaveBeenCalledTimes(1);expect(deps.stage).toHaveBeenCalledTimes(1);
+  });
+  test('queued execution stays alive and stops heartbeats after completion',async()=>{
+    jest.useFakeTimers();
+    try {
+      const deps=dependencies(),execute=await prepareAcquisitionExecution('alice','operation',{API_KEY:'secret'},deps);
+      await jest.advanceTimersByTimeAsync(30000);
+      expect(deps.repository.heartbeatExecution).toHaveBeenCalledWith('alice','operation','execution');
+      expect(deps.stage).not.toHaveBeenCalled();
+      expect((await execute!()).status).toBe('ready');
+      const calls=deps.repository.heartbeatExecution.mock.calls.length;
+      await jest.advanceTimersByTimeAsync(90000);
+      expect(deps.repository.heartbeatExecution).toHaveBeenCalledTimes(calls);
+    } finally {jest.useRealTimers();}
+  });
+  test('a queued worker losing its heartbeat cannot write secrets or start installation',async()=>{
+    jest.useFakeTimers();
+    try {
+      const deps=dependencies(),execute=await prepareAcquisitionExecution('alice','operation',{API_KEY:'secret'},deps);
+      deps.repository.heartbeatExecution.mockRejectedValue(new Error('database unavailable'));
+      await jest.advanceTimersByTimeAsync(30000);
+      expect((await execute!()).status).toBe('reconciliation_required');
+      expect(deps.putSecret).not.toHaveBeenCalled();expect(deps.stage).not.toHaveBeenCalled();
+    } finally {jest.useRealTimers();}
+  });
+  test('a slow heartbeat never overlaps another heartbeat or phase ownership check',async()=>{
+    jest.useFakeTimers();
+    try {
+      let release!:(alive:boolean)=>void;
+      const pending=new Promise<boolean>(resolve=>{release=resolve;});
+      const deps=dependencies();deps.repository.heartbeatExecution.mockImplementation(()=>pending);
+      const execute=await prepareAcquisitionExecution('alice','operation',{API_KEY:'secret'},deps);
+      await jest.advanceTimersByTimeAsync(120000);
+      expect(deps.repository.heartbeatExecution).toHaveBeenCalledTimes(1);
+      const running=execute!();await Promise.resolve();
+      expect(deps.putSecret).not.toHaveBeenCalled();
+      release(true);expect((await running).status).toBe('ready');
+    } finally {jest.useRealTimers();}
+  });
+  test('revocation after credential storage fences the next native phase',async()=>{
+    const deps=dependencies();
+    deps.putSecret.mockImplementation(async()=>{deps.repository.heartbeatExecution.mockResolvedValue(false);return {};});
+    expect((await runAcquisitionExecution('alice','operation',{API_KEY:'secret'},deps)).status).toBe('reconciliation_required');
+    expect(deps.stage).not.toHaveBeenCalled();expect(deps.verify).not.toHaveBeenCalled();
   });
 });

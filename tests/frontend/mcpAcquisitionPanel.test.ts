@@ -29,6 +29,7 @@ test('operation messaging distinguishes authorization, queueing and activation w
   expect(acquisitionOperationStatus({operation_id:'op',state:'verifying',publication_applied_at:'now'}).text).toContain('Starting');
   expect(acquisitionOperationStatus({operation_id:'op',state:'verifying',verification:'functional',cancel_requested:true}).text).toContain('Cancellation');
   expect(acquisitionOperationStatus({operation_id:'op',state:'failed',requires_reconciliation:true}).text).toContain('review');
+  expect(acquisitionOperationStatus({operation_id:'op',state:'authorized',execution_started:true,execution_stale:true}).text).toContain('No recent worker activity');
 });
 test('execution sends credentials only to the owner-scoped operation endpoint',async()=>{
   (apiPost as jest.Mock).mockResolvedValue({success:true,data:{status:'accepted'}});

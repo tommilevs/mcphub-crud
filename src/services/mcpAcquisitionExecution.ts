@@ -9,12 +9,13 @@ import { verifyAcquisitionOperation } from './mcpAcquisitionVerification.js';
 import { publishVerifiedAcquisition } from './mcpAcquisitionPublication.js';
 import { activateAcquisition } from './mcpAcquisitionActivationWorker.js';
 import { rollbackPublishedAcquisition } from './mcpAcquisitionRollback.js';
+import { startExecutionHeartbeat } from './mcpAcquisitionExecutionHeartbeat.js';
 
 export class AcquisitionExecutionUnavailable extends Error {}
 type PhaseResult = { status: string; checkpointSaved?: boolean };
 interface ExecutionDependencies {
   enabled(): boolean;
-  repository: Pick<AcquisitionOperationRepository, 'executionCandidate' | 'claimExecution' | 'requireExecutionReconciliation' | 'get'>;
+  repository: Pick<AcquisitionOperationRepository, 'executionCandidate' | 'claimExecution' | 'heartbeatExecution' | 'requireExecutionReconciliation' | 'get'>;
   putSecret(id: string, value: string): Promise<unknown>;
   stage(owner: string, id: string, executionToken: string): Promise<PhaseResult>;
   verify(owner: string, id: string, references: Record<string, string>): Promise<PhaseResult>;
@@ -56,6 +57,7 @@ export async function prepareAcquisitionExecution(owner: string, operationId: st
   credentials = Object.create(null);
   const claim = await deps.repository.claimExecution(owner, operationId, candidate.manifest_digest);
   if (!claim) return null;
+  const heartbeat = startExecutionHeartbeat(() => deps.repository.heartbeatExecution(owner, operationId, claim.execution_claim_id));
   let started = false;
   return async () => {
   if (started) return { status: 'not_claimed' };
@@ -71,15 +73,20 @@ export async function prepareAcquisitionExecution(owner: string, operationId: st
     if (!operation || operation.requires_reconciliation) return reconcile();
     const references: Record<string, string> = Object.create(null);
     for (const name of required) {
+      if (!await heartbeat.confirm()) return reconcile();
       const id = `acq-${createHash('sha256').update(`${owner}\0${operationId}\0${name}`).digest('hex')}`;
       await deps.putSecret(id, values[name]); references[name] = id; delete values[name];
     }
+    if (!await heartbeat.confirm()) return reconcile();
     const staged = await deps.stage(owner, operationId, claim.execution_claim_id);
     if (staged.status !== 'package_staged') return ['failed', 'cancelled', 'reconciliation_required'].includes(staged.status) ? staged : reconcile();
+    if (!await heartbeat.confirm()) return reconcile();
     const verified = await deps.verify(owner, operationId, references);
     if (verified.status !== 'inspected') return verified.status === 'failed' ? verified : reconcile();
+    if (!await heartbeat.confirm()) return reconcile();
     const published = await deps.publish(owner, operationId, references);
     if (published.status !== 'published') return reconcile();
+    if (!await heartbeat.confirm()) return reconcile();
     const activated = await deps.activate(owner, operationId);
     if (activated.status === 'ready') return activated;
     if (activated.status === 'not_claimed') {
@@ -88,6 +95,6 @@ export async function prepareAcquisitionExecution(owner: string, operationId: st
     }
     return reconcile();
   } catch { return reconcile(); }
-  finally { for (const name of Object.keys(values)) delete values[name]; }
+  finally { heartbeat.stop(); for (const name of Object.keys(values)) delete values[name]; }
   };
 }
