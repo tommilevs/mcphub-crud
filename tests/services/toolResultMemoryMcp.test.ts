@@ -3,6 +3,30 @@ const repository=()=>({findById:jest.fn(),incrementUseCount:jest.fn().mockResolv
 const raw=JSON.stringify({content:[{type:'text',text:'A😀B'}]});
 const record={resultId:'id',username:'alice',keyId:'key-a',raw,rawBytes:Buffer.byteLength(raw),rawSha256:'digest',payloadAvailable:true,server:'fixture',tool:'read'};
 const scope={username:'alice',keyId:'key-a',isAllowed:async()=>true};
+const anonymous={sessionId:'server-generated-session',isAllowed:async()=>true};
+it('lets an anonymous MCP session read only its own anonymous RAW',async()=>{
+ const db=repository();db.findById.mockResolvedValue({...record,username:undefined,keyId:undefined,sessionId:anonymous.sessionId});
+ expect((await readStoredToolResult(db as never,anonymous,'get_tool_result',{result_id:'id'})).content[0].text).toBe(raw);
+ for(const foreign of [{sessionId:'other'},{sessionId:undefined},{username:'alice'},{keyId:'key-a'}]){
+  db.findById.mockResolvedValue({...record,username:undefined,keyId:undefined,sessionId:anonymous.sessionId,...foreign});
+  expect((await readStoredToolResult(db as never,anonymous,'get_tool_result',{result_id:'id'})).isError).toBe(true);
+ }
+});
+it('anchors anonymous history searches to the server-provided session and rechecks returned rows',async()=>{
+ const db=repository();db.hybridSearch.mockResolvedValue([
+  {...record,resultId:'own',username:undefined,keyId:undefined,sessionId:anonymous.sessionId},
+  {...record,resultId:'foreign-session',username:undefined,keyId:undefined,sessionId:'other'},
+  {...record,resultId:'authenticated',sessionId:anonymous.sessionId},
+ ]);
+ const result=await searchStoredToolResults(db as never,anonymous,'search_tool_results',{query:'needle'},async()=>[1]);
+ expect(db.hybridSearch).toHaveBeenCalledWith('needle',[1],10,{sessionId:anonymous.sessionId});
+ expect(JSON.parse(result.content[0].text).results.map((r:any)=>r.result_id)).toEqual(['own']);
+});
+it('refuses caller filters that replace the anonymous session scope',async()=>{
+ const db=repository();const embed=jest.fn();
+ const result=await searchStoredToolResults(db as never,anonymous,'search_tool_results',{query:'needle',filters:{sessionId:'other'}},embed);
+ expect(result.isError).toBe(true);expect(embed).not.toHaveBeenCalled();expect(db.hybridSearch).not.toHaveBeenCalled();
+});
 it('returns exact stored RAW without invoking a tool',async()=>{
  const db=repository();db.findById.mockResolvedValue(record);
  const result=await readStoredToolResult(db as never,scope,'get_tool_result',{result_id:'id'});

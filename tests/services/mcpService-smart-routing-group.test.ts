@@ -509,6 +509,22 @@ describe('MCP Service - Smart Routing with Group Support', () => {
     expect(callTool).not.toHaveBeenCalled();
     expect(mockHistoryRepository.incrementUseCount).toHaveBeenCalledWith('id');
   });
+  it('requires a registered transport session before granting anonymous RAW access',async()=>{
+    mcpService.setServerInfosForTest([{name:'server1',status:'connected',enabled:true,tools:[{name:'server1::direct-tool',inputSchema:{type:'object'}}],options:{}}] as any);
+    mockHistoryRepository={findById:jest.fn().mockResolvedValue({resultId:'id',sessionId:'session-smart',server:'server1',tool:'direct-tool',raw:'anonymous evidence',payloadAvailable:true}),incrementUseCount:jest.fn().mockResolvedValue(undefined)};
+    const request={params:{name:'get_tool_result',arguments:{result_id:'id'}}};
+    expect((await mcpService.handleCallToolRequest(request,{sessionId:'session-smart'})).isError).toBe(true);
+    expect(mockHistoryRepository.findById).not.toHaveBeenCalled();
+    await mcpService.getMcpServer('session-smart');
+    try {
+      expect((await mcpService.handleCallToolRequest(request,{sessionId:'session-smart'})).content[0].text).toBe('anonymous evidence');
+      const {RequestContextService}=await import('../../src/services/requestContextService.js');
+      const context=jest.spyOn(RequestContextService.getInstance(),'getRequestContext').mockReturnValue({stateless:true} as any);
+      try {expect((await mcpService.handleCallToolRequest(request,{sessionId:'session-smart'})).isError).toBe(true);}
+      finally {context.mockRestore();}
+    } finally {mcpService.deleteMcpServer('session-smart');}
+    expect((await mcpService.handleCallToolRequest(request,{sessionId:'session-smart'})).isError).toBe(true);
+  });
   it('uses smart objective after capture and never forwards smart settings to the source tool',async()=>{
     const raw={content:[{type:'text',text:'routine\n'.repeat(20000)+'Xid 79 failure\n'}]};
     const callTool=jest.fn().mockResolvedValue(raw);

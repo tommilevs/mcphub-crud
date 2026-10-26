@@ -4,6 +4,8 @@ export interface ResultMemoryScope {
   servers?:string[];
   username?:string;
   keyId?:string;
+  /** Verified stateful MCP transport session; never taken from tool arguments. */
+  sessionId?:string;
   isAllowed:(record:ToolResultRecord)=>Promise<boolean>;
 }
 export type ResultMemoryReadName='get_tool_result'|'get_tool_result_range'|'pin_tool_result'|'unpin_tool_result';
@@ -17,12 +19,12 @@ export async function readStoredToolResult(
   name:ResultMemoryReadName,
   args:Record<string,unknown>,
 ){
-  if(!scope.username&&!scope.keyId)return failure('Authenticated history scope required');
+  if(!scope.username&&!scope.keyId&&!scope.sessionId)return failure('Authenticated history scope required');
   const id=typeof args.result_id==='string'?args.result_id.trim():'';
   if(!id||id.length>128)return failure('result_id is required');
   try {
     const record=await repository.findById(id);
-    if(!record||(scope.username&&record.username!==scope.username)||(scope.keyId&&record.keyId!==scope.keyId)||!await scope.isAllowed(record))return failure('Stored result not found');
+    if(!record||!withinOwner(record,scope)||!await scope.isAllowed(record))return failure('Stored result not found');
     if(name==='pin_tool_result'||name==='unpin_tool_result'){
       const pinned=name==='pin_tool_result';
       const updated=await repository.setPinned(id,pinned);
@@ -55,7 +57,10 @@ export const resultMemoryReadDefinitions = () => [...RESULT_MEMORY_READ_NAMES].m
 export type ResultMemorySearchName='search_tool_result'|'search_tool_results';
 export const RESULT_MEMORY_SEARCH_NAMES=new Set<string>(['search_tool_result','search_tool_results']);
 const withinOwner=(record:ToolResultRecord,scope:ResultMemoryScope)=>
-  (!scope.username||record.username===scope.username)&&(!scope.keyId||record.keyId===scope.keyId)&&(!scope.servers||scope.servers.includes(record.server));
+  (scope.username||scope.keyId
+    ? (!scope.username||record.username===scope.username)&&(!scope.keyId||record.keyId===scope.keyId)
+    : !!scope.sessionId&&!record.username&&!record.keyId&&record.sessionId===scope.sessionId)
+  &&(!scope.servers||scope.servers.includes(record.server));
 const boundedSearchResult=(values:unknown[],extra:Record<string,unknown>)=>{
   const results:unknown[]=[];
   for(const value of values){
@@ -68,7 +73,7 @@ export async function searchStoredToolResults(
   repository:ToolResultRepository,scope:ResultMemoryScope,name:ResultMemorySearchName,
   args:Record<string,unknown>,embed:(query:string)=>Promise<number[]|null>,
 ){
-  if(!scope.username&&!scope.keyId)return failure('Authenticated history scope required');
+  if(!scope.username&&!scope.keyId&&!scope.sessionId)return failure('Authenticated history scope required');
   const query=typeof args.query==='string'?args.query.trim():'';
   const limit=args.limit===undefined?10:args.limit;
   if(!query||query.length>2000||typeof limit!=='number'||!Number.isInteger(limit)||limit<1||limit>20)return failure('query is required (maximum 2000 characters); limit must be 1 through 20');
@@ -88,11 +93,13 @@ export async function searchStoredToolResults(
     }
     const rawFilters=args.filters;
     if(rawFilters!==undefined&&(!rawFilters||typeof rawFilters!=='object'||Array.isArray(rawFilters)))return failure('Invalid history filters');
-    const filter:ToolResultFilter={...(scope.username?{username:scope.username}:{}),...(scope.keyId?{keyId:scope.keyId}:{}),...(scope.servers?{servers:scope.servers}:{})};
+    const sessionScoped=!scope.username&&!scope.keyId;
+    const filter:ToolResultFilter={...(scope.username?{username:scope.username}:{}),...(scope.keyId?{keyId:scope.keyId}:{}),...(scope.servers?{servers:scope.servers}:{}),...(sessionScoped?{sessionId:scope.sessionId}:{})};
     const permitted=new Set(['server','tool','status','sessionId','conversationId','modelId','taskId','traceId','branchId']);
     for(const [key,value] of Object.entries(rawFilters??{})){
       if(!permitted.has(key)||typeof value!=='string'||!value||value.length>255)return failure('Invalid history filter');
       if(key==='status'&&!['success','error'].includes(value))return failure('Invalid history status');
+      if(sessionScoped&&key==='sessionId'&&value!==scope.sessionId)return failure('Invalid history session scope');
       Object.assign(filter,{[key]:value});
     }
     if(scope.servers&&(scope.servers.length===0||(filter.server&&!scope.servers.includes(filter.server))))return boundedSearchResult([],{mode:'lexical'});

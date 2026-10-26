@@ -4246,7 +4246,11 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
       const lookupGroup=getGroupLookupName(group);
       let visibility:ReturnType<typeof getFilteredServerInfosForGroup>|undefined;
       const visible=()=>visibility??=getFilteredServerInfosForGroup(lookupGroup);
-      const scope:ResultMemoryScope={username,keyId,isAllowed:async record=>{
+      // Anonymous retrieval is bound to an existing stateful transport, not a
+      // caller-supplied history filter or a forged stateless session header.
+      const historySession = !username&&!keyId&&sessionId&&servers[sessionId]&&
+        !requestContextService.getRequestContext()?.stateless ? sessionId : undefined;
+      const scope:ResultMemoryScope={username,keyId,sessionId:historySession,isAllowed:async record=>{
         const {filteredServerInfos,serverConfigsByName}=await visible();
         const info=filteredServerInfos.find(server=>server.name===record.server);
         if(!info)return false;
@@ -4257,7 +4261,7 @@ const handleCallToolRequestImpl = async (request: any, extra: any) => {
         return allowed.length>0;
       }};
       if(RESULT_MEMORY_SEARCH_NAMES.has(request.params.name)){
-        if(username||keyId)scope.servers=(await visible()).filteredServerInfos.map(info=>info.name);
+        if(username||keyId||historySession)scope.servers=(await visible()).filteredServerInfos.map(info=>info.name);
         return searchStoredToolResults(repository,scope,request.params.name as ResultMemorySearchName,request.params.arguments||{},query=>generateEmbedding(query,'query'));
       }
       return readStoredToolResult(repository,scope,request.params.name as ResultMemoryReadName,request.params.arguments||{});
