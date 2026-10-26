@@ -95,6 +95,15 @@ deletion. Native launch-reference preflight in `bfe823f` inspects the service
 supervisor under its mutex, including restartable exited definitions. Personal
 and interactive supervisors still require lifecycle/reference coordination.
 
+Personal-runtime tracking now retains immutable internal launch snapshots before
+connect and after cache invalidation. A cleanup reservation blocks new starts
+and invalidates preparations from earlier generations. Only an explicit native
+job-tree exit receipt releases a retired reference; legacy, failed and unknown
+outcomes remain references. Identical uncertain attempts are compacted without
+letting a later successful stop erase an earlier uncertain launch. This is an
+internal guard; shared and interactive runtime coordination and reconciliation
+of unknown outcomes must still be completed before deletion is exposed.
+
 The index guard holds a SERIALIZABLE transaction and a write-excluding table
 lock throughout guarded work. It checks server metadata and server/tool content
 IDs, including older tool rows without server metadata. Missing/unreadable

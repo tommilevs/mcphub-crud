@@ -1,6 +1,7 @@
 import { PrincipalRuntimeService } from '../../src/services/principalRuntimeService.js';
 import { credentialBindingEvents } from '../../src/services/credentialBindingService.js';
 import type { ServerInfo, ServerConfigWithName } from '../../src/types/index.js';
+import {NativeRuntimeTransport} from '../../src/services/nativeRuntimeTransport.js';
 
 const mockDefinition: ServerConfigWithName = {
   name: 'shared',
@@ -29,6 +30,42 @@ const info = (): ServerInfo => ({
   createTime: Date.now(),
 });
 const alice = { username: 'alice@example.com' };
+const operationId='00000000-0000-4000-8000-000000000001';
+const cleanupTarget={operationId,directory:`C:\\data\\acquisitions\\${operationId}`,secretIds:[]};
+const absent=async()=>{throw Object.assign(Error('missing'),{code:'ENOENT'});};
+test('retains personal runtime references after cache invalidation until confirmed native closure',async()=>{
+  mockDefinition.args=[`${cleanupTarget.directory}\\entry.js`];
+  let finish!:()=>void;const closing=new Promise<void>(resolve=>{finish=resolve;});
+  const transport=new NativeRuntimeTransport({id:'fixture',command:'unused.exe',args:[],env:{}});
+  const proof=jest.spyOn(transport,'shutdownConfirmed','get').mockReturnValue(true);
+  const child={...info(),transport};
+  const pool=new PrincipalRuntimeService(async()=>child,async(info)=>{info.transport=undefined;await closing;});
+  try{
+    const lease=await pool.acquire('shared',alice);lease.release();pool.invalidate();
+    await expect(pool.withCleanupGuard(cleanupTarget,async()=>undefined,absent)).rejects.toThrow('references');
+    finish();await new Promise(resolve=>setImmediate(resolve));
+    await expect(pool.withCleanupGuard(cleanupTarget,async()=>'done',absent)).resolves.toBe('done');
+  }finally{finish();pool.invalidate();proof.mockRestore();}
+});
+test('a preparation started before cleanup cannot launch a stale configuration afterwards',async()=>{
+  const connect=jest.fn(async()=>info());const pool=new PrincipalRuntimeService(connect,jest.fn());
+  const acquire=pool.acquire('shared',alice);
+  const rejected=expect(acquire).rejects.toThrow(/Runtime cleanup/);
+  await pool.withCleanupGuard(cleanupTarget,async()=>undefined,absent);
+  await rejected;expect(connect).not.toHaveBeenCalled();
+});
+test('invalidating a pending connection never drops its unresolved package reference',async()=>{
+  mockDefinition.args=[`${cleanupTarget.directory}\\entry.js`];
+  let connected!:(value:ServerInfo)=>void;
+  const close=jest.fn();
+  const pool=new PrincipalRuntimeService(()=>new Promise<ServerInfo>(resolve=>{connected=resolve;}),close);
+  const pending=pool.acquire('shared',alice),rejected=expect(pending).rejects.toThrow('changed');
+  await new Promise(resolve=>setImmediate(resolve));pool.invalidate();
+  try{await expect(pool.withCleanupGuard(cleanupTarget,async()=>undefined,absent)).rejects.toThrow('references');}
+  finally{connected(info());await rejected;}
+  await expect(pool.withCleanupGuard(cleanupTarget,async()=>undefined,absent)).rejects.toThrow('references');
+  expect(close).toHaveBeenCalledTimes(1);
+});
 test('failed startup verification waits for asynchronous child shutdown', async () => {
   let finishClose!: () => void;
   const closing = new Promise<void>((resolve) => { finishClose = resolve; });

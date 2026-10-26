@@ -10,6 +10,9 @@ import { authorizationService, type RequestPrincipal } from './authorizationServ
 import { CredentialBindingError, hasPersonalAuthentication } from '../utils/credentialTemplate.js';
 import { expandServerConfig } from './serverConfigEnvironment.js';
 import type { ServerConfig, ServerInfo } from '../types/index.js';
+import {NativeRuntimeTransport} from './nativeRuntimeTransport.js';
+import {RuntimeCleanupTracker,type RuntimeCleanupLease} from './runtimeCleanupTracker.js';
+import type {CleanupReferenceTarget} from './mcpAcquisitionCleanupReferences.js';
 
 interface RuntimeEntry {
   serverName: string;
@@ -20,11 +23,23 @@ interface RuntimeEntry {
   info?: ServerInfo;
   active: number;
   timer?: NodeJS.Timeout;
+  cleanupLease: RuntimeCleanupLease;
 }
 
 /** Reuses children across MCP sessions, but never across authenticated principals. */
 export class PrincipalRuntimeService {
   private readonly entries = new Map<string, RuntimeEntry>();
+  private readonly cleanupTracker=new RuntimeCleanupTracker();
+
+  withCleanupGuard<T>(target:CleanupReferenceTarget,work:()=>Promise<T>,resolvePath?:(path:string)=>Promise<string>){
+    return this.cleanupTracker.withCleanupGuard(target,work,resolvePath);
+  }
+
+  private retire(entry:RuntimeEntry,info:ServerInfo){
+    const transport=info.transport;
+    return entry.cleanupLease.retire(()=>this.close(info),
+      ()=>transport instanceof NativeRuntimeTransport&&transport.shutdownConfirmed);
+  }
 
   constructor(
     private readonly connect: (name: string, config: ServerConfig) => Promise<ServerInfo>,
@@ -40,7 +55,7 @@ export class PrincipalRuntimeService {
       entry.valid = false;
       clearTimeout(entry.timer);
       this.entries.delete(key);
-      void entry.promise.then((info) => this.close(info)).catch(() => undefined);
+      void entry.promise.then((info) => this.retire(entry,info)).catch(() => undefined);
     }
   }
 
@@ -50,6 +65,7 @@ export class PrincipalRuntimeService {
   ): Promise<{ info: ServerInfo; release: () => void }> {
     if (principal.credentialEligible === false)
       throw new CredentialBindingError('Personal authentication is required');
+    const cleanupGeneration=this.cleanupTracker.generation;
     const definition = await getServerDao().findById(serverName);
     if (
       !definition ||
@@ -77,6 +93,7 @@ export class PrincipalRuntimeService {
       }
       if (!entry) {
         const created: RuntimeEntry = {
+          cleanupLease:this.cleanupTracker.begin(serverName,resolved.config,cleanupGeneration),
           serverName,
           username: principal.username,
           // This context advances only after its own successful CAS writes. External
@@ -118,7 +135,7 @@ export class PrincipalRuntimeService {
             return info;
           } catch (error) {
             try {
-              if (info) await this.close(info);
+              if (info) await this.retire(created,info);else created.cleanupLease.unconfirmed();
             } finally {
               if (this.entries.get(key) === created) this.entries.delete(key);
               created.valid = false;
