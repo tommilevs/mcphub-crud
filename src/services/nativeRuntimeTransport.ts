@@ -16,6 +16,11 @@ export class NativeRuntimeTransport implements Transport {
   private pending:Promise<unknown>=Promise.resolve();
   private closed=false;
   private closing=false;
+  private closePromise?:Promise<void>;
+  private stopConfirmed=false;
+  /** True only when a capable native host explicitly confirms job-tree exit.
+   * Legacy acknowledgements keep normal close compatibility but prove no exit. */
+  get shutdownConfirmed():boolean{return this.stopConfirmed;}
   private streaming=false;
   private consume?:(response:ControlResponse)=>void;
   private abort?:(error:Error)=>void;
@@ -55,9 +60,18 @@ export class NativeRuntimeTransport implements Transport {
     const response=await this.control({op:this.streaming?'stdio_send':'stdio',id:this.processId,message:JSON.stringify(message),timeout_ms:timeout});
     for(const frame of response.responses??[]){try{this.onmessage?.(JSON.parse(frame) as JSONRPCMessage);}catch(error){this.onerror?.(error instanceof Error?error:new Error(String(error)));}}
   }
-  async close():Promise<void>{
-    if(this.closed||this.closing)return;this.closing=true;
-    try{await this.control({op:'stop',id:this.processId});}finally{this.disconnect();}
+  close():Promise<void>{
+    if(this.closePromise)return this.closePromise;
+    if(this.closed)return Promise.resolve();
+    this.closing=true;
+    this.closePromise=(async()=>{
+      try{
+        const response=await this.control({op:'stop',id:this.processId});
+        if(response.ok!==true)throw new Error('Native process stop is unconfirmed');
+        this.stopConfirmed=response.processExitConfirmed===true;
+      }finally{this.disconnect();}
+    })();
+    return this.closePromise;
   }
   private onData(chunk:Buffer):void{
     if(this.closed)return;this.buffer+=this.decoder.write(chunk);let newline;

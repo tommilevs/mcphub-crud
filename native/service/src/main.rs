@@ -214,7 +214,7 @@ fn handle_request(
         }
         Some("stop") => {
             supervisor.stop(request["id"].as_str().unwrap_or_default())?;
-            serde_json::json!({"ok": true})
+            serde_json::json!({"ok": true,"processExitConfirmed":cfg!(windows)})
         }
         Some("restart") => {
             serde_json::to_value(supervisor.restart(request["id"].as_str().unwrap_or_default())?)?

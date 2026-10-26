@@ -61,6 +61,31 @@ suite('native transport over a real isolated Windows named pipe',()=>{
       if(previous===undefined)delete process.env.MCPHUB_NATIVE_PIPE;else process.env.MCPHUB_NATIVE_PIPE=previous;
     }
   });
+  test('concurrent closes wait for the same native stop acknowledgement',async()=>{
+    let receiveStop!:(socket:net.Socket)=>void;
+    const stopped=new Promise<net.Socket>(resolve=>{receiveStop=resolve;});
+    handler=(request,socket)=>request.op==='stop'?receiveStop(socket):socket.write(JSON.stringify({ok:true})+'\n');
+    const client=transport();await client.start();
+    let secondDone=false;
+    const first=client.close(),second=client.close().then(()=>{secondDone=true;});
+    const socket=await stopped;
+    try{expect(secondDone).toBe(false);expect(client.shutdownConfirmed).toBe(false);}
+    finally{socket.write(JSON.stringify({ok:true,processExitConfirmed:true})+'\n');await Promise.all([first,second]);}
+    expect(client.shutdownConfirmed).toBe(true);
+    expect(requests.filter(r=>r.op==='stop')).toHaveLength(1);
+  });
+  test('a legacy stop acknowledgement permits close but cannot prove process exit',async()=>{
+    const client=transport();await client.start();await client.close();
+    expect(client.shutdownConfirmed).toBe(false);
+  });
+  test.each([{}, {ok:false}])('does not confirm shutdown from an invalid acknowledgement %j',async ack=>{
+    handler=(request,socket)=>socket.write(JSON.stringify(request.op==='stop'?ack:{ok:true})+'\n');
+    const client=transport();await client.start();
+    await expect(client.close()).rejects.toThrow('unconfirmed');
+    expect(client.shutdownConfirmed).toBe(false);
+    await expect(client.close()).rejects.toThrow('unconfirmed');
+    expect(requests.filter(r=>r.op==='stop')).toHaveLength(1);
+  });
   test('receives a fragmented reply without polling and forwards matching MCP frames',async()=>{
     handler=(request,socket)=>{
       if(request.op!=='stdio'){socket.write('{"ok":true}\n');return;}
