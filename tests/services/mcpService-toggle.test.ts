@@ -373,7 +373,6 @@ describe('mcpService resetServerOAuthConnection', () => {
       const diagnosticArgs = [...logSpy.mock.calls, ...warnSpy.mock.calls].flat();
       expect(diagnosticArgs).toEqual([
         'Cleared MCP server keep-alive interval',
-        'Closed MCP server client and transport',
         'Error closing MCP client during runtime shutdown',
         'Error closing MCP transport during runtime shutdown',
       ]);

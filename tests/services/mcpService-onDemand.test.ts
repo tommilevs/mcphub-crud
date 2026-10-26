@@ -202,6 +202,7 @@ describe('startOnDemand lifecycle', () => {
     expect(createTransportSpy).toHaveBeenCalledWith(
       'demo',
       expect.objectContaining({ command: 'node' }),
+      expect.any(Number),
     );
     expect(mockConnect).toHaveBeenCalledTimes(1);
     expect(mockCallTool).toHaveBeenCalledWith(
@@ -534,6 +535,7 @@ describe('startOnDemand lifecycle', () => {
     expect(createTransportSpy).toHaveBeenCalledWith(
       'demo',
       expect.objectContaining({ command: 'node' }),
+      expect.any(Number),
     );
   });
 });

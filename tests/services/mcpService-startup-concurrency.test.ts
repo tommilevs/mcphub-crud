@@ -20,6 +20,7 @@ jest.mock('@modelcontextprotocol/client/stdio', () => ({
   StdioClientTransport: jest.fn().mockImplementation((params: { args?: string[] }) => ({
     // Kept so a test can tell which server a connect() call belongs to.
     params,
+    start: jest.fn().mockResolvedValue(undefined),
     close: jest.fn(),
     stderr: {
       on: jest.fn((event: string, listener: (data?: Buffer) => void) => {
@@ -105,10 +106,39 @@ jest.mock('../../src/services/activityLoggingService.js', () => ({
 }));
 
 import {
+  createTransportFromConfig,
+  withRuntimeCleanupGuard,
   initializeClientsFromSettings,
   setServerInfosForTest,
   toggleServerStatus,
 } from '../../src/services/mcpService.js';
+
+describe('shared runtime cleanup reservation',()=>{
+ const absent=async()=>{throw Object.assign(Error('missing'),{code:'ENOENT'});};
+ const target=(n:string)=>{const operationId=`00000000-0000-4000-8000-${n.padStart(12,'0')}`;
+  return {operationId,directory:`C:\\data\\acquisitions\\${operationId}`,secretIds:[]};};
+ it('retains a shared pending launch and a legacy close with no process-exit proof',async()=>{
+  const owned=target('1');
+  const transport=await createTransportFromConfig('held',{type:'stdio',command:'node',args:[`${owned.directory}\\entry.js`]});
+  await expect(withRuntimeCleanupGuard(owned,async()=>undefined,absent)).rejects.toThrow('references');
+  await transport.start();
+  await transport.close();
+  await expect(withRuntimeCleanupGuard(owned,async()=>undefined,absent)).rejects.toThrow('references');
+ });
+ it('releases a never-started transport but prevents it from resurrecting after cleanup',async()=>{
+  const owned=target('3');
+  const transport=await createTransportFromConfig('not-started',{type:'stdio',command:'node',args:[`${owned.directory}\\entry.js`]});
+  await transport.close();
+  await withRuntimeCleanupGuard(owned,async()=>undefined,absent);
+  expect(()=>transport.start()).toThrow('Retired');
+ });
+ it('prevents transport creation from starting a process during cleanup',async()=>{
+  const owned=target('2');
+  await withRuntimeCleanupGuard(owned,async()=>{
+   await expect(createTransportFromConfig('late',{type:'stdio',command:'node',args:[`${owned.directory}\\entry.js`]})).rejects.toThrow('cleanup');
+  },absent);
+ });
+});
 
 const flush = async () => {
   for (let i = 0; i < 20; i += 1) {

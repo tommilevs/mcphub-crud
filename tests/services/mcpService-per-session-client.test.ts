@@ -30,7 +30,8 @@ jest.mock('@modelcontextprotocol/client', () => ({
 const mockCreatedTransports: any[] = [];
 
 class MockStreamableHTTPClientTransport {
-  close = jest.fn();
+  closeImplementation = jest.fn();
+  close = this.closeImplementation;
   constructor(
     public url: URL,
     public options?: any,
@@ -40,7 +41,8 @@ class MockStreamableHTTPClientTransport {
 }
 
 class MockSSEClientTransport {
-  close = jest.fn();
+  closeImplementation = jest.fn();
+  close = this.closeImplementation;
   constructor(
     public url: URL,
     public options?: any,
@@ -50,7 +52,8 @@ class MockSSEClientTransport {
 }
 
 class MockStdioClientTransport {
-  close = jest.fn();
+  closeImplementation = jest.fn();
+  close = this.closeImplementation;
   // Expose a fake stdio child pid via the SDK's public `pid` getter so cleanup
   // exercises the process-tree path.
   pid = 4242;
@@ -514,7 +517,7 @@ describe('mcpService per-session client isolation (perSessionClient)', () => {
     mcpService.deleteMcpServer('session-A');
 
     expect(isolatedClient.close).toHaveBeenCalledTimes(1);
-    expect(isolatedTransport.close).toHaveBeenCalledTimes(1);
+    expect(isolatedTransport.closeImplementation).toHaveBeenCalledTimes(1);
 
     // A subsequent call for the same session creates a fresh isolated client.
     await callTool('session-A');
@@ -572,7 +575,7 @@ describe('mcpService per-session client isolation (perSessionClient)', () => {
     // The half-open client and its transport were closed, and the whole stdio
     // process tree was killed rather than left as an orphan.
     expect(failedClient.close).toHaveBeenCalledTimes(1);
-    expect(stdioTransport.close).toHaveBeenCalledTimes(1);
+    expect(stdioTransport.closeImplementation).toHaveBeenCalledTimes(1);
     expect(mockTreeKill).toHaveBeenCalledWith(4242, 'SIGTERM', expect.any(Function));
 
     // No stale entry was cached — a retry builds a brand-new isolated client.

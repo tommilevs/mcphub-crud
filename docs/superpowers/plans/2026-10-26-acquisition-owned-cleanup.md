@@ -101,8 +101,13 @@ and invalidates preparations from earlier generations. Only an explicit native
 job-tree exit receipt releases a retired reference; legacy, failed and unknown
 outcomes remain references. Identical uncertain attempts are compacted without
 letting a later successful stop erase an earlier uncertain launch. This is an
-internal guard; shared and interactive runtime coordination and reconciliation
-of unknown outcomes must still be completed before deletion is exposed.
+internal guard. Shared and per-session transport factories now reserve immutable
+launch snapshots before connect, preserve runtime-only argument bindings, and
+retain started legacy transports after close when no native exit proof exists.
+Never-started transports can release their reservation but cannot be restarted.
+The combined internal guard fences shared and personal launches and checks the
+retained server catalogue. Interactive coordination and reconciliation of unknown
+outcomes must still be completed before deletion is exposed.
 
 The index guard holds a SERIALIZABLE transaction and a write-excluding table
 lock throughout guarded work. It checks server metadata and server/tool content

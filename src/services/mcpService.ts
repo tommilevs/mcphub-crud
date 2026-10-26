@@ -34,10 +34,13 @@ import {
 } from '../utils/toolConfig.js';
 import type { RequestPrincipal } from './authorizationService.js';
 import { PrincipalRuntimeService } from './principalRuntimeService.js';
+import { RuntimeCleanupTracker } from './runtimeCleanupTracker.js';
+import { assertNoCleanupReferences, type CleanupReferenceTarget } from './mcpAcquisitionCleanupReferences.js';
 import { UserContextService } from './userContextService.js';
 import { deleteCredentialBindings, missingCredentialError } from './credentialBindingService.js';
 import {
   CredentialBindingError,
+  argumentCredentialBindings,
   hasCredentialTemplate,
   hasPersonalAuthentication,
   resolveCredentialArguments,
@@ -542,6 +545,7 @@ const getOrCreateIsolatedClient = async (
   sessionId: string,
   serverInfo: ServerInfo,
 ): Promise<{ client: Client; transport: any }> => {
+  const cleanupGeneration=sharedRuntimeCleanup.generation;
   // Quick check without lock — already exists
   const sessionClients = sessionIsolatedClients.get(sessionId);
   if (sessionClients) {
@@ -578,7 +582,7 @@ const getOrCreateIsolatedClient = async (
     }
 
     const reservedClients = sessionIsolatedClients.get(sessionId);
-    const transport = await createTransportFromConfig(serverInfo.name, serverConfig);
+    const transport = await createTransportFromConfig(serverInfo.name, serverConfig,cleanupGeneration);
     const client = createUpstreamMcpClient(serverInfo.name, () => serverInfo);
 
     try {
@@ -906,6 +910,7 @@ const normalizeResourceForCache = (resource: McpResource): Resource => {
 
 // Store all server information
 let serverInfos: ServerInfo[] = [];
+const sharedRuntimeCleanup = new RuntimeCleanupTracker();
 
 /**
  * How many upstream connections an initialization pass may open at once.
@@ -1651,7 +1656,41 @@ const stripAuthorizationHeader = (headers: Record<string, string>): Record<strin
   );
 };
 
-export const createTransportFromConfig = async (name: string, conf: ServerConfig): Promise<any> => {
+export const createTransportFromConfig = async (name: string, conf: ServerConfig,
+  generation=sharedRuntimeCleanup.generation): Promise<any> => {
+  // Factory construction does not start a process. Reserve immediately before
+  // returning the transport that the caller can connect, with a stable config.
+  const launchConfig=structuredClone(conf);
+  const argumentBindings=argumentCredentialBindings.get(conf);
+  if(argumentBindings)argumentCredentialBindings.set(launchConfig,{...argumentBindings});
+  const transport=await createUntrackedTransportFromConfig(name,launchConfig);
+  try{
+    const lease=sharedRuntimeCleanup.begin(name,launchConfig,generation);
+    let started=false,retired=false;
+    if(typeof transport.start==='function'){
+      const start=transport.start.bind(transport);
+      transport.start=()=>{
+        if(retired)throw new Error('Retired runtime transport cannot be restarted');
+        started=true;return start();
+      };
+    }
+    if(typeof transport.close==='function'){
+      const close=transport.close.bind(transport);
+      transport.close=()=>{
+        retired=true;
+        return lease.retire(async()=>{
+          try{await close();}catch(error){if(started)throw error;}
+        },()=>!started||(transport instanceof NativeRuntimeTransport&&transport.shutdownConfirmed));
+      };
+    }
+    return transport;
+  }catch(error){
+    try{await transport.close?.();}catch{/* Construction never started a process. */}
+    throw error;
+  }
+};
+
+const createUntrackedTransportFromConfig = async (name: string, conf: ServerConfig): Promise<any> => {
   let transport;
   const env = await getServerEnvironment(conf);
 
@@ -1933,6 +1972,7 @@ const callToolWithReconnect = async (
         );
 
         try {
+          const cleanupGeneration=sharedRuntimeCleanup.generation;
           const rawConfig = await getServerDao().findById(serverInfo.name);
           if (!rawConfig) {
             throw new Error(`Server configuration not found for: ${serverInfo.name}`, {
@@ -1942,7 +1982,7 @@ const callToolWithReconnect = async (
 
           // Match initial connection expansion before URL validation and transport creation.
           const server = await expandServerConfig(rawConfig);
-          const newTransport = await createTransportFromConfig(serverInfo.name, server);
+          const newTransport = await createTransportFromConfig(serverInfo.name, server,cleanupGeneration);
           const newClient = createUpstreamMcpClient(serverInfo.name, () => serverInfo);
 
           // Reconnect with new transport
@@ -2058,6 +2098,7 @@ export const initializeClientsFromSettings = async (
   serverName?: string,
   options?: { reportEmbeddingProgress?: boolean },
 ): Promise<ServerInfo[]> => {
+  const cleanupGeneration=sharedRuntimeCleanup.generation;
   const allServers: ServerConfigWithName[] = await getServerDao().findAll();
   const existingServerInfos = serverInfos;
   const nextServerInfos: ServerInfo[] = [];
@@ -2311,7 +2352,7 @@ export const initializeClientsFromSettings = async (
         }
       } else {
         try {
-          transport = await createTransportFromConfig(name, expandedConf);
+          transport = await createTransportFromConfig(name, expandedConf,cleanupGeneration);
         } catch (error) {
           // Fail this server only. Letting the error escape the loop hits the
           // outer catch, which restores `serverInfos` to its previous value -
@@ -3350,6 +3391,7 @@ export const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> =
   }
 
   const spawnStart = Date.now();
+  const cleanupGeneration=sharedRuntimeCleanup.generation;
 
   const spawnPromise = (async () => {
     // Load the config fresh from the DAO for the expanded transport config and
@@ -3372,7 +3414,7 @@ export const ensureServerReady = async (serverInfo: ServerInfo): Promise<void> =
     const name = rawConfig.name;
     logger.log(`[${name}] Cold-starting on-demand server…`);
 
-    const transport = await createTransportFromConfig(name, expandedConf);
+    const transport = await createTransportFromConfig(name, expandedConf,cleanupGeneration);
     const client = createUpstreamMcpClient(name, () => serverInfo);
 
     const serverRequestOptions = expandedConf.options || {};
@@ -5373,7 +5415,8 @@ const createPrincipalRuntime = async (
         inputSchema: cleanInputSchema(tool.inputSchema),
       }));
     } else {
-      const transport = await createTransportFromConfig(name, resolvedConfig);
+      // PersonalRuntimeService owns the lifecycle reservation for this path.
+      const transport = await createUntrackedTransportFromConfig(name, resolvedConfig);
       const client = new LegacyMcpClient(
         { name: `mcp-client-${name}`, version: '1.0.0' },
         {
@@ -5432,6 +5475,15 @@ const createPrincipalRuntime = async (
 };
 
 const principalRuntimes = new PrincipalRuntimeService(createPrincipalRuntime, closeServerRuntime);
+
+/** Internal JS-runtime barrier only. Settings/index reservations and native
+ * supervisor/interactive checks must also span the destructive coordinator. */
+export const withRuntimeCleanupGuard = <T>(target:CleanupReferenceTarget,work:()=>Promise<T>,
+  resolvePath?:(path:string)=>Promise<string>):Promise<T> =>
+  sharedRuntimeCleanup.withCleanupGuard(target,()=>principalRuntimes.withCleanupGuard(target,async()=>{
+    await assertNoCleanupReferences(serverInfos.map(info=>({name:info.name,config:structuredClone(info.config)})),target,resolvePath);
+    return work();
+  },resolvePath),resolvePath);
 
 /**
  * Resolve the tools of a personal-credential server on behalf of an explicit
