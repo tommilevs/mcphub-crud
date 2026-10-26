@@ -68,6 +68,7 @@ fn fixture_with_exit(exit: bool) -> (RuntimeSupervisor, ObservedProcess, Observe
 fn stop_terminates_the_managed_descendant_tree() {
     let (mut supervisor, parent, leaf) = fixture();
     supervisor.stop("tree").unwrap();
+    assert_eq!(supervisor.process_specs().count(), 0);
     assert!(
         parent.exited_now(),
         "stop must confirm parent exit before returning"
@@ -105,6 +106,11 @@ fn polling_an_exited_parent_cleans_descendants_even_with_no_restart_budget() {
     assert!(parent.exited());
     let statuses = supervisor.poll();
     assert_eq!(statuses[0].state, "CRASH_LOOP");
+    assert_eq!(
+        supervisor.process_specs().count(),
+        1,
+        "exited definitions remain references until explicitly stopped"
+    );
     assert!(
         leaf.exited(),
         "an exited root must not leave live descendants behind"

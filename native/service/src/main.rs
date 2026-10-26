@@ -392,7 +392,9 @@ fn serve_named_pipe_client(
                             let package=request["package"].as_str().unwrap_or_default();
                             let version=request["version"].as_str().unwrap_or_default();
                             if op=="install_cleanup_inspect" {
+                                let guard = supervisor.lock().map_err(|_| "supervisor unavailable")?;
                                 let (directory,state)=cleanup_path::inspect_owned_staging(jobs,&data.join("acquisitions"),id,package,version)?;
+                                cleanup_path::assert_no_launch_references(guard.process_specs(),&directory,id)?;
                                 return Ok(serde_json::json!({"id":id,"verification":"cleanup_preflight",
                                     "state":state["state"],"directory":directory}));
                             }

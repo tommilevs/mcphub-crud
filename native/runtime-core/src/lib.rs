@@ -409,6 +409,11 @@ impl RuntimeSupervisor {
     pub fn statuses(&mut self) -> Vec<ProcessStatus> {
         self.poll()
     }
+    /// Internal borrowed inventory, including exited entries eligible for restart.
+    /// The service must hold its supervisor mutex throughout reference checks.
+    pub fn process_specs(&self) -> impl Iterator<Item = &ManagedProcessSpec> {
+        self.processes.values().map(|process| &process.spec)
+    }
     pub fn forget_stopped(&mut self, id: &str) {
         self.stopped.remove(id);
     }

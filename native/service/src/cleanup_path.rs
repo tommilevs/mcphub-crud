@@ -34,8 +34,38 @@ mod tests {
         );
         assert!(super::validate_owned_path(&root, ID, "@fixture/other", "1.0.0").is_err());
         assert!(super::validate_owned_path(&root, "..", "@fixture/mcp", "1.0.0").is_err());
-        let junction = directory.join("adopted");
+        let alias = fixture.join("alias");
         use std::os::windows::process::CommandExt;
+        let linked = Command::new("cmd.exe")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&alias)
+            .arg(&directory)
+            .creation_flags(0x08000000)
+            .output()
+            .unwrap();
+        assert!(linked.status.success());
+        let mut spec: mcphub_runtime_core::ManagedProcessSpec = serde_json::from_value(
+            serde_json::json!({"id":"renamed-runtime","command":"node.exe",
+                "cwd":fixture,"args":["alias/operation.json"]}),
+        )
+        .unwrap();
+        assert!(super::assert_no_launch_references([&spec], &directory, ID).is_err());
+        spec.args = vec!["alias/not-created-yet.json".into()];
+        assert!(super::assert_no_launch_references([&spec], &directory, ID).is_err());
+        spec.args = vec![format!(
+            "--input={}",
+            alias.join("operation.json").display()
+        )];
+        assert!(super::assert_no_launch_references([&spec], &directory, ID).is_err());
+        spec.args.clear();
+        spec.env
+            .insert("INPUT".into(), format!("private-prefix-{ID}"));
+        assert!(super::assert_no_launch_references([&spec], &directory, ID).is_err());
+        spec.env.clear();
+        spec.cwd = Some(outside.clone());
+        assert!(super::assert_no_launch_references([&spec], &directory, ID).is_ok());
+        fs::remove_dir(&alias).unwrap();
+        let junction = directory.join("adopted");
         let result = Command::new("cmd.exe")
             .args(["/d", "/c", "mklink", "/J"])
             .arg(&junction)
@@ -80,6 +110,94 @@ fn ordinary(path: &Path) -> Result<fs::Metadata, &'static str> {
         return Err("cleanup refuses filesystem reparse points");
     }
     Ok(metadata)
+}
+
+/// Additional read-only preflight for this supervisor's launch definitions.
+/// This is not a proof of OS-wide process absence or deletion authorization.
+/// Interactive supervisors and concurrent filesystem changes need separate gates.
+pub fn assert_no_launch_references<'a>(
+    specs: impl IntoIterator<Item = &'a mcphub_runtime_core::ManagedProcessSpec>,
+    directory: &Path,
+    id: &str,
+) -> Result<(), &'static str> {
+    fn normalized(path: &Path) -> String {
+        path.to_string_lossy()
+            .replace('/', "\\")
+            .to_lowercase()
+            .trim_start_matches("\\\\?\\")
+            .trim_end_matches('\\')
+            .to_string()
+    }
+    // Resolve the nearest existing ancestor too: an alias can point into the
+    // package even when a referenced output file has not been created yet.
+    fn resolve(path: &Path) -> Result<PathBuf, &'static str> {
+        let mut ancestor = path.to_path_buf();
+        let mut suffix = Vec::new();
+        loop {
+            match ancestor.canonicalize() {
+                Ok(mut canonical) => {
+                    for component in suffix.iter().rev() {
+                        canonical.push(component);
+                    }
+                    return Ok(canonical);
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    suffix.push(
+                        ancestor
+                            .file_name()
+                            .ok_or("native launch reference is unconfirmed")?
+                            .to_os_string(),
+                    );
+                    if !ancestor.pop() {
+                        return Err("native launch reference is unconfirmed");
+                    }
+                }
+                Err(_) => return Err("native launch reference is unconfirmed"),
+            }
+        }
+    }
+    let directory = normalized(
+        &directory
+            .canonicalize()
+            .map_err(|_| "native cleanup directory is unconfirmed")?,
+    );
+    let id = id.to_lowercase();
+    for spec in specs {
+        let cwd = spec.cwd.as_ref().map(|p| p.to_string_lossy().into_owned());
+        for value in std::iter::once(&spec.command)
+            .chain(spec.args.iter())
+            .chain(spec.env.values())
+            .chain(cwd.iter())
+        {
+            if value.to_lowercase().contains(&id) {
+                return Err("native launch references remain");
+            }
+            let candidate = if value.starts_with('-') {
+                value
+                    .split_once('=')
+                    .map(|(_, value)| value)
+                    .unwrap_or(value)
+            } else {
+                value.as_str()
+            };
+            let path = Path::new(candidate.trim_matches('"'));
+            let candidate = if path.is_absolute() {
+                path.to_path_buf()
+            } else if !candidate.starts_with('-') && candidate.contains(['/', '\\', '.']) {
+                match &spec.cwd {
+                    Some(cwd) if cwd.is_absolute() => cwd.join(path),
+                    _ => continue,
+                }
+            } else {
+                continue;
+            };
+            let canonical = normalized(&resolve(&candidate)?);
+            if canonical == directory || canonical.starts_with(&(directory.clone() + "\\")) {
+                return Err("native launch references remain");
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Inspect while install/forget cannot replace the job identity. No file is
