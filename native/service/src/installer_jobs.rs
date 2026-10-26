@@ -18,6 +18,9 @@ struct Job {
 }
 #[derive(Default)]
 pub struct InstallerJobs {
+    // Serialize staging/forget with the complete terminal cleanup callback,
+    // including filesystem preparation before start() takes the registry lock.
+    lifecycle: Mutex<()>,
     jobs: Mutex<HashMap<String, Job>>,
 }
 
@@ -66,6 +69,26 @@ pub fn start_npm(
     root: &std::path::Path,
 ) -> Result<Value, &'static str> {
     validate_request(id, package, version)?;
+    let _lifecycle = jobs
+        .lifecycle
+        .lock()
+        .map_err(|_| "installer lifecycle unavailable")?;
+    // A persisted cleanup attempt survives the in-memory registry. Never rerun
+    // package scripts for that operation after its directory was removed.
+    let data = root
+        .parent()
+        .ok_or("installer staging identity unavailable")?;
+    match std::fs::symlink_metadata(data.join("cleanup-receipts")) {
+        Ok(_) => {
+            if crate::cleanup_receipt::status(data, id, package, version)?
+                != crate::cleanup_receipt::ReceiptStatus::Missing
+            {
+                return Err("installer cleanup was attempted; reconciliation is required");
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("installer cleanup state is unconfirmed"),
+    }
     let node = runtime.join("node.exe");
     let npm = runtime.join("npm").join("bin").join("npm-cli.js");
     if !node.is_file() || !npm.is_file() {
@@ -116,6 +139,22 @@ pub fn start_npm(
     jobs.start(id, &binding, command)
 }
 impl InstallerJobs {
+    #[cfg(test)]
+    pub(super) fn test_terminal(id: &str, package: &str, version: &str, confirmed: bool) -> Self {
+        validate_request(id, package, version).unwrap();
+        let jobs = Self::default();
+        jobs.jobs.lock().unwrap().insert(
+            id.into(),
+            Job {
+                binding: format!("{package}@{version}"),
+                cancel: Arc::new(AtomicBool::new(false)),
+                state: Arc::new(Mutex::new(
+                    json!({"id":id,"state":"cancelled","processExitConfirmed":confirmed}),
+                )),
+            },
+        );
+        jobs
+    }
     /// Keep the registry and outcome locked during an ownership inspection.
     /// The callback must not reenter InstallerJobs. Terminal proof alone does
     /// not authorize deletion: publication/runtime/reference guards still apply.
@@ -127,6 +166,10 @@ impl InstallerJobs {
         inspect: impl FnOnce(&Value) -> Result<T, &'static str>,
     ) -> Result<T, &'static str> {
         validate_request(id, package, version)?;
+        let _lifecycle = self
+            .lifecycle
+            .lock()
+            .map_err(|_| "installer lifecycle unavailable")?;
         let jobs = self.jobs.lock().map_err(|_| "installer jobs unavailable")?;
         let job = jobs
             .get(id)
@@ -221,6 +264,10 @@ impl InstallerJobs {
         Ok(json!({"id":id,"cancelRequested":true}))
     }
     pub fn forget(&self, id: &str) -> Result<Value, &'static str> {
+        let _lifecycle = self
+            .lifecycle
+            .lock()
+            .map_err(|_| "installer lifecycle unavailable")?;
         let mut jobs = self.jobs.lock().map_err(|_| "installer jobs unavailable")?;
         if let Some(job) = jobs.get(id) {
             if job.state.lock().map_err(|_| "installer job unavailable")?["state"] == "running" {
@@ -241,6 +288,10 @@ mod tests {
         let id = "00000000-0000-4000-8000-000000000001";
         let calls = std::cell::Cell::new(0);
         let inspect = |_: &Value| {
+            assert!(
+                jobs.lifecycle.try_lock().is_err(),
+                "staging lifecycle must stay reserved during cleanup"
+            );
             assert!(
                 jobs.jobs.try_lock().is_err(),
                 "registry must stay locked during inspection"
@@ -263,7 +314,8 @@ mod tests {
             .with_terminal_job(id, "@fixture/mcp", "1.0.0", inspect)
             .is_err());
         for state in [
-            json!({"state":"exited"}), json!({"state":"unknown"}),
+            json!({"state":"exited"}),
+            json!({"state":"unknown"}),
             json!({"state":"failed","processExitConfirmed":false}),
             json!({"state":"cancelled"}),
             json!({"state":"exited","exitCode":0,"processExitConfirmed":false}),
@@ -280,8 +332,8 @@ mod tests {
             json!({"state":"timed_out"}),
             json!({"state":"exited","exitCode":0}),
         ] {
-            let mut state=state;
-            state["processExitConfirmed"]=json!(true);
+            let mut state = state;
+            state["processExitConfirmed"] = json!(true);
             *jobs.jobs.lock().unwrap()[id].state.lock().unwrap() = state;
             assert!(jobs
                 .with_terminal_job(id, "@fixture/other", "1.0.0", inspect)
@@ -368,12 +420,23 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(jobs.status(id).unwrap()["exitCode"], 0);
-        let inspection=crate::cleanup_path::inspect_owned_staging(
-            &jobs,&acquisitions,id,"@fixture/mcp","1.2.3");
-        if jobs.status(id).unwrap()["processExitConfirmed"]==true {
-            assert_eq!(inspection.unwrap().0,acquisitions.join(id).canonicalize().unwrap());
+        let inspection = crate::cleanup_path::inspect_owned_staging(
+            &jobs,
+            &acquisitions,
+            id,
+            "@fixture/mcp",
+            "1.2.3",
+        );
+        if jobs.status(id).unwrap()["processExitConfirmed"] == true {
+            assert_eq!(
+                inspection.unwrap().0,
+                acquisitions.join(id).canonicalize().unwrap()
+            );
         } else {
-            assert_eq!(inspection.unwrap_err(),"installer has no confirmed terminal outcome");
+            assert_eq!(
+                inspection.unwrap_err(),
+                "installer has no confirmed terminal outcome"
+            );
         }
         let args: Value = serde_json::from_slice(
             &std::fs::read(acquisitions.join(id).join("observed.json")).unwrap(),

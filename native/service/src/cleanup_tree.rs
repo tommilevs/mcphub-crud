@@ -87,6 +87,74 @@ mod tests {
         assert!(!path.exists());
     }
     #[test]
+    fn terminal_job_cleanup_blocks_reinstallation_after_registry_loss() {
+        let fixture = fixture();
+        let root = fixture.0.join("acquisitions");
+        let jobs = super::super::installer_jobs::InstallerJobs::test_terminal(
+            ID,
+            "@fixture/mcp",
+            "1.0.0",
+            true,
+        );
+        let supervisor = std::sync::Mutex::new(mcphub_runtime_core::RuntimeSupervisor::new());
+        let result = cleanup_machine_owned_staging(
+            &jobs,
+            &supervisor,
+            &fixture.0,
+            ID,
+            "@fixture/mcp",
+            "1.0.0",
+        )
+        .unwrap();
+        assert_eq!(result["verification"], "cleanup_complete");
+        assert!(!root.join(ID).exists());
+        jobs.forget(ID).unwrap();
+        let restarted = super::super::installer_jobs::InstallerJobs::default();
+        assert!(super::super::installer_jobs::start_npm(
+            &restarted,
+            ID,
+            "@fixture/mcp",
+            "1.0.0",
+            &fixture.0.join("unused-runtime"),
+            &root
+        )
+        .unwrap_err()
+        .contains("reconciliation"));
+        assert!(!root.join(ID).exists());
+        let path = fixture.0.clone();
+        drop(fixture);
+        assert!(!path.exists());
+    }
+    #[test]
+    fn unconfirmed_job_cannot_start_destructive_cleanup() {
+        let fixture = fixture();
+        let jobs = super::super::installer_jobs::InstallerJobs::test_terminal(
+            ID,
+            "@fixture/mcp",
+            "1.0.0",
+            false,
+        );
+        let supervisor = std::sync::Mutex::new(mcphub_runtime_core::RuntimeSupervisor::new());
+        assert!(cleanup_machine_owned_staging(
+            &jobs,
+            &supervisor,
+            &fixture.0,
+            ID,
+            "@fixture/mcp",
+            "1.0.0"
+        )
+        .is_err());
+        assert!(fixture
+            .0
+            .join("acquisitions")
+            .join(ID)
+            .join("nested/entry.js")
+            .exists());
+        let path = fixture.0.clone();
+        drop(fixture);
+        assert!(!path.exists());
+    }
+    #[test]
     fn a_child_created_after_capture_prevents_a_false_completed_delete() {
         let fixture = fixture();
         let root = fixture.0.join("acquisitions");
@@ -181,6 +249,31 @@ use windows_sys::Win32::{
         FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
     },
 };
+
+/// Machine supervisor and installer registry adapter only. The eventual IPC
+/// caller must ALSO reserve all interactive supervisors. This is not exposed
+/// as an administrative operation before that cross-session gate exists.
+pub(super) fn cleanup_machine_owned_staging(
+    jobs: &super::installer_jobs::InstallerJobs,
+    supervisor: &std::sync::Mutex<mcphub_runtime_core::RuntimeSupervisor>,
+    data: &Path,
+    id: &str,
+    package: &str,
+    version: &str,
+) -> Result<serde_json::Value, &'static str> {
+    // Same lock order as machine preflight: supervisor before installer jobs.
+    let guard = supervisor
+        .lock()
+        .map_err(|_| "native supervisor unavailable")?;
+    jobs.with_terminal_job(id,package,version,|_|{
+        let root=data.join("acquisitions");
+        let tree=LockedCleanupTree::acquire(&root,id,package,version)?;
+        super::cleanup_path::assert_no_launch_references(guard.process_specs(),&root.join(id),id)?;
+        let receipt=super::cleanup_receipt::begin(data,id,package,version)?;
+        tree.remove(receipt)?;
+        Ok(serde_json::json!({"id":id,"package":package,"version":version,"verification":"cleanup_complete"}))
+    })
+}
 
 /// Filesystem primitive only, NOT deletion authorization. The caller must hold
 /// settings/index and every native supervisor reservation and persist intent

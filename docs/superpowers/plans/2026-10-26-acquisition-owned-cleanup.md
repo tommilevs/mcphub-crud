@@ -191,3 +191,15 @@ changed by these tests.
 
 Win32 contracts: [CreateFileW sharing and OPEN_REPARSE_POINT](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew),
 [SetFileInformationByHandle / FileDispositionInfo](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle).
+
+The internal machine cleanup adapter now holds the machine supervisor mutex and
+installer lifecycle/registry/outcome reservation across path capture, launch-ref
+checks, durable intent, deletion and completion. A negative/missing native job
+proof prevents all destructive work. Installer staging and forget share the
+lifecycle reservation so their filesystem preparation cannot race cleanup.
+Pinned npm start refuses any persisted cleanup intent/completion after registry
+loss, preventing package-script replay after successful deletion. Actual owned
+filesystem fixtures cover this replay fence and failed-proof refusal; terminal
+job records in these adapter fixtures are explicitly synthetic (the separate
+one-shot suites test real process proof). The adapter is still internal and cannot
+be exposed through IPC until all interactive supervisors are reserved too.
