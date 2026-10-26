@@ -96,5 +96,24 @@ export async function ensureMcpAcquisitionSchema(db: { query(sql: string): Promi
       END;
     $$ LANGUAGE plpgsql SET search_path FROM CURRENT;
     SELECT ensure_mcp_acquisition_rollback_guard();
+    CREATE UNIQUE INDEX IF NOT EXISTS mcp_acquisition_operations_cleanup_identity_idx
+      ON mcp_acquisition_operations(operation_id,owner,manifest_digest);
+    CREATE TABLE IF NOT EXISTS mcp_acquisition_cleanup (
+      operation_id uuid PRIMARY KEY,
+      owner varchar(255) NOT NULL,
+      manifest_digest char(64) NOT NULL CHECK (manifest_digest ~ '^[a-f0-9]{64}$'),
+      cleanup_claim_id uuid NOT NULL UNIQUE,
+      status varchar(20) NOT NULL DEFAULT 'running' CHECK (status IN ('running','complete','review_required')),
+      files_removed_at timestamptz,
+      secrets_removed_at timestamptz,
+      review_code varchar(40) CHECK (review_code IN ('cleanup_outcome_unknown','references_adopted','ownership_unconfirmed')),
+      created_at timestamptz NOT NULL DEFAULT NOW(),
+      updated_at timestamptz NOT NULL DEFAULT NOW(),
+      FOREIGN KEY(operation_id,owner,manifest_digest)
+        REFERENCES mcp_acquisition_operations(operation_id,owner,manifest_digest),
+      CHECK (status<>'complete' OR (files_removed_at IS NOT NULL AND secrets_removed_at IS NOT NULL)),
+      CHECK (secrets_removed_at IS NULL OR files_removed_at IS NOT NULL),
+      CHECK ((status='review_required')=(review_code IS NOT NULL))
+    );
   `);
 }
