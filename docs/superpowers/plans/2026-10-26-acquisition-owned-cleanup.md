@@ -150,3 +150,16 @@ receipts cannot complete the operation. Public journal reads omit the receipt ma
 The additive JSONB column migration preserves older completed rows; real PostgreSQL
 fixtures verify the upgrade and owner/claim isolation. No vault deletion or cleanup
 endpoint is activated by this journal work.
+
+Internal cleanup coordinator is implemented with mandatory injected adapters; it
+is not wired to production or a public API. It checks immutable manifest integrity,
+derives native identities and vault IDs, drains index work before locks, and nests
+settings/runtime/index/native reservations around all destructive phases. Exact
+native completion identity precedes the file receipt; each acknowledged vault
+delete precedes its own credential receipt. Overall completion follows successful
+reservation release. Lost claims, mismatched receipts, partial deletion or unknown
+outcomes preserve evidence and request review without automatic replay.
+Real PostgreSQL fixtures exercise complete/partial outcomes with actual settings
+and index reservations and journal storage; native effects are explicitly fixtures.
+Native cross-session reservation/deletion adapters remain the next implementation
+boundary. These coordinator tests do not prove real Windows package deletion.

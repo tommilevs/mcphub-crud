@@ -8,6 +8,7 @@ import {DataSource} from 'typeorm';
 import {Server} from '../../src/db/entities/Server.js';
 import {withPostgresCleanupSettings} from '../../src/services/mcpAcquisitionCleanupSettings.js';
 import {withCleanupIndexGuard} from '../../src/services/mcpAcquisitionCleanupIndex.js';
+import {runAcquisitionCleanup} from '../../src/services/mcpAcquisitionCleanup.js';
 
 const suite=process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD?describe:describe.skip;
 suite('owned acquisition cleanup journal in PostgreSQL',()=>{
@@ -111,6 +112,24 @@ suite('owned acquisition cleanup journal in PostgreSQL',()=>{
     expect(await journal.get('alice',id)).toMatchObject({status:'complete'});
     expect(await journal.get('alice',id)).not.toHaveProperty('secret_receipts');
     expect(await journal.recordSecret('alice',id,claim.cleanup_claim_id,'SECOND_KEY')).toBe(false);
+  });
+  test.each([false,true])('coordinator persists credential outcomes under real settings/index guards (partial=%s)',async partial=>{
+    const id=await operation('failed',false,['FIRST_KEY','SECOND_KEY']);
+    const pass=async(_identity:unknown,work:()=>Promise<void>)=>work();
+    const deleted:string[]=[];
+    const deps={journal,inspect:async()=>({id,verification:'cleanup_preflight',directory:`C:\\data\\acquisitions\\${id}`}),
+      drain:async()=>{},withSettings:(target:any,work:()=>Promise<void>)=>withPostgresCleanupSettings(settingsDb,target,work),
+      withRuntime:pass,withIndex:(names:readonly string[],work:()=>Promise<void>)=>withCleanupIndexGuard(settingsDb,names,work),withNative:pass,
+      // Native effects are fixtures: this test proves coordination and database receipts, not deletion.
+      removePackage:async(identity:any)=>({...identity,verification:'cleanup_complete'}),
+      deleteSecret:async(secret:string)=>{if(partial&&deleted.length===1)throw new Error('unknown native outcome');deleted.push(secret);return {ok:true};}};
+    expect((await runAcquisitionCleanup('alice',id,deps)).status).toBe(partial?'review_required':'complete');
+    const state=await journal.get('alice',id);
+    expect(state.status).toBe(partial?'review_required':'complete');
+    const receipts=(await pool.query('SELECT secret_receipts FROM mcp_acquisition_cleanup WHERE operation_id=$1',[id])).rows[0].secret_receipts;
+    expect(Object.values(receipts).map((receipt:any)=>receipt.secret_id)).toEqual(deleted);
+    expect((await runAcquisitionCleanup('alice',id,deps)).status).toBe('not_claimed');
+    expect(deleted).toHaveLength(partial?1:2);
   });
   test('active, ready, uncertain and unrolled-back publications cannot claim cleanup',async()=>{
     for(const state of ['authorized','staging','starting','verifying','ready'])
