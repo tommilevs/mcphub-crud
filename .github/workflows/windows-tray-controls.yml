@@ -1,0 +1,21 @@
+name: Windows tray service controls
+on:
+  workflow_dispatch:
+  push:
+    branches: [feat/tool-result-history]
+    paths: ['.github/workflows/windows-tray-controls.yml', 'native/tests/tray_service_control.rs', 'native/test-tray-service-control-windows.ps1', 'native/tray/src/gateway_start.rs']
+permissions:
+  contents: read
+jobs:
+  controls:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build native fixture service
+        run: ./native/build-windows.ps1 -Action service
+      - name: Verify Start Stop and Restart against isolated SCM service
+        run: ./native/test-tray-service-control-windows.ps1
