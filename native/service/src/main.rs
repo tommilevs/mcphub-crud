@@ -18,6 +18,8 @@ mod installed_package;
 #[cfg(windows)]
 mod settings_lock;
 #[cfg(windows)]
+mod initial_login;
+#[cfg(windows)]
 static INSTALLER_JOBS: std::sync::OnceLock<installer_jobs::InstallerJobs> = std::sync::OnceLock::new();
 #[cfg(windows)]
 static OPTIONS: std::sync::OnceLock<options::Options> = std::sync::OnceLock::new();
@@ -746,19 +748,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(error) => return Err(error.into()),
                 }
             };
-            let message: Vec<u16> = format!("MCPHub initial login\n\nUsername: admin\nPassword: {password}\n\nChange this password after signing in.\nThis does not reset an existing account.").encode_utf16().chain(Some(0)).collect();
-            let title: Vec<u16> = "MCPHub initial login"
-                .encode_utf16()
-                .chain(Some(0))
-                .collect();
-            unsafe {
-                windows_sys::Win32::UI::WindowsAndMessaging::MessageBoxW(
-                    std::ptr::null_mut(),
-                    message.as_ptr(),
-                    title.as_ptr(),
-                    0,
-                );
-            }
+            initial_login::show(password)?;
             return Ok(());
         }
         service_dispatcher::start(&options().service_name, ffi_service_main)?;

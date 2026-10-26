@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [feat/tool-result-history]
-    paths: ['.github/workflows/windows-installer.yml', 'native/tray/src/main.rs']
+    paths: ['.github/workflows/windows-installer.yml', 'native/tray/src/**', 'native/service/src/**', 'native/service/Cargo.toml', 'native/build-windows.ps1']
 
 permissions:
   contents: read

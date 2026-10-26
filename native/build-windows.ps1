@@ -11,6 +11,9 @@ $cargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
 $cargoAction = if ($Action -eq 'check') { 'check' } else { 'build --release' }
 
 $build = if ($Action -eq 'test') { "`"$cargo`" test -p mcphub-runtime-core -p mcphub-runtime-service" } else { "`"$cargo`" build -p mcphub-runtime-service --release && `"$cargo`" $cargoAction -p mcphub-tray" }
+if ($Action -eq 'test' -and $env:GITHUB_ACTIONS -eq 'true') {
+  $build += " && `"$cargo`" test -p mcphub-runtime-service initial_login::tests::copy_button_places_exact_password_on_clipboard -- --ignored"
+}
 if ($Action -eq 'service') { $build = "`"$cargo`" build -p mcphub-runtime-service --release" }
 if ($Action -eq 'bundle') { $build = "`"$cargo`" build -p mcphub-runtime-service --release && cd tray && `"$cargo`" tauri build --bundles nsis" }
 $cargoDirectory = Split-Path -Parent $cargo
