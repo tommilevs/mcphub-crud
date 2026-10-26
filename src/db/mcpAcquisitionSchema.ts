@@ -115,5 +115,6 @@ export async function ensureMcpAcquisitionSchema(db: { query(sql: string): Promi
       CHECK (secrets_removed_at IS NULL OR files_removed_at IS NOT NULL),
       CHECK ((status='review_required')=(review_code IS NOT NULL))
     );
+    ALTER TABLE mcp_acquisition_cleanup ADD COLUMN IF NOT EXISTS secret_receipts jsonb NOT NULL DEFAULT '{}'::jsonb;
   `);
 }

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { acquisitionSecretId } from './mcpAcquisitionSecretIdentity.js';
 import { getAppDataSource } from '../db/connection.js';
 import { AcquisitionOperationRepository } from './mcpAcquisitionOperation.js';
 import { acquisitionManifestDigest } from './mcpAcquisitionPlan.js';
@@ -74,7 +74,7 @@ export async function prepareAcquisitionExecution(owner: string, operationId: st
     const references: Record<string, string> = Object.create(null);
     for (const name of required) {
       if (!await heartbeat.confirm()) return reconcile();
-      const id = `acq-${createHash('sha256').update(`${owner}\0${operationId}\0${name}`).digest('hex')}`;
+      const id = acquisitionSecretId(owner, operationId, name);
       await deps.putSecret(id, values[name]); references[name] = id; delete values[name];
     }
     if (!await heartbeat.confirm()) return reconcile();

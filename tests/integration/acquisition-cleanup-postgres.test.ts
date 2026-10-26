@@ -60,9 +60,9 @@ suite('owned acquisition cleanup journal in PostgreSQL',()=>{
       expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);
       await admin.end();}
   });
-  const operation=async(state='failed',reconciliation=false)=>{
+  const operation=async(state='failed',reconciliation=false,inputs:string[]=[])=>{
     const manifest=buildAcquisitionManifest({name:'cleanup-fixture',installations:{npm:{type:'npm',command:'npx',
-      args:['-y','@fixture/mcp']}},arguments:{}} as unknown as MarketServer,'1.0.0','fixture-group');
+      args:['-y','@fixture/mcp']}},arguments:Object.fromEntries(inputs.map(name=>[name,{required:true}]))} as unknown as MarketServer,'1.0.0','fixture-group');
     const plan=await plans.create('alice',manifest);
     const op=await plans.authorize('alice',plan.plan_id,plan.manifest_digest,randomUUID());
     await pool.query(`UPDATE mcp_acquisition_operations SET state=$2,requires_reconciliation=$3,
@@ -91,6 +91,27 @@ suite('owned acquisition cleanup journal in PostgreSQL',()=>{
     expect((await pool.query('SELECT state,failure_code FROM mcp_acquisition_operations WHERE operation_id=$1',[id])).rows[0])
       .toEqual({state:'failed',failure_code:'cancelled_requires_cleanup'});
   });
+  test('cleanup completes only after each reviewed credential has an owner-bound receipt',async()=>{
+    const id=await operation('failed',false,['FIRST_KEY','SECOND_KEY']);
+    const claim=(await journal.claim('alice',id))!;
+    expect(await journal.recordStep('alice',id,claim.cleanup_claim_id,'files')).toBe(true);
+    expect(await journal.recordStep('alice',id,claim.cleanup_claim_id,'secrets')).toBe(false);
+    expect(await journal.recordSecret('alice',id,claim.cleanup_claim_id,'UNREVIEWED')).toBe(false);
+    expect(await journal.recordSecret('bob',id,claim.cleanup_claim_id,'FIRST_KEY')).toBe(false);
+    expect(await journal.recordSecret('alice',id,randomUUID(),'FIRST_KEY')).toBe(false);
+    expect(await journal.recordSecret('alice',id,claim.cleanup_claim_id,'FIRST_KEY')).toBe(true);
+    const firstReceipt=(await pool.query('SELECT secret_receipts FROM mcp_acquisition_cleanup WHERE operation_id=$1',[id])).rows[0].secret_receipts;
+    expect(firstReceipt.FIRST_KEY.secret_id).toMatch(/^acq-[a-f0-9]{64}$/);
+    expect(await journal.recordSecret('alice',id,claim.cleanup_claim_id,'FIRST_KEY')).toBe(true);
+    expect((await pool.query('SELECT secret_receipts FROM mcp_acquisition_cleanup WHERE operation_id=$1',[id])).rows[0].secret_receipts)
+      .toEqual(firstReceipt);
+    expect(await journal.recordStep('alice',id,claim.cleanup_claim_id,'secrets')).toBe(false);
+    expect(await journal.recordSecret('alice',id,claim.cleanup_claim_id,'SECOND_KEY')).toBe(true);
+    expect(await journal.recordStep('alice',id,claim.cleanup_claim_id,'secrets')).toBe(true);
+    expect(await journal.get('alice',id)).toMatchObject({status:'complete'});
+    expect(await journal.get('alice',id)).not.toHaveProperty('secret_receipts');
+    expect(await journal.recordSecret('alice',id,claim.cleanup_claim_id,'SECOND_KEY')).toBe(false);
+  });
   test('active, ready, uncertain and unrolled-back publications cannot claim cleanup',async()=>{
     for(const state of ['authorized','staging','starting','verifying','ready'])
       expect(await journal.claim('alice',await operation(state))).toBeNull();
@@ -110,6 +131,16 @@ suite('owned acquisition cleanup journal in PostgreSQL',()=>{
     expect(await journal.get('alice',id)).toMatchObject({status:'review_required',review_code:'cleanup_outcome_unknown',
       files_removed_at:expect.any(Date),secrets_removed_at:null});
     await expect(pool.query(`UPDATE mcp_acquisition_cleanup SET status='complete',review_code=NULL WHERE operation_id=$1`,[id])).rejects.toThrow();
+  });
+  test('additive receipt migration preserves existing completed cleanup rows',async()=>{
+    const id=await operation(); const claim=(await journal.claim('alice',id))!;
+    await journal.recordStep('alice',id,claim.cleanup_claim_id,'files');
+    await journal.recordStep('alice',id,claim.cleanup_claim_id,'secrets');
+    // Only this suite's isolated owned schema is modified to emulate the older table.
+    await pool.query('ALTER TABLE mcp_acquisition_cleanup DROP COLUMN secret_receipts');
+    await ensureMcpAcquisitionSchema({query:async(sql:string,args?:any[])=>{const result=await pool.query(sql,args);return result.rows;}});
+    expect(await journal.get('alice',id)).toMatchObject({status:'complete'});
+    expect((await pool.query('SELECT secret_receipts FROM mcp_acquisition_cleanup WHERE operation_id=$1',[id])).rows[0].secret_receipts).toEqual({});
   });
   test('settings adoption is blocked and concurrent writes wait for the complete guarded operation',async()=>{
     const id=randomUUID(),secret='acq-'+'a'.repeat(64);

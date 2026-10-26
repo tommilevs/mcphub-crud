@@ -141,3 +141,12 @@ unfinished. No installed service changes accompany this source work.
 
 Win32 references: [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects),
 [TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess).
+
+Credential cleanup journal now stores an idempotent private receipt per reviewed
+input, with the same deterministic native vault ID used at installation. Owner,
+claim, manifest membership and file-removal prerequisites are checked atomically.
+Completion requires receipts for exactly all reviewed inputs; partial or duplicate
+receipts cannot complete the operation. Public journal reads omit the receipt map.
+The additive JSONB column migration preserves older completed rows; real PostgreSQL
+fixtures verify the upgrade and owner/claim isolation. No vault deletion or cleanup
+endpoint is activated by this journal work.
