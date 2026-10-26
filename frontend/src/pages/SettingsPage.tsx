@@ -1255,10 +1255,6 @@ const SettingsPage: React.FC = () => {
         }
       } else {
         // Get current LLM provider config values with explicit type checking and trim
-        const currentLlmProviderApiKey = (typeof tempSmartRoutingConfig.llmProviderApiKey === 'string'
-          ? tempSmartRoutingConfig.llmProviderApiKey
-          : smartRoutingConfig.llmProviderApiKey || ''
-        ).trim();
         const currentLlmProviderBaseUrl = (typeof tempSmartRoutingConfig.llmProviderBaseUrl === 'string'
           ? tempSmartRoutingConfig.llmProviderBaseUrl
           : smartRoutingConfig.llmProviderBaseUrl || ''
@@ -1268,9 +1264,6 @@ const SettingsPage: React.FC = () => {
           : smartRoutingConfig.embeddingModel || ''
         ).trim();
 
-        if (!currentLlmProviderApiKey) {
-          missingFields.push(t('settings.llmProviderApiKey') || 'OpenAI API Key');
-        }
         if (!currentLlmProviderBaseUrl) {
           missingFields.push(t('settings.llmProviderBaseUrl') || 'OpenAI API Base URL');
         }

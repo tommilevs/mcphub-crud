@@ -795,6 +795,15 @@ describe('serverController - updateSystemConfig', () => {
   let mockResponse: Partial<Response>;
   let mockJson: jest.Mock;
   let mockStatus: jest.Mock;
+  it('enables Smart Routing for a configured local embedding provider without an API key', async () => {
+    mockRequest.body = {smartRouting:{enabled:true,dbUrl:'postgres://localhost/test',
+      llmProviderBaseUrl:'http://127.0.0.1:8080/v1',embeddingModel:'local',llmProviderApiKey:''}};
+    await updateSystemConfig(mockRequest as Request,mockResponse as Response);
+    expect(mockStatus).not.toHaveBeenCalledWith(400);
+    expect(mockSystemConfigDao.update).toHaveBeenCalledWith(expect.objectContaining({
+      smartRouting:expect.objectContaining({enabled:true,llmProviderApiKey:''}),
+    }));
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();

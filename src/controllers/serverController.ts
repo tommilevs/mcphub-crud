@@ -2385,10 +2385,6 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
             }
           } else {
             // Get current LLM provider config values, preferring new values from request
-            const currentLlmProviderApiKey =
-              typeof smartRouting.llmProviderApiKey === 'string'
-                ? smartRouting.llmProviderApiKey.trim()
-                : (systemConfig.smartRouting.llmProviderApiKey || '').trim();
             const currentLlmProviderBaseUrl =
               typeof smartRouting.llmProviderBaseUrl === 'string'
                 ? smartRouting.llmProviderBaseUrl.trim()
@@ -2398,10 +2394,10 @@ export const updateSystemConfig = async (req: Request, res: Response): Promise<v
                 ? smartRouting.embeddingModel.trim()
                 : (systemConfig.smartRouting.embeddingModel || '').trim();
 
-            if (!currentLlmProviderApiKey || !currentLlmProviderBaseUrl || !currentEmbeddingModel) {
+            if (!currentLlmProviderBaseUrl || !currentEmbeddingModel) {
               res.status(400).json({
                 message:
-                  'Smart routing cannot be enabled without LLM provider configuration. Please provide API key, API base URL, and embedding model.',
+                  'Smart routing cannot be enabled without LLM provider configuration. Please provide API base URL and embedding model.',
               });
               return;
             }

@@ -79,6 +79,15 @@ import {
 } from '../../src/services/vectorSearchService.js';
 
 describe('vectorSearchService', () => {
+  it('uses actual provider embeddings instead of lexical fallback for a custom endpoint with no key', async () => {
+    const config = await mockGetSmartRoutingConfig();
+    mockGetSmartRoutingConfig.mockResolvedValue({...config,llmProviderBaseUrl:'http://127.0.0.1:8080/v1',llmProviderApiKey:''});
+    mockEmbeddingCreate.mockResolvedValue({data:[{embedding:new Array(100).fill(0.1)}]});
+    mockVectorRepository.searchSimilar.mockResolvedValue([]);
+    await searchToolsByVector('fixture',1,0.1);
+    expect(mockEmbeddingCreate).toHaveBeenCalled();
+    expect(mockOpenAIConstructor).toHaveBeenCalledWith(expect.objectContaining({defaultHeaders:{Authorization:null}}));
+  });
   beforeEach(() => {
     jest.clearAllMocks();
     mockEmbeddingCreate.mockReset();

@@ -9,6 +9,7 @@ import {
 } from '../db/connection.js';
 import { getServerDao } from '../dao/index.js';
 import { getSmartRoutingConfig, type SmartRoutingConfig } from '../utils/smartRouting.js';
+import { embeddingClientOptions } from '../utils/embeddingClientOptions.js';
 import { filterModelVisibleTools } from '../utils/mcpApps.js';
 import { toFloat32Array } from '../utils/base64.js';
 import {
@@ -751,10 +752,7 @@ const shouldForwardDimensionsToApi = (
 // Initialize the OpenAI client with smartRouting configuration
 const getOpenAIClient = async () => {
   const config = await getLlmProviderConfig();
-  return new OpenAI({
-    apiKey: config.apiKey, // Get API key from smartRouting settings or environment variables
-    baseURL: config.baseURL, // Get base URL from smartRouting settings or fallback to default
-  });
+  return new OpenAI(embeddingClientOptions(config));
 };
 
 // Check if the provider supports base64 embeddings
@@ -824,13 +822,14 @@ export async function generateEmbedding(text: string, kind: 'query' | 'document'
   }
 
   const config = await getLlmProviderConfig();
-  const openai = await getOpenAIClient();
-
-  // Check if API key is configured
-  if (!openai.apiKey) {
+  // Preserve the legacy fallback for the public OpenAI endpoint without a
+  // credential. Custom providers may intentionally support unauthenticated HTTP.
+  const publicOpenAI = !config.baseURL || new URL(config.baseURL).hostname === 'api.openai.com';
+  if (!config.apiKey?.trim() && publicOpenAI) {
     logger.warn('OpenAI API key is not configured. Using fallback embedding method.');
     return generateFallbackEmbedding(text);
   }
+  const openai = await getOpenAIClient();
 
   // Truncate text to the model's token limit using precise tokenization.
   // Apply a safety margin for providers where the local tokenizer may count
