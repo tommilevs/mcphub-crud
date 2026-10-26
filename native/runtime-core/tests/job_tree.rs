@@ -230,3 +230,18 @@ fn failed_respawn_attempts_exhaust_the_restart_budget() {
     assert!(exhausted[0].last_error.is_some());
     supervisor.stop("respawn").unwrap();
 }
+
+#[test]
+fn stop_receipt_does_not_promote_missing_descendant_handles_to_exit_proof() {
+    let mut supervisor=RuntimeSupervisor::new();
+    let info=supervisor.start(ManagedProcessSpec {
+        server_name:None,id:"missing-exit-proof".into(),cwd:None,command:"powershell.exe".into(),
+        args:vec!["-NoLogo".into(),"-NoProfile".into(),"-NonInteractive".into(),"-Command".into(),
+            "$leaf=Start-Process powershell.exe -ArgumentList '-NoProfile','-Command','exit 0' -WindowStyle Hidden -PassThru; $leaf.WaitForExit(); exit 0".into()],
+        env:HashMap::new(),restart_limit:0,restart_delay_ms:0,request_timeout_ms:60000,
+    }).unwrap();
+    let parent=ObservedProcess::open(info.pid.unwrap());
+    assert!(parent.exited());
+    assert!(!supervisor.stop_with_confirmation("missing-exit-proof").unwrap());
+    assert_eq!(supervisor.process_specs().count(),0);
+}

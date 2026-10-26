@@ -1,5 +1,5 @@
 //! Bounded asynchronous jobs. Package resolution and staging policy stay at IPC.
-use mcphub_runtime_core::{run_owned_command, OneShotOutcome};
+use mcphub_runtime_core::{run_owned_command_verified, OneShotOutcome};
 use serde_json::{json, Value};
 use std::{
     collections::HashMap,
@@ -140,7 +140,7 @@ impl InstallerJobs {
             Some("exited") => state["exitCode"].as_i64().is_some(),
             _ => false,
         };
-        if !terminal {
+        if !terminal || state["processExitConfirmed"] != true {
             return Err("installer has no confirmed terminal outcome");
         }
         inspect(&state)
@@ -179,15 +179,18 @@ impl InstallerJobs {
         if std::thread::Builder::new()
             .name("mcphub-installer".into())
             .spawn(move || {
-                let result = run_owned_command(&mut command, Duration::from_secs(900), &cancel);
+                let (result,confirmed)=match run_owned_command_verified(&mut command, Duration::from_secs(900), &cancel) {
+                    Ok(result)=>(Ok(result.outcome),result.process_exit_confirmed),
+                    Err(error)=>(Err(error),false),
+                };
                 let outcome = match result {
                     Ok(OneShotOutcome::Exited(code)) => {
-                        json!({"id":job_id,"state":"exited","exitCode":code})
+                        json!({"id":job_id,"state":"exited","exitCode":code,"processExitConfirmed":confirmed})
                     }
-                    Ok(OneShotOutcome::Cancelled) => json!({"id":job_id,"state":"cancelled"}),
-                    Ok(OneShotOutcome::TimedOut) => json!({"id":job_id,"state":"timed_out"}),
+                    Ok(OneShotOutcome::Cancelled) => json!({"id":job_id,"state":"cancelled","processExitConfirmed":confirmed}),
+                    Ok(OneShotOutcome::TimedOut) => json!({"id":job_id,"state":"timed_out","processExitConfirmed":confirmed}),
                     Err(_) => {
-                        json!({"id":job_id,"state":"failed","error":"installer process failed"})
+                        json!({"id":job_id,"state":"failed","processExitConfirmed":false,"error":"installer process failed"})
                     }
                 };
                 if let Ok(mut state) = state.lock() {
@@ -259,7 +262,12 @@ mod tests {
         assert!(jobs
             .with_terminal_job(id, "@fixture/mcp", "1.0.0", inspect)
             .is_err());
-        for state in [json!({"state":"exited"}), json!({"state":"unknown"})] {
+        for state in [
+            json!({"state":"exited"}), json!({"state":"unknown"}),
+            json!({"state":"failed","processExitConfirmed":false}),
+            json!({"state":"cancelled"}),
+            json!({"state":"exited","exitCode":0,"processExitConfirmed":false}),
+        ] {
             *jobs.jobs.lock().unwrap()[id].state.lock().unwrap() = state;
             assert!(jobs
                 .with_terminal_job(id, "@fixture/mcp", "1.0.0", inspect)
@@ -272,6 +280,8 @@ mod tests {
             json!({"state":"timed_out"}),
             json!({"state":"exited","exitCode":0}),
         ] {
+            let mut state=state;
+            state["processExitConfirmed"]=json!(true);
             *jobs.jobs.lock().unwrap()[id].state.lock().unwrap() = state;
             assert!(jobs
                 .with_terminal_job(id, "@fixture/other", "1.0.0", inspect)
@@ -358,18 +368,13 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(jobs.status(id).unwrap()["exitCode"], 0);
-        assert_eq!(
-            crate::cleanup_path::inspect_owned_staging(
-                &jobs,
-                &acquisitions,
-                id,
-                "@fixture/mcp",
-                "1.2.3"
-            )
-            .unwrap()
-            .0,
-            acquisitions.join(id).canonicalize().unwrap()
-        );
+        let inspection=crate::cleanup_path::inspect_owned_staging(
+            &jobs,&acquisitions,id,"@fixture/mcp","1.2.3");
+        if jobs.status(id).unwrap()["processExitConfirmed"]==true {
+            assert_eq!(inspection.unwrap().0,acquisitions.join(id).canonicalize().unwrap());
+        } else {
+            assert_eq!(inspection.unwrap_err(),"installer has no confirmed terminal outcome");
+        }
         let args: Value = serde_json::from_slice(
             &std::fs::read(acquisitions.join(id).join("observed.json")).unwrap(),
         )

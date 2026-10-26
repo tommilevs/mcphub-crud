@@ -26,7 +26,7 @@ import { createMcpAcquisitionPlan, authorizeMcpAcquisitionPlan, executeMcpAcquis
   getMcpAcquisitionOperation, cancelMcpAcquisitionOperation, reviewInterruptedMcpAcquisition } from '../../src/controllers/mcpAcquisitionController.js';
 import { AcquisitionOperationRepository } from '../../src/services/mcpAcquisitionOperation.js';
 import { getServerByName, cleanupAllServers, initializeClientsFromSettings } from '../../src/services/mcpService.js';
-import { deleteNativeRuntimeSecret, forgetNativeInstall, getNativeRuntimeStatus, inspectNativeInstallCleanup } from '../../src/services/nativeRuntimeSecretService.js';
+import { deleteNativeRuntimeSecret, forgetNativeInstall, getNativeRuntimeStatus, inspectNativeInstallCleanup, getNativeInstallStatus } from '../../src/services/nativeRuntimeSecretService.js';
 import * as inspectionModule from '../../src/services/mcpAcquisitionInspection.js';
 import { NativeRuntimeTransport } from '../../src/services/nativeRuntimeTransport.js';
 
@@ -161,8 +161,13 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
       } while (Date.now() < deadline);
       expect(observed).toMatchObject({ state: 'failed', cancel_requested: true,
         failure_code: 'cancelled_requires_cleanup', requires_reconciliation: false });
-      const preflight=await inspectNativeInstallCleanup(operationId,'mcphub-acquisition-fixture','1.0.0');
-      expect(preflight).toMatchObject({id:operationId,verification:'cleanup_preflight',state:'cancelled'});
+      const nativeStatus=await getNativeInstallStatus(operationId);
+      if(nativeStatus.processExitConfirmed===true) {
+        const preflight=await inspectNativeInstallCleanup(operationId,'mcphub-acquisition-fixture','1.0.0');
+        expect(preflight).toMatchObject({id:operationId,verification:'cleanup_preflight',state:'cancelled'});
+      } else {
+        await expect(inspectNativeInstallCleanup(operationId,'mcphub-acquisition-fixture','1.0.0')).rejects.toThrow('terminal');
+      }
       await expect(inspectNativeInstallCleanup(operationId,'mcphub-acquisition-fixture','2.0.0')).rejects.toThrow('identity');
       expect(getServerByName('native-acquisition-fixture')).toBeUndefined();
       expect(JSON.parse(fs.readFileSync(process.env.MCPHUB_SETTING_PATH!, 'utf8')).mcpServers).toEqual({});

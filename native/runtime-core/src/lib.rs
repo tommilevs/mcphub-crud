@@ -22,7 +22,7 @@ pub use stdio::StdioSession;
 #[cfg(windows)]
 mod one_shot;
 #[cfg(windows)]
-pub use one_shot::{run_owned_command, OneShotOutcome};
+pub use one_shot::{run_owned_command, run_owned_command_verified, OneShotOutcome, VerifiedOneShotOutcome};
 
 /// A non-stdio child whose complete process tree belongs to this host.
 /// Job ownership also survives abrupt host termination via kernel handle cleanup.
@@ -33,6 +33,13 @@ pub struct OwnedChild {
 }
 #[cfg(windows)]
 impl OwnedChild {
+    /// Confirm that the entire job is empty before reporting a terminal outcome.
+    pub fn terminate_and_confirm(&mut self) -> std::io::Result<bool> {
+        let confirmed=self._job.terminate_and_confirm(&self.child)?;
+        self.child.wait()?;
+        Ok(confirmed)
+    }
+
     pub fn spawn(command: &mut Command) -> std::io::Result<Self> {
         use std::os::windows::process::CommandExt;
         use windows_sys::Win32::System::Threading::{CREATE_NO_WINDOW, CREATE_SUSPENDED};
@@ -287,6 +294,22 @@ impl RuntimeSupervisor {
         };
         self.processes.insert(id, process);
         Ok(status)
+    }
+
+    /// Normal stop and an exhaustive per-process exit receipt are distinct.
+    /// Missing handles never authorize package deletion, even after a successful stop.
+    pub fn stop_with_confirmation(&mut self, id: &str) -> Result<bool, SupervisorError> {
+        #[cfg(windows)]
+        let confirmed = {
+            let process=self.processes.get_mut(id)
+                .ok_or_else(||SupervisorError::NotFound(id.to_owned()))?;
+            process.job.terminate_and_confirm(&process.child)
+                .map_err(|source|SupervisorError::Stop {id:id.to_owned(),source})?
+        };
+        #[cfg(not(windows))]
+        let confirmed=false;
+        self.stop(id)?;
+        Ok(confirmed)
     }
 
     pub fn stop(&mut self, id: &str) -> Result<(), SupervisorError> {
@@ -545,6 +568,69 @@ mod windows {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(10));
             }
+        }
+        pub fn terminate_and_confirm(&self, root: &std::process::Child) -> io::Result<bool> {
+            use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+            use windows_sys::Win32::System::JobObjects::{
+                IsProcessInJob, JobObjectBasicProcessIdList, JOBOBJECT_BASIC_PROCESS_ID_LIST,
+            };
+            use windows_sys::Win32::System::Threading::{
+                WaitForSingleObject, PROCESS_SYNCHRONIZE,
+            };
+            use windows_sys::Win32::Foundation::{ERROR_MORE_DATA, WAIT_OBJECT_0};
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            // Acquire process handles BEFORE requesting termination. Job accounting
+            // can reach zero before those process objects become signaled.
+            let mut capacity = 32usize;
+            let members = loop {
+                let mut buffer = vec![0usize; capacity + 2];
+                let ok = unsafe { QueryInformationJobObject(self.0, JobObjectBasicProcessIdList,
+                    buffer.as_mut_ptr().cast(), std::mem::size_of_val(buffer.as_slice()) as u32,
+                    std::ptr::null_mut()) };
+                if ok == 0 {
+                    let error=io::Error::last_os_error();
+                    if error.raw_os_error()==Some(ERROR_MORE_DATA as i32) && capacity<65536 {
+                        capacity*=2; continue;
+                    }
+                    return Err(error);
+                }
+                let list=unsafe { &*(buffer.as_ptr() as *const JOBOBJECT_BASIC_PROCESS_ID_LIST) };
+                let count=list.NumberOfProcessIdsInList as usize;
+                if count>capacity { return Err(io::Error::other("job process list is unconfirmed")); }
+                let ids=unsafe { std::slice::from_raw_parts(list.ProcessIdList.as_ptr(),count) };
+                let mut handles=Vec::new();
+                for &pid in ids {
+                    if pid==root.id() as usize { continue; }
+                    let handle=unsafe { OpenProcess(PROCESS_SYNCHRONIZE|PROCESS_QUERY_INFORMATION,0,pid as u32) };
+                    if handle.is_null() { return Err(io::Error::last_os_error()); }
+                    let handle=unsafe { OwnedHandle::from_raw_handle(handle) };
+                    let mut belongs=0;
+                    if unsafe { IsProcessInJob(handle.as_raw_handle(),self.0,&mut belongs) }==0 || belongs==0 {
+                        return Err(io::Error::other("job process identity is unconfirmed"));
+                    }
+                    handles.push(handle);
+                }
+                break handles;
+            };
+            if unsafe { TerminateJobObject(self.0,1) }==0 { return Err(io::Error::last_os_error()); }
+            for handle in std::iter::once(root.as_raw_handle()).chain(members.iter().map(|h| h.as_raw_handle())) {
+                let remaining=deadline.saturating_duration_since(std::time::Instant::now()).as_millis() as u32;
+                match unsafe { WaitForSingleObject(handle,remaining) } {
+                    WAIT_OBJECT_0=>{},
+                    windows_sys::Win32::Foundation::WAIT_TIMEOUT=>return Err(io::Error::new(io::ErrorKind::TimedOut,"managed process exit is unconfirmed")),
+                    _=>return Err(io::Error::last_os_error()),
+                }
+            }
+            let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION=unsafe { std::mem::zeroed() };
+            if unsafe { QueryInformationJobObject(self.0,JobObjectBasicAccountingInformation,
+                &mut accounting as *mut _ as *mut _,std::mem::size_of_val(&accounting) as u32,
+                std::ptr::null_mut()) }==0 { return Err(io::Error::last_os_error()); }
+            // A process which exited before enumeration or appeared concurrently
+            // has no retained handle. Do not promote an incomplete inventory to proof.
+            if accounting.ActiveProcesses!=0 {
+                return Err(io::Error::other("managed processes remain"));
+            }
+            Ok(accounting.TotalProcesses as usize==members.len()+1)
         }
         pub fn terminate(&self) {
             unsafe {

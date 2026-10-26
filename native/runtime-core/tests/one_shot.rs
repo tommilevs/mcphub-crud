@@ -1,5 +1,5 @@
 #![cfg(windows)]
-use mcphub_runtime_core::{run_owned_command, OneShotOutcome};
+use mcphub_runtime_core::{run_owned_command, run_owned_command_verified, OneShotOutcome};
 use std::{
     process::Command,
     sync::{
@@ -125,7 +125,7 @@ fn successful_root_exit_also_terminates_detached_descendants() {
                 "only an already-gone process is acceptable"
             );
         } else {
-            let wait = WaitForSingleObject(handle, 5000);
+            let wait = WaitForSingleObject(handle, 0);
             CloseHandle(handle);
             assert_eq!(
                 wait, WAIT_OBJECT_0,
@@ -134,4 +134,22 @@ fn successful_root_exit_also_terminates_detached_descendants() {
         }
     }
     assert!(!path.exists());
+}
+
+#[test]
+fn successful_exit_without_complete_handle_inventory_is_not_cleanup_proof() {
+    let result=run_owned_command_verified(
+        &mut powershell("$leaf=Start-Process powershell.exe -ArgumentList '-NoLogo','-NoProfile','-Command','exit 0' -WindowStyle Hidden -PassThru; $leaf.WaitForExit(); exit 0"),
+        Duration::from_secs(15), &AtomicBool::new(false),
+    ).unwrap();
+    assert_eq!(result.outcome,OneShotOutcome::Exited(Some(0)));
+    assert!(!result.process_exit_confirmed,"already-gone descendants have no retained signal evidence");
+}
+
+#[test]
+fn pre_cancelled_verified_execution_confirms_no_process_was_created() {
+    let result=run_owned_command_verified(&mut Command::new("nonexistent-fixture-command"),
+        Duration::from_secs(1), &AtomicBool::new(true)).unwrap();
+    assert_eq!(result.outcome,OneShotOutcome::Cancelled);
+    assert!(result.process_exit_confirmed);
 }

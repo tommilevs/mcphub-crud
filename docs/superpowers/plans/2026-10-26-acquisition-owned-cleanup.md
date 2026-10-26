@@ -120,3 +120,24 @@ acquiring this guard to avoid queue deadlocks.
 These are prerequisites. There is still no cleanup actuator or public endpoint;
 complete runtime coordination and the coordinator remain. No guard by itself
 authorizes file or credential deletion.
+
+### Exit proof correction
+
+A real Windows regression with `WaitForSingleObject(handle, 0)` demonstrated
+that `ActiveProcesses == 0` is weaker than signaled process handles. The native
+host now captures member handles before termination, verifies membership, waits
+within one deadline, and compares retained handles with the job's total process
+count. Missing early or concurrent members return `processExitConfirmed: false`;
+normal execution/stop results remain usable but cannot authorize cleanup.
+The installer terminal guard requires explicit true, including successful exits.
+Legacy states without the field require review. Errors never acquire proof.
+An already-exited short-lived child is covered by a separate real-process test.
+
+This conservative inventory does not yet retain every handle throughout a job's
+lifetime. Packages with earlier short-lived children may therefore require review;
+continuous inventory/reconciliation remains necessary before cleanup release.
+Interactive guard coordination, destructive actuator and full acceptance remain
+unfinished. No installed service changes accompany this source work.
+
+Win32 references: [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects),
+[TerminateProcess](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-terminateprocess).

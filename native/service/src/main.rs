@@ -213,8 +213,8 @@ fn handle_request(
             serde_json::to_value(supervisor.start(spec)?)?
         }
         Some("stop") => {
-            supervisor.stop(request["id"].as_str().unwrap_or_default())?;
-            serde_json::json!({"ok": true,"processExitConfirmed":cfg!(windows)})
+            let confirmed=supervisor.stop_with_confirmation(request["id"].as_str().unwrap_or_default())?;
+            serde_json::json!({"ok": true,"processExitConfirmed":confirmed})
         }
         Some("restart") => {
             serde_json::to_value(supervisor.restart(request["id"].as_str().unwrap_or_default())?)?
