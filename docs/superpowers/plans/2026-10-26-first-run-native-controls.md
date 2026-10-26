@@ -33,11 +33,24 @@
 
 ## Pending release gates
 
+Additional acceptance: Windows run `40303969719`, job `121508390824`, passed the
+real SCM control fixture (logs read): Stop twice, Start twice and Restart all
+reached the expected states. This exercises the functions used by the tray,
+not clicks on the native context menu.
+
+The local isolated user-agent harness also passed five SDK integration tests
+and three lifecycle tests. Its new late-agent test first observes a failed real
+pipe connection, starts a temporary user agent, then waits for the production
+keep-alive callback to establish a real SDK connection and list tools without
+manual reload. It uses the installed runtime binary and a unique direct agent
+pipe, not the production service connection or a full reboot. Temporary agents
+and test binaries were removed; the running production service was untouched.
+
 - Read final installer CI results for `035913b` and `05cde03`; retain source/run
   identity and inspect acceptance logs before presenting a new installer.
 - Verify Copy in isolated Windows CI and wizard compatibility with the new dialog.
-- Exercise real tray Start/Stop controls and recovery when the user agent appears
-  after the first gateway connection attempt.
+- Exercise clicks on real tray Start/Stop controls and the full installed service
+  delegation path when the user agent appears after the first connection attempt.
 - Validate a changed Windows logon session separately: reconnect retries do not
   authorize or automatically retarget another session.
 - Deploy a verified update before claiming these corrections exist in the user's

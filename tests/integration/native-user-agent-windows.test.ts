@@ -1,6 +1,9 @@
 import net from 'node:net';
 import path from 'node:path';
-import {execFileSync} from 'node:child_process';
+import {execFileSync, spawn} from 'node:child_process';
+import {randomUUID} from 'node:crypto';
+import {setupClientKeepAlive, clearClientKeepAlive} from '../../src/services/keepAliveService.js';
+import type {ServerInfo} from '../../src/types/index.js';
 import {NativeRuntimeTransport} from '../../src/services/nativeRuntimeTransport.js';
 import {LegacyMcpClient} from '../../src/clients/legacyMcpClient.js';
 const suite=process.platform==='win32'&&process.env.MCPHUB_NATIVE_USER_PIPE?describe:describe.skip;
@@ -17,6 +20,48 @@ suite('interactive Windows runtime agent',()=>{
     const until=Date.now()+10000;
     while(true){try{await control({op:'status'});return;}catch(error){if(Date.now()>until)throw error;await new Promise(resolve=>setTimeout(resolve,100));}}
   });
+  test('a late user agent restores a failed native connection without manual reload',async()=>{
+    const binary=process.env.MCPHUB_USER_RUNTIME_TEST_BINARY;
+    expect(binary).toBeTruthy();
+    const pipeName=`mcphub-user-test-${randomUUID()}`;
+    const delayedPipe=`\\\\.\\pipe\\${pipeName}`;
+    const spec={id:'late-agent-fixture',command:process.execPath,
+      args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{},streaming:true};
+    let client=new LegacyMcpClient({name:'late-agent-acceptance',version:'1'});
+    const transport=new NativeRuntimeTransport(spec,delayedPipe);
+    await expect(client.connect(transport)).rejects.toThrow();
+    await client.close().catch(()=>{}); // Initial transport never connected to an agent.
+    const info={name:'late-agent-fixture',enabled:true,status:'disconnected',transport,
+      tools:[],prompts:[],resources:[],error:'Agent not started'} as unknown as ServerInfo;
+    let attempts=0;
+    let recovered!:()=>void;
+    const ready=new Promise<void>(resolve=>{recovered=resolve;});
+    await setupClientKeepAlive(info,{type:'stdio',command:process.execPath,
+      options:{nativeExecution:{kind:'interactive',sessionId:Number(process.env.MCPHUB_NATIVE_USER_SESSION)}}},{
+      reconnectServer:async()=>{
+        attempts++;
+        client=new LegacyMcpClient({name:'late-agent-recovered',version:'1'});
+        const next=new NativeRuntimeTransport(spec,delayedPipe);
+        try{
+          await client.connect(next);
+          expect((await client.listTools()).tools[0].name).toBe('check_secret');
+          info.client=client as any; info.transport=next; info.status='connected'; info.error=null;
+          recovered();
+        }catch(error){await client.close();throw error;}
+      },
+    });
+    const agent=spawn(binary!,['--user-agent','--pipe-name',pipeName],{windowsHide:true,stdio:'ignore'});
+    let deadline:ReturnType<typeof setTimeout>|undefined;
+    try{
+      await Promise.race([ready,new Promise<never>((_,reject)=>{
+        deadline=setTimeout(()=>reject(new Error('Late user agent did not recover')),35000);
+      })]);
+      expect(info.status).toBe('connected'); expect(attempts).toBe(1);
+    }finally{
+      clearTimeout(deadline); clearClientKeepAlive(info); await client.close();
+      if(agent.exitCode===null){await new Promise<void>(resolve=>{agent.once('exit',()=>resolve());agent.kill();});}
+    }
+  },40000);
   test('real SDK calls run in the signed-in session and closing the lease stops the child',async()=>{
     const transport=new NativeRuntimeTransport({id:'interactive-fixture',command:process.execPath,
       args:[path.resolve('native/tests/stdio-fixture.mjs')],env:{MCPHUB_NATIVE_TEST_SECRET:'synthetic-user-value'},streaming:true},pipe);

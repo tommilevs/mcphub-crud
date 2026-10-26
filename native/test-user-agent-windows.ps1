@@ -11,6 +11,7 @@ Push-Location (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..')).Path
 try {
   $agent=Start-Process -FilePath (Resolve-Path -LiteralPath $RuntimeBinary).Path -ArgumentList @('--user-agent','--pipe-name',$pipe) -WindowStyle Hidden -PassThru
   $env:MCPHUB_NATIVE_USER_PIPE="\\.\pipe\$pipe";$env:MCPHUB_NATIVE_USER_SESSION="$session"
+  $env:MCPHUB_USER_RUNTIME_TEST_BINARY=(Resolve-Path -LiteralPath $RuntimeBinary).Path
   npm run -s test -- --runInBand tests/integration/native-user-agent-windows.test.ts --silent
   if($LASTEXITCODE -ne 0){throw 'User-session runtime acceptance failed.'}
   $duplicate=Start-Process -FilePath (Resolve-Path -LiteralPath $RuntimeBinary).Path -ArgumentList @('--user-agent','--pipe-name',$pipe) -WindowStyle Hidden -PassThru
@@ -35,6 +36,8 @@ try {
     if($owned){try{$owned.Kill();if(-not $owned.WaitForExit(5000)){throw 'Temporary user agent did not exit.'}}finally{$owned.Dispose()}}
   }
   if(Test-Path -LiteralPath $lifecycleTest){Remove-Item -LiteralPath $lifecycleTest -Force}
+  $symbols=[IO.Path]::ChangeExtension($lifecycleTest,'.pdb')
+  if(Test-Path -LiteralPath $symbols){Remove-Item -LiteralPath $symbols -Force}
   Pop-Location
 }
 Write-Output 'User-session runtime acceptance passed; temporary agent removed.'
