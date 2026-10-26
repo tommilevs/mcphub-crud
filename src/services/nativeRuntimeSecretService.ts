@@ -70,3 +70,7 @@ export const cancelNativeInstall = (id: string): Promise<RuntimeResponse> => cal
 export const forgetNativeInstall = (id: string): Promise<RuntimeResponse> => callRuntime({op:'install_forget',id});
 export const resolveNativeInstalledPackage = (id: string, packageName: string, version: string): Promise<RuntimeResponse> =>
   callRuntime({op:'install_resolve',id,package:packageName,version});
+
+/** Read-only ownership preflight; this never deletes files or credentials. */
+export const inspectNativeInstallCleanup = (id: string, packageName: string, version: string): Promise<RuntimeResponse> =>
+  callRuntime({op:'install_cleanup_inspect',id,package:packageName,version});

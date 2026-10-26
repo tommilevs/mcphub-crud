@@ -116,6 +116,35 @@ pub fn start_npm(
     jobs.start(id, &binding, command)
 }
 impl InstallerJobs {
+    /// Keep the registry and outcome locked during an ownership inspection.
+    /// The callback must not reenter InstallerJobs. Terminal proof alone does
+    /// not authorize deletion: publication/runtime/reference guards still apply.
+    pub(super) fn with_terminal_job<T>(
+        &self,
+        id: &str,
+        package: &str,
+        version: &str,
+        inspect: impl FnOnce(&Value) -> Result<T, &'static str>,
+    ) -> Result<T, &'static str> {
+        validate_request(id, package, version)?;
+        let jobs = self.jobs.lock().map_err(|_| "installer jobs unavailable")?;
+        let job = jobs
+            .get(id)
+            .ok_or("installer outcome is unknown; reconciliation is required")?;
+        if job.binding != format!("{package}@{version}") {
+            return Err("installer job identity conflict");
+        }
+        let state = job.state.lock().map_err(|_| "installer job unavailable")?;
+        let terminal = match state["state"].as_str() {
+            Some("cancelled" | "timed_out" | "failed") => true,
+            Some("exited") => state["exitCode"].as_i64().is_some(),
+            _ => false,
+        };
+        if !terminal {
+            return Err("installer has no confirmed terminal outcome");
+        }
+        inspect(&state)
+    }
     pub fn start(
         &self,
         id: &str,
@@ -203,6 +232,59 @@ impl InstallerJobs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn cleanup_guard_requires_exact_identity_and_confirmed_terminal_outcome() {
+        let jobs = InstallerJobs::default();
+        let id = "00000000-0000-4000-8000-000000000001";
+        let calls = std::cell::Cell::new(0);
+        let inspect = |_: &Value| {
+            assert!(
+                jobs.jobs.try_lock().is_err(),
+                "registry must stay locked during inspection"
+            );
+            calls.set(calls.get() + 1);
+            Ok(())
+        };
+        assert!(jobs
+            .with_terminal_job(id, "@fixture/mcp", "1.0.0", inspect)
+            .is_err());
+        jobs.jobs.lock().unwrap().insert(
+            id.into(),
+            Job {
+                binding: "@fixture/mcp@1.0.0".into(),
+                cancel: Arc::new(AtomicBool::new(false)),
+                state: Arc::new(Mutex::new(json!({"state":"running"}))),
+            },
+        );
+        assert!(jobs
+            .with_terminal_job(id, "@fixture/mcp", "1.0.0", inspect)
+            .is_err());
+        for state in [json!({"state":"exited"}), json!({"state":"unknown"})] {
+            *jobs.jobs.lock().unwrap()[id].state.lock().unwrap() = state;
+            assert!(jobs
+                .with_terminal_job(id, "@fixture/mcp", "1.0.0", inspect)
+                .is_err());
+        }
+        assert_eq!(calls.get(), 0);
+        for state in [
+            json!({"state":"cancelled"}),
+            json!({"state":"failed"}),
+            json!({"state":"timed_out"}),
+            json!({"state":"exited","exitCode":0}),
+        ] {
+            *jobs.jobs.lock().unwrap()[id].state.lock().unwrap() = state;
+            assert!(jobs
+                .with_terminal_job(id, "@fixture/other", "1.0.0", inspect)
+                .is_err());
+            jobs.with_terminal_job(id, "@fixture/mcp", "1.0.0", inspect)
+                .unwrap();
+        }
+        assert_eq!(calls.get(), 4);
+        jobs.forget(id).unwrap();
+        assert!(jobs
+            .with_terminal_job(id, "@fixture/mcp", "1.0.0", inspect)
+            .is_err());
+    }
     fn fixture(script: &str) -> Command {
         let mut command = Command::new("powershell.exe");
         command.args([
@@ -276,6 +358,18 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(jobs.status(id).unwrap()["exitCode"], 0);
+        assert_eq!(
+            crate::cleanup_path::inspect_owned_staging(
+                &jobs,
+                &acquisitions,
+                id,
+                "@fixture/mcp",
+                "1.2.3"
+            )
+            .unwrap()
+            .0,
+            acquisitions.join(id).canonicalize().unwrap()
+        );
         let args: Value = serde_json::from_slice(
             &std::fs::read(acquisitions.join(id).join("observed.json")).unwrap(),
         )
@@ -295,6 +389,14 @@ mod tests {
         );
         start_npm(&jobs, id, "@fixture/mcp", "1.2.3", &runtime, &acquisitions).unwrap();
         let restarted = InstallerJobs::default();
+        assert!(crate::cleanup_path::inspect_owned_staging(
+            &restarted,
+            &acquisitions,
+            id,
+            "@fixture/mcp",
+            "1.2.3"
+        )
+        .is_err());
         assert!(start_npm(
             &restarted,
             id,
