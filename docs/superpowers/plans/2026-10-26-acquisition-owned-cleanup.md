@@ -226,3 +226,11 @@ pipe handle, never a reopened pipe name. Real local pipe tests prove mismatched
 sessions are refused; malformed discovery names fail before opening. Positive
 WTS user-token validation still needs the isolated LocalSystem CI scenario.
 This adapter is internal; no cleanup command or public API has been enabled.
+
+The disposable NSIS/tray acceptance now requests interactive status through the
+installed LocalSystem broker while the installed tray agent is running. It checks
+the returned session and interactive context, with bounded connect/read waits and
+no response-body logging. This covers positive WTS/SID/executable validation in
+the actual installed pair. Local PowerShell parsing and diff checks pass; actual
+execution is restricted to hosted Windows CI and must be checked there before
+claiming positive validation. It does not yet exercise connect_discovered itself.

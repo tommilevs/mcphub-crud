@@ -35,6 +35,36 @@ function Assert-Login([string]$Password){
   $response=Invoke-RestMethod http://127.0.0.1:3000/api/auth/login -Method Post -ContentType 'application/json' -Body (@{username='admin';password=$Password}|ConvertTo-Json -Compress)
   if(-not $response.token){throw 'Installed gateway rejected its bootstrap administrator.'}
 }
+function Assert-InteractiveDelegation {
+  # Exercise the installed LocalSystem broker's actual WTS/SID/executable checks,
+  # rather than treating a local wrong-session refusal as positive validation.
+  $session=[Diagnostics.Process]::GetCurrentProcess().SessionId
+  if($session -eq 0){throw 'Interactive delegation acceptance requires a signed-in session.'}
+  $service=Get-CimInstance Win32_Service -Filter "Name='MCPHub'"
+  if($service.StartName -ne 'LocalSystem'){throw 'Delegation acceptance requires the installed LocalSystem broker.'}
+  $pipe=[IO.Pipes.NamedPipeClientStream]::new('.', 'mcphub-runtime', [IO.Pipes.PipeDirection]::InOut, [IO.Pipes.PipeOptions]::Asynchronous)
+  $reader=$null;$writer=$null
+  try {
+    $pipe.Connect(5000)
+    $writer=[IO.StreamWriter]::new($pipe,[Text.UTF8Encoding]::new($false),1024,$true)
+    $reader=[IO.StreamReader]::new($pipe,[Text.UTF8Encoding]::new($false),$false,1024,$true)
+    $request=@{op='status';execution_context=@{kind='interactive';session_id=$session;pipe_name="mcphub-user-session-$session"}}
+    $writer.WriteLine(($request|ConvertTo-Json -Compress -Depth 4));$writer.Flush()
+    $pending=$reader.ReadLineAsync()
+    if(-not $pending.Wait(5000)){throw 'Installed broker delegation status timed out.'}
+    $line=$pending.GetAwaiter().GetResult()
+    if(-not $line){throw 'Installed broker closed delegation without a response.'}
+    $response=$line|ConvertFrom-Json
+    # Do not print response bodies: future status payloads may contain user data.
+    if($response.error -or $response.executionContext -ne 'interactive' -or $response.sessionId -ne $session -or $response.interactiveDelegation -ne $false){
+      throw 'Installed LocalSystem broker did not authenticate the tray user agent.'
+    }
+  } finally {
+    try {if($writer){$writer.Dispose()};if($reader){$reader.Dispose()}}
+    finally {$pipe.Dispose()}
+  }
+  Write-Output 'Installed LocalSystem delegation passed: user session, owner SID, canonical executable and same-handle reply verified.'
+}
 try{
   Invoke-Installer -Interactive:$CheckWizard
   foreach($file in @('mcphub-tray.exe','mcphub-runtime-service.exe','runtime-install.ps1','runtime\node.exe','runtime\dist\index.js','runtime\frontend\dist\index.html')){
@@ -126,6 +156,7 @@ public static class TrayWindowEvidence {
       }
       Wait-Gateway
       Assert-Login $password
+      Assert-InteractiveDelegation
       Write-Output 'Installed tray passed: dashboard window created, close hides without exiting, service gateway and login remain available.'
     }finally{
       if(-not $tray.HasExited){$tray.Kill();$tray.WaitForExit(10000)|Out-Null}
