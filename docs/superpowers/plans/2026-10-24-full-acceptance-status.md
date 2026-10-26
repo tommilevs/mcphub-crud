@@ -17,9 +17,10 @@ prove that production deployment or real PostgreSQL acceptance has passed.
 | LoopGuard / ToolPilot | Failure loops, explicit unchanged-success tools, repeat-intent exclusions, scoped feedback, bounded metadata-only provider tests; PostgreSQL branch/feedback/reaction isolation; isolated browser acceptance of unchanged-success settings and advice | Full deployed settings/detail acceptance; independently verified reactions/outcomes |
 | Experience Memory | Scope/evidence tests and reviewed manual advice | Broader verified strategies and deployment acceptance; optional adapters remain optional |
 | Dataset / Skills | Reviewed SFT, recorded trajectories, DPO, split registry and miner tests; PostgreSQL preview/export tenant/latest-consent gates and current independent Experience evidence | Broader deployed export/skills acceptance; no fabricated original conversation |
-| Windows service / stdio | Actual isolated SCM, Job Objects, duplex streams, managed tools and interactive broker acceptance | Full installer wizard acceptance and production switch |
+| Windows service / stdio | Actual isolated SCM, Job Objects, duplex streams, managed tools and interactive broker acceptance; 39 native Windows tests and October 26 installer wizard/tray acceptance | Production switch and reboot/logon acceptance |
 | Native dashboard | Actual browser same-ID service/agent restart targets, offline agent and narrow layout | Deployed package acceptance |
-| Installer | Official NSIS bundle built and entry assets checked; install helper exercised in PowerShell 7 and 5.1; occupied-port preflight tested in 64/32-bit PowerShell; welcome/directory wizard pages observed | Complete installation/shortcuts/bootstrap flow and real logon/reboot |
+| Installer | October 26 source b3cdac9: actual interactive wizard, bootstrap dialog, installed imports, tray close, login, shortcuts, upgrade/data retention and uninstall on disposable Windows | Local settings/client migration and real logon/reboot |
+| MCP acquisition | Real Windows SCM + offline npm + DPAPI + PostgreSQL/pgvector + dashboard JWT: owner-bound execution, duplicate refusal, pre-execution cancellation, immutable probe RAW, JSON publication, runtime activation and credential-backed tool call | Interrupted worker reconciliation, staging/owned secret cleanup, active cancellation/rollback end-to-end, deployed acquisition acceptance |
 
 PostgreSQL query regressions now run in disposable pgvector CI, without needing
 the production administrator credential. The red run was
