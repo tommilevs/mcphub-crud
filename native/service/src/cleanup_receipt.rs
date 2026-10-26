@@ -238,9 +238,26 @@ pub fn begin(
     })
 }
 impl CleanupReceipt {
-    /// Call only after owned package deletion has been confirmed. A missing
-    /// completion after any error remains incomplete; never infer from absence.
-    pub fn complete(self) -> Result<(), &'static str> {
+    pub(super) fn assert_for(
+        &self,
+        data: &Path,
+        id: &str,
+        package: &str,
+        version: &str,
+    ) -> Result<(), &'static str> {
+        let data = data
+            .canonicalize()
+            .map_err(|_| "cleanup receipt data directory unavailable")?;
+        if self.intent_path.parent().and_then(Path::parent) != Some(data.as_path())
+            || self.identity["id"] != id
+            || self.identity["package"] != package
+            || self.identity["version"] != version
+        {
+            return Err("cleanup receipt operation identity mismatch");
+        }
+        self.verify_intent()
+    }
+    fn verify_intent(&self) -> Result<(), &'static str> {
         let root = self
             .complete_path
             .parent()
@@ -256,6 +273,12 @@ impl CleanupReceipt {
         if read(&self.intent_path)?.as_ref() != Some(&self.identity) {
             return Err("cleanup intent identity changed");
         }
+        Ok(())
+    }
+    /// Call only after owned package deletion has been confirmed. A missing
+    /// completion after any error remains incomplete; never infer from absence.
+    pub fn complete(self) -> Result<(), &'static str> {
+        self.verify_intent()?;
         write_new(&self.complete_path, &self.identity)
     }
 }

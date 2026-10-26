@@ -167,3 +167,27 @@ boundary. These coordinator tests do not prove real Windows package deletion.
 Native cleanup preflight now carries explicit processExitConfirmed. The coordinator refuses missing or false proof, so an older host's weaker preflight cannot authorize effects. Actual destructive adapters remain disabled.
 
 Installer CI a68d4da exposed the same signal race in ordinary RuntimeSupervisor::stop (job_tree descendant handle not signaled on return). All stop/restart callers now share stop_with_confirmation's retained-handle wait; the weaker accounting-only helper was removed. Missing historical inventory still returns false proof rather than authorizing cleanup.
+
+### Handle-pinned deletion primitive
+
+`LockedCleanupTree` captures ordinary filesystem handles from the volume root
+through the exact operation tree, disallowing delete/rename sharing and writers
+for captured entries. It refuses reparse points in ancestors and descendants,
+checks the pinned operation marker and bounded tree before mutation, then removes
+children before parents with FileDispositionInfo on those same handles. Every
+removal is checked after handle close. A late child makes directory deletion fail;
+its presence cannot produce a completed receipt or redirect deletion elsewhere.
+Removal requires a persisted CleanupReceipt matching the data directory and exact
+operation/package/version, verifies intent before mutation, and records completion
+only after all captured entries are confirmed absent. Failed/partial work leaves
+intent incomplete. Four actual Windows filesystem tests cover identity locks,
+foreign receipts, late files, existing/late junctions, preserved unrelated files
+and receipt outcomes; all newly owned fixtures are removed and absence asserted.
+
+This is an internal filesystem primitive, not a public cleanup capability. The
+machine/interactive supervisor reservation and installer-job adapter are still
+required before exposing it through IPC or the dashboard. No installed data is
+changed by these tests.
+
+Win32 contracts: [CreateFileW sharing and OPEN_REPARSE_POINT](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-createfilew),
+[SetFileInformationByHandle / FileDispositionInfo](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-setfileinformationbyhandle).
