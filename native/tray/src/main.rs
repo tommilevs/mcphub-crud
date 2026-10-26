@@ -189,14 +189,17 @@ fn main() {
                     });
                 }
             }
-            tauri::WebviewWindowBuilder::new(
+            let window = tauri::WebviewWindowBuilder::new(
                 app,
                 "main",
                 tauri::WebviewUrl::External(format!("http://127.0.0.1:{port}").parse()?),
             )
             .title("MCPHub")
             .inner_size(1280.0, 800.0)
-            .visible(std::env::args().any(|arg| arg == "--open-dashboard"))
+            // Tauri attaches global window listeners after native creation.
+            // Showing during creation lets an early WM_CLOSE destroy the window
+            // before our close-to-tray listener exists.
+            .visible(false)
             .build()?;
             let dashboard = MenuItemBuilder::with_id("dashboard", "Open Dashboard").build(app)?;
             let restart =
@@ -246,6 +249,9 @@ fn main() {
                     _ => {}
                 })
                 .build(app)?;
+            if std::env::args().any(|arg| arg == "--open-dashboard") {
+                window.show()?;
+            }
             Ok(())
         })
         .build(tauri::generate_context!())
@@ -254,7 +260,10 @@ fn main() {
             // The runtime can separately request exit after its last native
             // window closes. Keep the tray alive; app.exit(0) from Exit tray
             // carries an explicit code and must still be honored.
-            if let tauri::RunEvent::ExitRequested { code: None, api, .. } = event {
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = event
+            {
                 api.prevent_exit();
                 if let Some(window) = app.get_webview_window("main") {
                     let _ = window.hide();

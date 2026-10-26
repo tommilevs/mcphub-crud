@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [feat/tool-result-history]
-    paths: ['.github/workflows/windows-installer.yml']
+    paths: ['.github/workflows/windows-installer.yml', 'native/tray/src/main.rs']
 
 permissions:
   contents: read
@@ -44,9 +44,9 @@ jobs:
         run: ./native/build-windows.ps1 -Action bundle
       - name: Verify fresh-install port preflight
         run: ./native/test-installer-preflight-windows.ps1
-      - name: Verify silent full installer and upgrade on disposable Windows
+      - name: Verify installer wizard, tray and upgrade on disposable Windows
         timeout-minutes: 15
-        run: ./native/test-nsis-ci-windows.ps1 -InstallerPath native/target/release/bundle/nsis/MCPHub_1.1.8_x64-setup.exe -CheckTray
+        run: ./native/test-nsis-ci-windows.ps1 -InstallerPath native/target/release/bundle/nsis/MCPHub_1.1.8_x64-setup.exe -CheckWizard -CheckTray
       - uses: actions/upload-artifact@v4
         with:
           name: MCPHub-Windows-tested-installer
