@@ -22,6 +22,8 @@ mod initial_login;
 #[cfg(windows)]
 mod cleanup_path;
 #[cfg(windows)]
+mod cleanup_receipt;
+#[cfg(windows)]
 static INSTALLER_JOBS: std::sync::OnceLock<installer_jobs::InstallerJobs> = std::sync::OnceLock::new();
 #[cfg(windows)]
 static OPTIONS: std::sync::OnceLock<options::Options> = std::sync::OnceLock::new();
