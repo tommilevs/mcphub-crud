@@ -46,9 +46,13 @@ manual reload. It uses the installed runtime binary and a unique direct agent
 pipe, not the production service connection or a full reboot. Temporary agents
 and test binaries were removed; the running production service was untouched.
 
-- Read final installer CI results for `035913b` and `05cde03`; retain source/run
-  identity and inspect acceptance logs before presenting a new installer.
-- Verify Copy in isolated Windows CI and wizard compatibility with the new dialog.
+- Installer `05cde03` run `40303514621`, job `121506877900`, completed successfully;
+  logs confirm the actual copy-button clipboard test, interactive wizard, tray
+  close behavior, bootstrap login, upgrade/data retention and uninstall. Its
+  artifact is `12642007554`; ZIP SHA256 is
+  `5f7cf971ade24f4f4717993d78b798dbd41b9aa275ae7a08444f18dbb741e6a1`.
+  The extracted installer SHA256 is
+  `1ba5642ae5abdbe0cf7b36132cbfb03f1db336810958b14c521daee49fcf193c`.
 - Exercise clicks on real tray Start/Stop controls and the full installed service
   delegation path when the user agent appears after the first connection attempt.
 - Validate a changed Windows logon session separately: reconnect retries do not

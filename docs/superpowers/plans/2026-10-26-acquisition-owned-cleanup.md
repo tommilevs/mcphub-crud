@@ -53,7 +53,7 @@ Cleanup must not reinterpret these records as proof that files were removed.
 
 ## Implementation and verification
 
-- [ ] Add journal migration/repository with owner isolation, atomic claims and
+- [x] Add journal migration/repository with owner isolation, atomic claims and
   completion receipts; PostgreSQL concurrency tests must prove only one worker.
 - [ ] Add native ownership/path/terminal-job guards and durable receipt handling.
   Test wrong identity, active jobs, registry loss, junctions, partial deletion and
@@ -71,3 +71,10 @@ Cleanup must not reinterpret these records as proof that files were removed.
 
 This plan authorizes no deletion on the user's installed system. Development
 fixtures must prove the contract before a cleanup action is offered there.
+
+Journal source `feb6631` passed real PostgreSQL run `40305423287`, job
+`121513215713` (49 tests across six suites, logs read). New tests cover eight
+concurrent claims, owner/FK isolation, step ordering, eligibility exclusions,
+partial review fencing and preservation of the original operation failure.
+The read-only native path preflight remains uncommitted implementation work;
+there is no cleanup actuator or public endpoint yet.
