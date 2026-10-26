@@ -117,7 +117,7 @@ suite('owned acquisition cleanup journal in PostgreSQL',()=>{
     const id=await operation('failed',false,['FIRST_KEY','SECOND_KEY']);
     const pass=async(_identity:unknown,work:()=>Promise<void>)=>work();
     const deleted:string[]=[];
-    const deps={journal,inspect:async()=>({id,verification:'cleanup_preflight',directory:`C:\\data\\acquisitions\\${id}`}),
+    const deps={journal,inspect:async()=>({id,verification:'cleanup_preflight',processExitConfirmed:true,directory:`C:\\data\\acquisitions\\${id}`}),
       drain:async()=>{},withSettings:(target:any,work:()=>Promise<void>)=>withPostgresCleanupSettings(settingsDb,target,work),
       withRuntime:pass,withIndex:(names:readonly string[],work:()=>Promise<void>)=>withCleanupIndexGuard(settingsDb,names,work),withNative:pass,
       // Native effects are fixtures: this test proves coordination and database receipts, not deletion.

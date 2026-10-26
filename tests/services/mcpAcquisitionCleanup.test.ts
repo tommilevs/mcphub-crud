@@ -17,7 +17,7 @@ function fixture(){
     get:jest.fn().mockResolvedValue(null),requireReview:jest.fn().mockResolvedValue(true),
     recordStep:jest.fn(async(_owner:any,_id:any,_token:any,step:string)=>{events.push(step);return true;}),
     recordSecret:jest.fn(async()=>{assertGuarded();return true;})},
-    inspect:jest.fn().mockResolvedValue({id,verification:'cleanup_preflight',directory:`C:\\data\\acquisitions\\${id}`}),
+    inspect:jest.fn().mockResolvedValue({id,verification:'cleanup_preflight',processExitConfirmed:true,directory:`C:\\data\\acquisitions\\${id}`}),
     drain:jest.fn(async()=>{expect(active.size).toBe(0);}),
     withSettings:guard('settings'),withRuntime:guard('runtime'),withIndex:guard('index'),withNative:guard('native'),
     removePackage:jest.fn(async()=>{assertGuarded();events.push('delete-files');
@@ -79,7 +79,13 @@ test('a missing credential acknowledgement cannot become a receipt',async()=>{
   expect(deps.journal.recordSecret).not.toHaveBeenCalled();
 });
 test('an invalid preflight path prevents entry into reservations and native effects',async()=>{
-  const {deps}=fixture();deps.inspect.mockResolvedValue({id,verification:'cleanup_preflight',directory:'C:\\unrelated'});
+  const {deps}=fixture();deps.inspect.mockResolvedValue({id,verification:'cleanup_preflight',processExitConfirmed:true,directory:'C:\\unrelated'});
   expect((await runAcquisitionCleanup('alice',id,deps)).status).toBe('review_required');
   expect(deps.withSettings).not.toHaveBeenCalled();expect(deps.removePackage).not.toHaveBeenCalled();
+});
+test.each([undefined,false])('legacy or negative preflight proof %s never authorizes cleanup',async proof=>{
+  const {deps}=fixture();deps.inspect.mockResolvedValue({id,verification:'cleanup_preflight',
+    processExitConfirmed:proof,directory:`C:\\data\\acquisitions\\${id}`});
+  expect((await runAcquisitionCleanup('alice',id,deps)).status).toBe('review_required');
+  expect(deps.removePackage).not.toHaveBeenCalled();expect(deps.deleteSecret).not.toHaveBeenCalled();
 });

@@ -39,7 +39,7 @@ export async function runAcquisitionCleanup(owner:string,id:string,deps:Acquisit
         ['__proto__','constructor','prototype'].includes(name)))throw new Error('Invalid cleanup manifest');
     const identity=Object.freeze({id,package:manifest.package.name,version:manifest.package.version});
     const inspection:any=await deps.inspect(identity);
-    if(inspection?.id!==id||inspection?.verification!=='cleanup_preflight'||typeof inspection.directory!=='string')
+    if(inspection?.id!==id||inspection?.verification!=='cleanup_preflight'||inspection.processExitConfirmed!==true||typeof inspection.directory!=='string')
       throw new Error('Unconfirmed cleanup identity');
     const target:CleanupReferenceTarget={operationId:id,directory:inspection.directory,
       secretIds:manifest.requiredInputs.map(name=>acquisitionSecretId(owner,id,name))};

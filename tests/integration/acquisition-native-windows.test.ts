@@ -164,7 +164,7 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
       const nativeStatus=await getNativeInstallStatus(operationId);
       if(nativeStatus.processExitConfirmed===true) {
         const preflight=await inspectNativeInstallCleanup(operationId,'mcphub-acquisition-fixture','1.0.0');
-        expect(preflight).toMatchObject({id:operationId,verification:'cleanup_preflight',state:'cancelled'});
+        expect(preflight).toMatchObject({id:operationId,verification:'cleanup_preflight',state:'cancelled',processExitConfirmed:true});
       } else {
         await expect(inspectNativeInstallCleanup(operationId,'mcphub-acquisition-fixture','1.0.0')).rejects.toThrow('terminal');
       }

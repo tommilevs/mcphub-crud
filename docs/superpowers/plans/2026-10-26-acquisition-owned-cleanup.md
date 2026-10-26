@@ -163,3 +163,5 @@ Real PostgreSQL fixtures exercise complete/partial outcomes with actual settings
 and index reservations and journal storage; native effects are explicitly fixtures.
 Native cross-session reservation/deletion adapters remain the next implementation
 boundary. These coordinator tests do not prove real Windows package deletion.
+
+Native cleanup preflight now carries explicit processExitConfirmed. The coordinator refuses missing or false proof, so an older host's weaker preflight cannot authorize effects. Actual destructive adapters remain disabled.

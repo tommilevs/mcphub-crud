@@ -396,7 +396,7 @@ fn serve_named_pipe_client(
                                 let (directory,state)=cleanup_path::inspect_owned_staging(jobs,&data.join("acquisitions"),id,package,version)?;
                                 cleanup_path::assert_no_launch_references(guard.process_specs(),&directory,id)?;
                                 return Ok(serde_json::json!({"id":id,"verification":"cleanup_preflight",
-                                    "state":state["state"],"directory":directory}));
+                                    "state":state["state"],"processExitConfirmed":state["processExitConfirmed"],"directory":directory}));
                             }
                             let runtime = options().runtime_dir.clone().or_else(||
                                 [install.join("resources/runtime"),install.join("runtime")].into_iter()
