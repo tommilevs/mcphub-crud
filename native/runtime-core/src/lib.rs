@@ -103,6 +103,8 @@ pub enum SupervisorError {
     Spawn { id: String, source: std::io::Error },
     #[error("restart limit reached for {0}")]
     RestartLimitReached(String),
+    #[error("failed to confirm process shutdown for {id}: {source}")]
+    Stop { id: String, source: std::io::Error },
 }
 
 struct ManagedProcess {
@@ -267,10 +269,7 @@ impl RuntimeSupervisor {
             }
             // A crashed child may not have been polled yet. Drop the stale
             // process record so a new MCP connection can recover immediately.
-            if let Some(mut process) = self.processes.remove(&spec.id) {
-                let _ = process.child.kill();
-                let _ = process.child.wait();
-            }
+            self.stop(&spec.id)?;
         }
         let id = spec.id.clone();
         self.stopped.remove(&id);
@@ -291,12 +290,24 @@ impl RuntimeSupervisor {
     }
 
     pub fn stop(&mut self, id: &str) -> Result<(), SupervisorError> {
-        let mut process = self
+        let process = self
             .processes
-            .remove(id)
+            .get_mut(id)
             .ok_or_else(|| SupervisorError::NotFound(id.to_owned()))?;
-        let _ = process.child.kill();
-        let _ = process.child.wait();
+        let failure = |source| SupervisorError::Stop {
+            id: id.to_owned(),
+            source,
+        };
+        // Keep ownership/restart metadata until Windows confirms that every
+        // process in this job has exited, not just its root child.
+        #[cfg(windows)]
+        process.job.terminate_and_wait().map_err(failure)?;
+        #[cfg(not(windows))]
+        if process.child.try_wait().map_err(failure)?.is_none() {
+            process.child.kill().map_err(failure)?;
+        }
+        process.child.wait().map_err(failure)?;
+        self.processes.remove(id);
         self.stopped.insert(id.to_owned());
         Ok(())
     }
@@ -305,16 +316,14 @@ impl RuntimeSupervisor {
     /// restart budget. This is the dashboard recovery path for unhealthy or
     /// crash-looping processes.
     pub fn restart(&mut self, id: &str) -> Result<ProcessStatus, SupervisorError> {
-        let mut process = self
+        let spec = self
             .processes
-            .remove(id)
-            .ok_or_else(|| SupervisorError::NotFound(id.to_owned()))?;
-        let _ = process.child.kill();
-        let _ = process.child.wait();
-        self.stopped.remove(id);
-        #[cfg(windows)]
-        process.job.terminate();
-        self.start(process.spec)
+            .get(id)
+            .ok_or_else(|| SupervisorError::NotFound(id.to_owned()))?
+            .spec
+            .clone();
+        self.stop(id)?;
+        self.start(spec)
     }
 
     pub fn poll(&mut self) -> Vec<ProcessStatus> {
@@ -440,9 +449,10 @@ mod windows {
         CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
     };
     use windows_sys::Win32::System::JobObjects::{
-        AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
-        SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
-        JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+        AssignProcessToJobObject, CreateJobObjectW, JobObjectBasicAccountingInformation,
+        JobObjectExtendedLimitInformation, QueryInformationJobObject, SetInformationJobObject,
+        TerminateJobObject, JOBOBJECT_BASIC_ACCOUNTING_INFORMATION,
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     };
     use windows_sys::Win32::System::Threading::{
         OpenProcess, OpenThread, ResumeThread, PROCESS_QUERY_INFORMATION, PROCESS_SET_QUOTA,
@@ -450,11 +460,87 @@ mod windows {
     };
 
     pub struct JobHandle(HANDLE);
+    #[test]
+    fn stop_keeps_ownership_when_job_termination_cannot_be_confirmed() {
+        let mut supervisor = super::RuntimeSupervisor::new();
+        supervisor
+            .start(super::ManagedProcessSpec {
+                server_name: None,
+                id: "unconfirmed-stop".into(),
+                cwd: None,
+                command: "powershell.exe".into(),
+                args: vec![
+                    "-NoProfile".into(),
+                    "-Command".into(),
+                    "Start-Sleep -Seconds 30".into(),
+                ],
+                env: Default::default(),
+                restart_limit: 0,
+                restart_delay_ms: 0,
+                request_timeout_ms: 1000,
+            })
+            .unwrap();
+        // Keep the real job owner alive so even a failing assertion cleans the
+        // fixture. An invalid replacement simulates a failed Windows control call.
+        let owned_job = std::mem::replace(
+            &mut supervisor
+                .processes
+                .get_mut("unconfirmed-stop")
+                .unwrap()
+                .job,
+            JobHandle(std::ptr::null_mut()),
+        );
+        assert!(supervisor.stop("unconfirmed-stop").is_err());
+        assert!(supervisor.restart("unconfirmed-stop").is_err());
+        assert!(supervisor.processes.contains_key("unconfirmed-stop"));
+        assert!(!supervisor.stopped.contains("unconfirmed-stop"));
+        supervisor
+            .processes
+            .get_mut("unconfirmed-stop")
+            .unwrap()
+            .job = owned_job;
+        supervisor.stop("unconfirmed-stop").unwrap();
+        assert!(!supervisor.processes.contains_key("unconfirmed-stop"));
+    }
     // Windows kernel handles are process-wide and the supervisor serializes
     // access through its service mutex before moving this owner between the
     // named-pipe client threads.
     unsafe impl Send for JobHandle {}
     impl JobHandle {
+        pub fn terminate_and_wait(&self) -> io::Result<()> {
+            unsafe {
+                if TerminateJobObject(self.0, 1) == 0 {
+                    return Err(io::Error::last_os_error());
+                }
+            }
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            loop {
+                let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION =
+                    unsafe { std::mem::zeroed() };
+                let result = unsafe {
+                    QueryInformationJobObject(
+                        self.0,
+                        JobObjectBasicAccountingInformation,
+                        &mut accounting as *mut _ as *mut _,
+                        std::mem::size_of_val(&accounting) as u32,
+                        std::ptr::null_mut(),
+                    )
+                };
+                if result == 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                if accounting.ActiveProcesses == 0 {
+                    return Ok(());
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "managed job shutdown is unconfirmed",
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        }
         pub fn terminate(&self) {
             unsafe {
                 TerminateJobObject(self.0, 1);

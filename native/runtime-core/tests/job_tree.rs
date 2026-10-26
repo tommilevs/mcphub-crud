@@ -17,6 +17,9 @@ impl ObservedProcess {
     fn exited(&self) -> bool {
         unsafe { WaitForSingleObject(self.0, 5000) == WAIT_OBJECT_0 }
     }
+    fn exited_now(&self) -> bool {
+        unsafe { WaitForSingleObject(self.0, 0) == WAIT_OBJECT_0 }
+    }
 }
 impl Drop for ObservedProcess {
     fn drop(&mut self) {
@@ -65,11 +68,29 @@ fn fixture_with_exit(exit: bool) -> (RuntimeSupervisor, ObservedProcess, Observe
 fn stop_terminates_the_managed_descendant_tree() {
     let (mut supervisor, parent, leaf) = fixture();
     supervisor.stop("tree").unwrap();
-    assert!(parent.exited(), "managed parent must exit");
     assert!(
-        leaf.exited(),
-        "managed descendant must exit when the job closes"
+        parent.exited_now(),
+        "stop must confirm parent exit before returning"
     );
+    assert!(
+        leaf.exited_now(),
+        "stop must confirm descendant exit before returning"
+    );
+}
+#[test]
+fn restart_confirms_the_old_tree_has_exited_before_returning_a_new_process() {
+    let (mut supervisor, parent, leaf) = fixture();
+    let replacement = supervisor.restart("tree").unwrap();
+    assert!(
+        parent.exited_now(),
+        "restart must confirm the old parent exit"
+    );
+    assert!(
+        leaf.exited_now(),
+        "restart must confirm the old descendant exit"
+    );
+    assert!(replacement.running);
+    supervisor.stop("tree").unwrap();
 }
 #[test]
 fn dropping_supervisor_terminates_parent_and_descendants() {
