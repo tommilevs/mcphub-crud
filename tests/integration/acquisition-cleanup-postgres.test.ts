@@ -7,6 +7,7 @@ import type {MarketServer} from '../../src/types/index.js';
 import {DataSource} from 'typeorm';
 import {Server} from '../../src/db/entities/Server.js';
 import {withPostgresCleanupSettings} from '../../src/services/mcpAcquisitionCleanupSettings.js';
+import {withCleanupIndexGuard} from '../../src/services/mcpAcquisitionCleanupIndex.js';
 
 const suite=process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD?describe:describe.skip;
 suite('owned acquisition cleanup journal in PostgreSQL',()=>{
@@ -24,11 +25,40 @@ suite('owned acquisition cleanup journal in PostgreSQL',()=>{
     settingsDb=new DataSource({type:'postgres',...config,username:config.user,schema,entities:[Server],synchronize:true,
       extra:{options:`-c search_path=${schema},public`}});
     await settingsDb.initialize();
+    await pool.query('CREATE TABLE vector_embeddings (content_type text,content_id text,metadata text)');
+  });
+  test('index adoption blocks work and concurrent embedding writes wait until guarded work completes',async()=>{
+    await pool.query(`INSERT INTO vector_embeddings VALUES ('tool','adopted:ping','{"serverName":"adopted"}')`);
+    const work=jest.fn();
+    await expect(withCleanupIndexGuard(settingsDb,['adopted'],work)).rejects.toThrow('references remain');
+    expect(work).not.toHaveBeenCalled();
+    await pool.query('DELETE FROM vector_embeddings');
+    await pool.query(`INSERT INTO vector_embeddings VALUES ('tool','adopted:legacy','{}')`);
+    await expect(withCleanupIndexGuard(settingsDb,['adopted'],work)).rejects.toThrow('references remain');
+    expect(work).not.toHaveBeenCalled();
+    await pool.query('DELETE FROM vector_embeddings');
+    const writer=await pool.connect();
+    try{
+      await withCleanupIndexGuard(settingsDb,['adopted'],async()=>{
+        await writer.query('BEGIN');await writer.query("SET LOCAL lock_timeout='100ms'");
+        await expect(writer.query(`INSERT INTO vector_embeddings VALUES ('server','adopted','{}')`)).rejects.toMatchObject({code:'55P03'});
+        await writer.query('ROLLBACK');
+      });
+      await writer.query(`INSERT INTO vector_embeddings VALUES ('server','adopted','{}')`);
+      await expect(withCleanupIndexGuard(settingsDb,['adopted'],work)).rejects.toThrow('references remain');
+      expect(work).not.toHaveBeenCalled();
+      await writer.query('DELETE FROM vector_embeddings');
+      await writer.query(`INSERT INTO vector_embeddings VALUES ('tool','malformed','not-json')`);
+      await expect(withCleanupIndexGuard(settingsDb,['adopted'],work)).rejects.toThrow('unconfirmed');
+      expect(work).not.toHaveBeenCalled();
+    }finally{await writer.query('ROLLBACK');await writer.query('DELETE FROM vector_embeddings');writer.release();}
   });
   afterAll(async()=>{
     if(settingsDb?.isInitialized)await settingsDb.destroy();
     if(pool)await pool.end();
-    if(admin){await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);await admin.end();}
+    if(admin){await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+      expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);
+      await admin.end();}
   });
   const operation=async(state='failed',reconciliation=false)=>{
     const manifest=buildAcquisitionManifest({name:'cleanup-fixture',installations:{npm:{type:'npm',command:'npx',

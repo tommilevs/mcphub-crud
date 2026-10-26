@@ -90,5 +90,19 @@ target contents survive. The guard includes operation/secret references and
 canonical absolute paths plus relative arguments under the configured working
 directory. Unreadable or stalled lookups refuse cleanup with static errors.
 
+Native durable receipt primitives are present in `b3a8b2c`, but are not wired to
+deletion. Native launch-reference preflight in `bfe823f` inspects the service
+supervisor under its mutex, including restartable exited definitions. Personal
+and interactive supervisors still require lifecycle/reference coordination.
+
+The index guard holds a SERIALIZABLE transaction and a write-excluding table
+lock throughout guarded work. It checks server metadata and server/tool content
+IDs, including older tool rows without server metadata. Missing/unreadable
+indexes fail closed. The PostgreSQL fixture proves remaining rows block work
+and a concurrent INSERT times out until the guard releases its lock; the owned
+schema is removed and its absence checked. Embedding work must drain before
+acquiring this guard to avoid queue deadlocks.
+
 These are prerequisites. There is still no cleanup actuator or public endpoint;
-live-runtime/index checks, native durable receipts and the coordinator remain.
+complete runtime coordination and the coordinator remain. No guard by itself
+authorizes file or credential deletion.
