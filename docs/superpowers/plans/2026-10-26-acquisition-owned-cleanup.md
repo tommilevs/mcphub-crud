@@ -1,0 +1,73 @@
+# Owned acquisition cleanup
+
+Goal: an administrator can remove an operation's abandoned package and credential
+references after a confirmed cancellation/failure or completed publication
+rollback. Preserve immutable plans, RAW results and lifecycle evidence.
+
+## Existing boundaries
+
+`InstallerJobs::forget` acknowledges a terminal in-memory job; it does not remove
+files. Registry loss currently refuses replay when staging already exists.
+`stageAcquisitionPackage` records a confirmed cancelled native job as `failed`
+with `cancelled_requires_cleanup`. Unknown native outcomes require reconciliation.
+Publication rollback removes registration/runtime/index and retains the package.
+Cleanup must not reinterpret these records as proof that files were removed.
+
+## Contract
+
+1. Use a separate additive cleanup journal keyed by operation ID, bound to owner
+   and manifest digest. Keep the existing operation state enum and failure reason.
+   Store the private cleanup claim, timestamps and per-step receipts; expose only
+   public status. Existing operations without a cleanup row remain readable.
+2. An authenticated dashboard administrator requests owner-scoped cleanup with an
+   empty-body POST `/api/market/acquisition/operations/:id/cleanup`. Callers cannot
+   supply paths, package coordinates, secret IDs, timestamps or commands. Derive
+   them from the immutable manifest and operation identity. A repeated request
+   observes the existing claim; it does not enqueue another worker.
+3. Reject ready/running/authorized operations, unknown native outcomes and pending
+   publication/activation/rollback claims. A published operation needs a completed
+   rollback receipt and verified absence from runtime/index before cleanup.
+4. Lock settings mutations across reference checks and native cleanup. Inspect
+   every server, including disabled and differently named servers, for adoption
+   of the package directory or owned native secret references. Implement the
+   equivalent JSON file and PostgreSQL reservation guards before declaring both
+   settings stores supported. An unsupported store must refuse cleanup explicitly.
+5. A machine-only native cleanup request accepts operation ID and exact package
+   identity, never a caller path. Require a confirmed terminal matching installer
+   job, matching operation marker and no managed process using the package. An
+   agent/stream connection cannot invoke it. Registry loss requires review.
+6. Resolve the configured acquisitions root and exact UUID child, refuse root,
+   siblings, marker mismatch and reparse escapes. Verify the final target before
+   recursive deletion. Serialize cleanup with install/resolve/forget for that
+   operation. Do not follow a junction into unrelated files.
+7. Persist native cleanup intent/receipt outside the directory being removed.
+   If a reply is lost or the service restarts mid-delete, do not infer completion
+   from a missing directory or replay installation. Return recorded completion
+   only when a completed receipt proves it; otherwise require review.
+8. Delete only deterministic credential IDs for this owner/operation/manifest,
+   under the same adoption guard. Journal each confirmed outcome. Mark cleanup
+   complete only after package and credential deletion are confirmed. A partial
+   failure remains visibly incomplete; it must not erase the original failure.
+9. The UI presents what cleanup removes, starts one explicit request, shows
+   progress/review/completion and never claims that RAW results were deleted.
+
+## Implementation and verification
+
+- [ ] Add journal migration/repository with owner isolation, atomic claims and
+  completion receipts; PostgreSQL concurrency tests must prove only one worker.
+- [ ] Add native ownership/path/terminal-job guards and durable receipt handling.
+  Test wrong identity, active jobs, registry loss, junctions, partial deletion and
+  lost responses using owned temporary fixtures only.
+- [ ] Add JSON/PostgreSQL adoption guards and the coordinator. Test settings
+  mutation races, renamed/disabled adoption, runtime/index references and partial
+  secret deletion. Never call destructive phases after a failed prerequisite.
+- [ ] Add authenticated API and dashboard status. Test foreign owners, bearer-only
+  management requests, invalid bodies, duplicate requests and truthful failures.
+- [ ] Extend real Windows npm cancellation acceptance through explicit cleanup;
+  assert the exact owned directory/credential are absent, unrelated fixtures and
+  RAW remain, and repeated execution cannot reinstall the package.
+- [ ] Extend publication rollback acceptance through cleanup and verify the same
+  invariants for both settings stores. Release only with matching evidence.
+
+This plan authorizes no deletion on the user's installed system. Development
+fixtures must prove the contract before a cleanup action is offered there.
