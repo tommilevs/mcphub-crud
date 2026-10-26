@@ -298,21 +298,11 @@ impl RuntimeSupervisor {
 
     /// Normal stop and an exhaustive per-process exit receipt are distinct.
     /// Missing handles never authorize package deletion, even after a successful stop.
-    pub fn stop_with_confirmation(&mut self, id: &str) -> Result<bool, SupervisorError> {
-        #[cfg(windows)]
-        let confirmed = {
-            let process=self.processes.get_mut(id)
-                .ok_or_else(||SupervisorError::NotFound(id.to_owned()))?;
-            process.job.terminate_and_confirm(&process.child)
-                .map_err(|source|SupervisorError::Stop {id:id.to_owned(),source})?
-        };
-        #[cfg(not(windows))]
-        let confirmed=false;
-        self.stop(id)?;
-        Ok(confirmed)
+    pub fn stop(&mut self, id: &str) -> Result<(), SupervisorError> {
+        self.stop_with_confirmation(id).map(|_| ())
     }
 
-    pub fn stop(&mut self, id: &str) -> Result<(), SupervisorError> {
+    pub fn stop_with_confirmation(&mut self, id: &str) -> Result<bool, SupervisorError> {
         let process = self
             .processes
             .get_mut(id)
@@ -321,18 +311,20 @@ impl RuntimeSupervisor {
             id: id.to_owned(),
             source,
         };
-        // Keep ownership/restart metadata until Windows confirms that every
-        // process in this job has exited, not just its root child.
+        // Keep ownership until the observed process handles have signaled.
+        // An incomplete historical inventory remains explicitly unconfirmed.
         #[cfg(windows)]
-        process.job.terminate_and_wait().map_err(failure)?;
+        let confirmed=process.job.terminate_and_confirm(&process.child).map_err(failure)?;
         #[cfg(not(windows))]
         if process.child.try_wait().map_err(failure)?.is_none() {
             process.child.kill().map_err(failure)?;
         }
+        #[cfg(not(windows))]
+        let confirmed=false;
         process.child.wait().map_err(failure)?;
         self.processes.remove(id);
         self.stopped.insert(id.to_owned());
-        Ok(())
+        Ok(confirmed)
     }
 
     /// Stop and immediately spawn the same managed command with a fresh
@@ -535,40 +527,6 @@ mod windows {
     // named-pipe client threads.
     unsafe impl Send for JobHandle {}
     impl JobHandle {
-        pub fn terminate_and_wait(&self) -> io::Result<()> {
-            unsafe {
-                if TerminateJobObject(self.0, 1) == 0 {
-                    return Err(io::Error::last_os_error());
-                }
-            }
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-            loop {
-                let mut accounting: JOBOBJECT_BASIC_ACCOUNTING_INFORMATION =
-                    unsafe { std::mem::zeroed() };
-                let result = unsafe {
-                    QueryInformationJobObject(
-                        self.0,
-                        JobObjectBasicAccountingInformation,
-                        &mut accounting as *mut _ as *mut _,
-                        std::mem::size_of_val(&accounting) as u32,
-                        std::ptr::null_mut(),
-                    )
-                };
-                if result == 0 {
-                    return Err(io::Error::last_os_error());
-                }
-                if accounting.ActiveProcesses == 0 {
-                    return Ok(());
-                }
-                if std::time::Instant::now() >= deadline {
-                    return Err(io::Error::new(
-                        io::ErrorKind::TimedOut,
-                        "managed job shutdown is unconfirmed",
-                    ));
-                }
-                std::thread::sleep(std::time::Duration::from_millis(10));
-            }
-        }
         pub fn terminate_and_confirm(&self, root: &std::process::Child) -> io::Result<bool> {
             use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
             use windows_sys::Win32::System::JobObjects::{

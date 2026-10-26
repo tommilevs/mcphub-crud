@@ -165,3 +165,5 @@ Native cross-session reservation/deletion adapters remain the next implementatio
 boundary. These coordinator tests do not prove real Windows package deletion.
 
 Native cleanup preflight now carries explicit processExitConfirmed. The coordinator refuses missing or false proof, so an older host's weaker preflight cannot authorize effects. Actual destructive adapters remain disabled.
+
+Installer CI a68d4da exposed the same signal race in ordinary RuntimeSupervisor::stop (job_tree descendant handle not signaled on return). All stop/restart callers now share stop_with_confirmation's retained-handle wait; the weaker accounting-only helper was removed. Missing historical inventory still returns false proof rather than authorizing cleanup.
