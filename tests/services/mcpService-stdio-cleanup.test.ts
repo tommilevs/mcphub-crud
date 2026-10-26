@@ -164,6 +164,7 @@ const installProcessKillMock = (): void => {
 // Import after mocks
 import {
   addServer,
+  closeServer,
   removeServer,
   setServerInfosForTest,
   toggleServerStatus,
@@ -205,6 +206,36 @@ describe('orphan stdio process cleanup (issue #920)', () => {
   });
 
   describe('removeServer', () => {
+    it('awaits asynchronous client and transport shutdown when explicitly closed', async () => {
+      let finishClient!: () => void;
+      let finishTransport!: () => void;
+      mockClientClose.mockReturnValueOnce(new Promise<void>((resolve) => { finishClient = resolve; }));
+      mockStdioTransportClose.mockReturnValueOnce(new Promise<void>((resolve) => { finishTransport = resolve; }));
+      const info = makeStdioServerInfo('closing');
+      info.transport = { close: mockStdioTransportClose } as any;
+      setServerInfosForTest([info]);
+      let finished = false;
+      const closing = Promise.resolve(closeServer('closing')).then(() => { finished = true; });
+      await Promise.resolve();
+      expect(finished).toBe(false);
+      finishClient();
+      await Promise.resolve();
+      expect(finished).toBe(false);
+      finishTransport();
+      await closing;
+      expect(finished).toBe(true);
+    });
+
+    it('observes rejected asynchronous close operations without an unhandled rejection', async () => {
+      mockClientClose.mockRejectedValueOnce(new Error('synthetic client close failure'));
+      mockStdioTransportClose.mockRejectedValueOnce(new Error('synthetic transport close failure'));
+      const info = makeStdioServerInfo('close-failure');
+      info.transport = { close: mockStdioTransportClose } as any;
+      setServerInfosForTest([info]);
+      await expect(Promise.resolve(closeServer('close-failure'))).resolves.toBeUndefined();
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+
     it('closes the client and transport when a server is deleted', async () => {
       const info = makeStdioServerInfo('orphan-server', 9999);
       setServerInfosForTest([info]);

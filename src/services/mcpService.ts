@@ -3204,7 +3204,10 @@ const clearIdleShutdown = (serverInfo: ServerInfo): void => {
   }
 };
 
-const closeServerRuntime = (serverInfo: ServerInfo): void => {
+// Completion covers client/transport close attempts, not proof of process-tree
+// exit. Cleanup must still independently verify native process ownership/state.
+const closeServerRuntime = (serverInfo: ServerInfo): Promise<void> => {
+  const pendingCloses: Promise<void>[] = [];
   clearIdleShutdown(serverInfo);
   if (serverInfo.keepAliveIntervalId) {
     clearInterval(serverInfo.keepAliveIntervalId);
@@ -3221,7 +3224,9 @@ const closeServerRuntime = (serverInfo: ServerInfo): void => {
 
   if (serverInfo.client) {
     try {
-      serverInfo.client.close();
+      pendingCloses.push(Promise.resolve(serverInfo.client.close()).catch(() => {
+        logger.warn('Error closing MCP client during runtime shutdown');
+      }));
     } catch {
       logger.warn('Error closing MCP client during runtime shutdown');
     }
@@ -3230,7 +3235,9 @@ const closeServerRuntime = (serverInfo: ServerInfo): void => {
 
   if (serverInfo.transport) {
     try {
-      serverInfo.transport.close();
+      pendingCloses.push(Promise.resolve(serverInfo.transport.close()).catch(() => {
+        logger.warn('Error closing MCP transport during runtime shutdown');
+      }));
     } catch {
       logger.warn('Error closing MCP transport during runtime shutdown');
     }
@@ -3241,7 +3248,9 @@ const closeServerRuntime = (serverInfo: ServerInfo): void => {
     killStdioProcessTree(serverInfo.name, stdioPid);
   }
 
-  logger.log('Closed MCP server client and transport');
+  return Promise.all(pendingCloses).then(() => {
+    logger.log('Finished MCP client and transport shutdown attempts');
+  });
 };
 
 // Close server client and transport (keeps the entry in serverInfos; the next
@@ -3250,8 +3259,9 @@ export function closeServer(name: string) {
   principalRuntimes.invalidate({ serverName: name });
   const serverInfo = serverInfos.find((serverInfo) => serverInfo.name === name);
   if (serverInfo) {
-    closeServerRuntime(serverInfo);
+    return closeServerRuntime(serverInfo);
   }
+  return Promise.resolve();
 }
 
 // ---------------------------------------------------------------------------
