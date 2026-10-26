@@ -48,7 +48,7 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
       try { return await inspect(...args); }
       catch (error) {
         // Entire harness is synthetic. Keep diagnostics here, never in production logs.
-        console.error('Synthetic acquisition inspection failed:', error instanceof Error ? error.message : 'unknown');
+        process.stderr.write(`Synthetic acquisition inspection failed: ${error instanceof Error ? error.message : 'unknown'}\n`);
         throw error;
       }
     });
@@ -60,7 +60,7 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     pool = new Pool({ ...config, options: `-c search_path=${schema},public` });
     mockAcquisitionDb = { isInitialized: true, query: async (sql: string, args?: any[]) => {
       try { return (await pool.query(sql, args)).rows; }
-      catch (error: any) { console.error('Synthetic database failure:', error.code, error.message); throw error; }
+      catch (error: any) { process.stderr.write(`Synthetic database failure: ${error.code} ${error.message}\n`); throw error; }
     } };
     await ensureMcpAcquisitionSchema(mockAcquisitionDb);
     await ensureToolResultHistorySchema(mockAcquisitionDb);
@@ -144,8 +144,8 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
       await new Promise(resolve => setTimeout(resolve, 250));
     } while (Date.now() < deadline);
     if (observed.state !== 'ready') {
-      console.error('Synthetic acquisition phase:', JSON.stringify(observed));
-      console.error('Synthetic probe journal:', (await pool.query('SELECT probe_claim_id,probe_result_id FROM mcp_acquisition_operations WHERE operation_id=$1', [id])).rows);
+      process.stderr.write(`Synthetic acquisition phase: ${JSON.stringify(observed)}\n`);
+      process.stderr.write(`Synthetic probe journal: ${JSON.stringify((await pool.query('SELECT probe_claim_id,probe_result_id FROM mcp_acquisition_operations WHERE operation_id=$1', [id])).rows)}\n`);
     }
     expect(observed).toMatchObject({ state: 'ready', verification: 'functional', execution_started: true, requires_reconciliation: false });
     await request(app).get(endpoint).set('x-auth-token', bob).expect(404);
