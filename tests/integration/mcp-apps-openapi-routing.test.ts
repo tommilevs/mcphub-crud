@@ -74,6 +74,7 @@ const alice = 'alice@example.com';
 const bob = 'bob@example.com';
 const clients: Client[] = [];
 const restCalls: string[] = [];
+let upstreamToolCalls = 0;
 let app: express.Express;
 let server: HttpServer;
 let baseUrl: string;
@@ -130,11 +131,14 @@ beforeAll(async () => {
     upstream.setRequestHandler('tools/list', async () => ({
       tools: [{ name: 'identity', inputSchema: { type: 'object' } }],
     }));
-    upstream.setRequestHandler('tools/call', async () => ({
-      content: [
-        { type: 'text', text: JSON.stringify({ credential: req.headers['x-personal-key'] }) },
-      ],
-    }));
+    upstream.setRequestHandler('tools/call', async () => {
+      upstreamToolCalls++;
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify({ credential: req.headers['x-personal-key'] }) },
+        ],
+      };
+    });
     const transport = new NodeStreamableHTTPServerTransport({ sessionIdGenerator: undefined });
     res.on('close', () => {
       void transport.close();
@@ -282,6 +286,61 @@ const connect = async (username: string, route = '') => {
 };
 
 const postgresTest=process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD?test:test.skip;
+postgresTest('anonymous MCP sessions retrieve exact own RAW while other sessions cannot read or pin it',async()=>{
+  const schema=`history_anon_${randomBytes(12).toString('hex')}`;
+  const config={host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST??'127.0.0.1',port:Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT??5432),
+    user:process.env.MCPHUB_ATTRIBUTION_TEST_USER,password:process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD,
+    database:process.env.MCPHUB_ATTRIBUTION_TEST_DB??'postgres',connectionTimeoutMillis:5000};
+  const admin=new PgClient(config);let pool:Pool|undefined;
+  const settingsPath=process.env.MCPHUB_SETTING_PATH!,original=fs.readFileSync(settingsPath);
+  const owned:Client[]=[],connections:StreamableHTTPClientTransport[]=[];
+  try{
+    await admin.connect();await admin.query(`CREATE SCHEMA ${schema}`);
+    pool=new Pool({...config,options:`-c search_path=${schema},public`});
+    const db={isInitialized:true,query:async(sql:string,parameters?:unknown[])=>(await pool!.query(sql,parameters)).rows};
+    await ensureAttributionContextSchema(db);await ensureToolResultHistorySchema(db);mockAttributionDb=db;
+    const settings=JSON.parse(original.toString());
+    settings.systemConfig.routing.enableBearerAuth=false;
+    settings.systemConfig.smartRouting={enabled:true};
+    fs.writeFileSync(settingsPath,JSON.stringify(settings));clearSettingsCache();
+    for(let i=0;i<2;i++){
+      const client=new Client({name:'anonymous-history-e2e',version:'1'});
+      const transport=new StreamableHTTPClientTransport(new URL(`${baseUrl}/mcp/$smart`));
+      owned.push(client);connections.push(transport);await client.connect(transport);
+    }
+    const before=upstreamToolCalls;
+    const called:any=await owned[0].callTool({name:'call_tool',arguments:{toolName:`shared${getNameSeparator()}identity`,arguments:{}}});
+    expect(called.isError).not.toBe(true);
+    const id=called._meta?.['mcphub/result_id'];expect(id).toEqual(expect.any(String));
+    const saved=(await pool.query('SELECT raw,raw_sha256,session_id,username,key_id FROM tool_results WHERE result_id=$1',[id])).rows[0];
+    expect(saved.session_id).toBe(connections[0].sessionId);expect(saved.username).toBeNull();expect(saved.key_id).toBeNull();
+    const read:any=await owned[0].callTool({name:'get_tool_result',arguments:{result_id:id}});
+    expect(read.isError).not.toBe(true);expect(read.content[0].text).toBe(saved.raw);
+    const range:any=await owned[0].callTool({name:'get_tool_result_range',arguments:{result_id:id,start:0,end:8}});
+    const bytes=JSON.parse(range.content[0].text);
+    expect(Buffer.from(bytes.data,'base64')).toEqual(Buffer.from(saved.raw).subarray(0,8));
+    expect(bytes.raw_sha256).toBe(createHash('sha256').update(saved.raw).digest('hex'));
+    for(const name of ['get_tool_result','pin_tool_result']){
+      const denied:any=await owned[1].callTool({name,arguments:{result_id:id}});
+      expect(denied.isError).toBe(true);expect(denied.content[0].text).not.toBe(saved.raw);
+    }
+    expect(upstreamToolCalls).toBe(before+1);
+    expect((await pool.query('SELECT raw,raw_sha256 FROM tool_results WHERE result_id=$1',[id])).rows[0]).toEqual({raw:saved.raw,raw_sha256:saved.raw_sha256});
+    await connections[0].terminateSession();
+    const replay=await request(app).post('/mcp/$smart').set('mcp-session-id',saved.session_id)
+      .set('Accept','application/json, text/event-stream').send({jsonrpc:'2.0',id:99,method:'tools/call',params:{name:'get_tool_result',arguments:{result_id:id}}});
+    expect(replay.status).not.toBe(200);
+    const denied:any=await owned[1].callTool({name:'get_tool_result',arguments:{result_id:id}});
+    expect(denied.isError).toBe(true);
+  }finally{
+    await Promise.all(owned.map(client=>client.close()));mockAttributionDb=undefined;
+    fs.writeFileSync(settingsPath,original);clearSettingsCache();
+    if(pool)await pool.end();
+    await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+    expect((await admin.query('SELECT 1 FROM pg_namespace WHERE nspname=$1',[schema])).rowCount).toBe(0);
+    await admin.end();
+  }
+});
 postgresTest('production MCP auth binds signed adapter evidence to the authenticated bearer owner',async()=>{
   const schema=`mcp_auth_attribution_${randomBytes(12).toString('hex')}`;
   const config={host:process.env.MCPHUB_ATTRIBUTION_TEST_HOST??'127.0.0.1',port:Number(process.env.MCPHUB_ATTRIBUTION_TEST_PORT??5432),

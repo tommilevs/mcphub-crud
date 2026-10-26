@@ -1,11 +1,9 @@
-import { getAppDataSource } from '../db/connection.js';
 import {rememberSavedResult} from './toolResultRetrieval.js';
 import {originalResultWindows} from './originalResultWindows.js';
 import { observeLoopGuard } from './loopGuardCoordinator.js';
-import { ToolResultRepositoryDb } from '../db/repositories/ToolResultRepository.js';
 import type { ToolResultStatus } from '../types/toolResult.js';
 import { logger } from '../utils/logger.js';
-import { ToolResultHistoryService, extractToolResultText } from './toolResultHistoryService.js';
+import { ToolResultHistoryService, extractToolResultText, type ToolResultRepository } from './toolResultHistoryService.js';
 import { getToolResultRepository } from './toolResultHistoryRegistry.js';
 import { generateEmbedding } from './vectorSearchService.js';
 import { recordToolResultIndexAttempt, recordToolResultIndexFailure } from './toolResultMetricsService.js';
@@ -145,6 +143,9 @@ export class ToolResultHistoryCoordinator {
     try {
       const history = this.getHistory();
       if (!history) return result;
+      // Capture the repository before awaits: a configuration change may replace
+      // the active data source while this result is being persisted.
+      const indexingRepository = getToolResultRepository();
       const saved = await history.capture({
         ...metadata,
         result,
@@ -160,7 +161,7 @@ export class ToolResultHistoryCoordinator {
           .filter(Boolean)
           .join('\n');
         void (async () => {
-          const repository = getToolResultRepository();
+          const repository = indexingRepository;
           if (!repository) return;
           const chunks = chunkToolResultText(searchable,TOOL_RESULT_CHUNK_CHARS,searchable.length-saved.rawText!.length);
           if (repository.indexChunks) {
@@ -213,13 +214,15 @@ export class ToolResultHistoryCoordinator {
 }
 
 let historyService: ToolResultHistoryService | undefined;
+let historyRepository: ToolResultRepository | undefined;
 
 const getDatabaseHistoryService = (): ToolResultHistoryService | undefined => {
   try {
-    if (!historyService) {
-      historyService = new ToolResultHistoryService(
-        new ToolResultRepositoryDb(getAppDataSource()),
-      );
+    const repository = getToolResultRepository();
+    if (!repository) return undefined;
+    if (!historyService || historyRepository !== repository) {
+      historyService = new ToolResultHistoryService(repository);
+      historyRepository = repository;
     }
     return historyService;
   } catch {
