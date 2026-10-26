@@ -28,7 +28,7 @@ export class PrincipalRuntimeService {
 
   constructor(
     private readonly connect: (name: string, config: ServerConfig) => Promise<ServerInfo>,
-    private readonly close: (info: ServerInfo) => void,
+    private readonly close: (info: ServerInfo) => void | Promise<void>,
   ) {
     credentialBindingEvents.on('invalidate', (filter) => this.invalidate(filter));
   }
@@ -117,9 +117,12 @@ export class PrincipalRuntimeService {
             created.info = info;
             return info;
           } catch (error) {
-            if (info) this.close(info);
-            if (this.entries.get(key) === created) this.entries.delete(key);
-            created.valid = false;
+            try {
+              if (info) await this.close(info);
+            } finally {
+              if (this.entries.get(key) === created) this.entries.delete(key);
+              created.valid = false;
+            }
             throw error;
           }
         })();

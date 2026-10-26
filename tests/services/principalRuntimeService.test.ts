@@ -29,9 +29,44 @@ const info = (): ServerInfo => ({
   createTime: Date.now(),
 });
 const alice = { username: 'alice@example.com' };
+test('failed startup verification waits for asynchronous child shutdown', async () => {
+  let finishClose!: () => void;
+  const closing = new Promise<void>((resolve) => { finishClose = resolve; });
+  const close = jest.fn(() => closing);
+  const pool = new PrincipalRuntimeService(async () => {
+    mockRevision = 'changed-during-connect';
+    return info();
+  }, close);
+  let settled = false;
+  const acquisition = pool.acquire('shared', alice);
+  const rejected = expect(acquisition).rejects.toThrow('changed');
+  void acquisition.catch(() => { settled = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  expect(close).toHaveBeenCalledTimes(1);
+  expect(settled).toBe(false);
+  finishClose();
+  await rejected;
+  expect(settled).toBe(true);
+});
+
 beforeEach(() => {
   mockRevision = 'first';
   mockDefinition.args = [];
+});
+
+test('a rejected asynchronous shutdown is observed and the failed entry is evicted', async () => {
+  const failure = new Error('shutdown unconfirmed');
+  const close = jest.fn().mockRejectedValueOnce(failure).mockResolvedValue(undefined);
+  const connect = jest.fn(async () => {
+    mockRevision = 'rotated';
+    return info();
+  });
+  const pool = new PrincipalRuntimeService(connect, close);
+  await expect(pool.acquire('shared', alice)).rejects.toBe(failure);
+  const lease = await pool.acquire('shared', alice);
+  expect(connect).toHaveBeenCalledTimes(2);
+  lease.release();
+  pool.invalidate();
 });
 afterEach(() => {
   credentialBindingEvents.removeAllListeners();
