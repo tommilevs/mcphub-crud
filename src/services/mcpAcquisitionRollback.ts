@@ -14,14 +14,21 @@ export async function cleanupAcquisitionRuntime(receipt: PublicationReceipt) {
   const runtime = await import('./mcpService.js');
   const info = runtime.getServerByName(receipt.serverName);
   if (info) {
-    if (info.config?.owner !== receipt.server.owner || info.config?.options?.acquisitionOperationId !== receipt.operationId) {
-      throw new Error('Runtime ownership changed; rollback requires reconciliation');
-    }
+    const assertOwnership = () => {
+      if (runtime.getServerByName(receipt.serverName) !== info ||
+        info.config?.owner !== receipt.server.owner || info.config?.options?.acquisitionOperationId !== receipt.operationId) {
+        throw new Error('Runtime ownership changed; rollback requires reconciliation');
+      }
+    };
+    assertOwnership();
     if (info.spawningPromise) await info.spawningPromise;
+    assertOwnership();
     if (info.activeToolCalls) throw new Error('Acquired runtime still has active tool calls');
     await info.transport?.close();
+    assertOwnership();
     await info.client?.close();
-    runtime.closeServer(receipt.serverName);
+    assertOwnership();
+    await runtime.closeServer(receipt.serverName);
   }
   await runtime.notifyToolChanged(receipt.serverName);
   if (runtime.getServerByName(receipt.serverName)) throw new Error('Removed server remains in the runtime catalog');
