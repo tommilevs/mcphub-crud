@@ -204,12 +204,14 @@ fn main() {
             let dashboard = MenuItemBuilder::with_id("dashboard", "Open Dashboard").build(app)?;
             let restart =
                 MenuItemBuilder::with_id("restart", "Restart MCPHub service").build(app)?;
+            let start = MenuItemBuilder::with_id("start", "Start MCPHub service").build(app)?;
+            let stop = MenuItemBuilder::with_id("stop", "Stop MCPHub service").build(app)?;
             let autostart = CheckMenuItemBuilder::with_id("autostart", "Start MCPHub with Windows")
                 .checked(tray_autostart_enabled())
                 .build(app)?;
             let quit = MenuItemBuilder::with_id("quit", "Exit tray").build(app)?;
             let menu = MenuBuilder::new(app)
-                .items(&[&dashboard, &restart, &autostart, &quit])
+                .items(&[&dashboard, &start, &stop, &restart, &autostart, &quit])
                 .build()?;
             TrayIconBuilder::new()
                 .icon(
@@ -221,20 +223,25 @@ fn main() {
                 .menu(&menu)
                 .on_menu_event(move |app, event| match event.id().as_ref() {
                     "dashboard" => open_dashboard(app, port),
-                    "restart" => {
+                    action @ ("start" | "stop" | "restart") => {
                         #[cfg(windows)]
                         {
-                            let item = restart.clone();
-                            let _ = item.set_enabled(false);
-                            let _ = item.set_text("Restarting MCPHub service...");
+                            let (operation, item, label) = match action {
+                                "start" => (gateway_start::ServiceAction::Start, start.clone(), "Start MCPHub service"),
+                                "stop" => (gateway_start::ServiceAction::Stop, stop.clone(), "Stop MCPHub service"),
+                                _ => (gateway_start::ServiceAction::Restart, restart.clone(), "Restart MCPHub service"),
+                            };
+                            let controls = [start.clone(), stop.clone(), restart.clone()];
+                            for control in &controls { let _ = control.set_enabled(false); }
+                            let _ = item.set_text("Changing MCPHub service state...");
                             std::thread::spawn(move || {
-                                let label = if gateway_start::restart_service("MCPHub").is_ok() {
-                                    "Restart MCPHub service"
+                                let label = if gateway_start::control_service("MCPHub", operation).is_ok() {
+                                    label.to_owned()
                                 } else {
-                                    "Restart failed — try again"
+                                    format!("{label} failed — try again")
                                 };
-                                let _ = item.set_text(label);
-                                let _ = item.set_enabled(true);
+                                let _ = item.set_text(&label);
+                                for control in &controls { let _ = control.set_enabled(true); }
                             });
                         }
                     }

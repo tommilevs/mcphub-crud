@@ -2,6 +2,7 @@ import { SSEClientTransport, StreamableHTTPClientTransport } from '../clients/mc
 import { ServerInfo, ServerConfig } from '../types/index.js';
 import { formatErrorForLogging } from '../utils/serialization.js';
 import { logger } from '../utils/logger.js';
+import { NativeRuntimeTransport } from './nativeRuntimeTransport.js';
 
 export interface KeepAliveOptions {
   enabled?: boolean;
@@ -21,11 +22,15 @@ export const setupClientKeepAlive = async (
   // Only set up keep-alive for SSE or Streamable HTTP client transports
   const isSSE = serverInfo.transport instanceof SSEClientTransport;
   const isStreamableHttp = serverInfo.transport instanceof StreamableHTTPClientTransport;
-  if (!isSSE && !isStreamableHttp) {
+  // SCM starts before logon. Retry the explicit user-session binding when its
+  // native agent appears; never silently move a process to another user/session.
+  const interactiveNative = serverInfo.transport instanceof NativeRuntimeTransport &&
+    serverConfig.options?.nativeExecution?.kind === 'interactive' && !serverConfig.startOnDemand;
+  if (!isSSE && !isStreamableHttp && !interactiveNative) {
     return;
   }
 
-  const enabled = serverConfig.enableKeepAlive === true;
+  const enabled = interactiveNative || serverConfig.enableKeepAlive === true;
   if (!enabled) {
     // Ensure any previous timer is cleared
     if (serverInfo.keepAliveIntervalId) {
@@ -41,7 +46,7 @@ export const setupClientKeepAlive = async (
   }
 
   // Default interval: 60 seconds
-  const interval = serverConfig.keepAliveInterval || 60000;
+  const interval = interactiveNative ? 15000 : serverConfig.keepAliveInterval || 60000;
   let isChecking = false;
 
   const isHealthCheckCurrent = (activeClient: NonNullable<ServerInfo['client']>): boolean =>
@@ -87,7 +92,7 @@ export const setupClientKeepAlive = async (
       return;
     }
 
-    if (!activeClient) {
+    if (!activeClient || interactiveNative) {
       return;
     }
 

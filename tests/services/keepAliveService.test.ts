@@ -1,6 +1,7 @@
 import { SSEClientTransport, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
 import { setupClientKeepAlive } from '../../src/services/keepAliveService.js';
 import { ServerConfig, ServerInfo } from '../../src/types/index.js';
+import { NativeRuntimeTransport } from '../../src/services/nativeRuntimeTransport.js';
 
 const makeServerInfo = (
   transport: ServerInfo['transport'],
@@ -35,6 +36,25 @@ const createDeferred = <T>() => {
 };
 
 describe('setupClientKeepAlive', () => {
+  it('retries an unavailable interactive native agent without pinging connected stdio', async () => {
+    jest.useFakeTimers();
+    const ping = jest.fn();
+    const serverInfo = makeServerInfo(new NativeRuntimeTransport({ id: 'fixture', command: 'fixture.exe', args: [], env: {} }), ping, 'disconnected');
+    const pending = createDeferred<void>();
+    const reconnectServer = jest.fn().mockReturnValue(pending.promise);
+    await setupClientKeepAlive(serverInfo, { type: 'stdio', command: 'fixture.exe',
+      options: { nativeExecution: { kind: 'interactive', sessionId: 2 } } }, { reconnectServer });
+    expect(serverInfo.keepAliveIntervalId).toBeDefined();
+    await jest.advanceTimersByTimeAsync(60000);
+    expect(reconnectServer).toHaveBeenCalledTimes(1);
+    pending.resolve(); await Promise.resolve();
+    serverInfo.status = 'connected';
+    await jest.advanceTimersByTimeAsync(15000);
+    expect(ping).not.toHaveBeenCalled();
+    serverInfo.enabled = false; serverInfo.status = 'disconnected';
+    await jest.advanceTimersByTimeAsync(15000);
+    expect(reconnectServer).toHaveBeenCalledTimes(1);
+  });
   afterEach(() => {
     jest.useRealTimers();
   });

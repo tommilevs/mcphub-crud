@@ -22,7 +22,11 @@ pub fn background_command(program: impl AsRef<std::ffi::OsStr>) -> std::process:
 }
 
 #[cfg(windows)]
-pub fn restart_service(name: &str) -> Result<(), String> {
+#[derive(Clone, Copy)]
+pub enum ServiceAction { Start, Stop, Restart }
+
+#[cfg(windows)]
+fn service_action_script(name: &str, action: ServiceAction) -> Result<String, String> {
     if name.is_empty()
         || name.len() > 128
         || !name
@@ -31,10 +35,20 @@ pub fn restart_service(name: &str) -> Result<(), String> {
     {
         return Err("Invalid service name".into());
     }
+    let stop = "if($s.Status -ne 'Stopped'){$s.Stop(); $s.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))};";
+    let start = "if($s.Status -ne 'Running'){$s.Start(); $s.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))};";
+    let transition = match action {
+        ServiceAction::Start => start.to_owned(),
+        ServiceAction::Stop => stop.to_owned(),
+        ServiceAction::Restart => format!("{stop} {start}"),
+    };
+    Ok(format!("$ErrorActionPreference='Stop'; $s=Get-Service -Name '{name}'; try{{{transition}}}finally{{$s.Dispose()}}"))
+}
+
+#[cfg(windows)]
+pub fn control_service(name: &str, action: ServiceAction) -> Result<(), String> {
+    let script = service_action_script(name, action)?;
     let system = std::env::var_os("SystemRoot").unwrap_or_else(|| "C:\\Windows".into());
-    let script = format!(
-        r#"$ErrorActionPreference='Stop'; $s=Get-Service -Name '{name}'; if($s.Status -ne 'Stopped'){{$s.Stop(); $s.WaitForStatus('Stopped',[TimeSpan]::FromSeconds(30))}}; $s.Start(); $s.WaitForStatus('Running',[TimeSpan]::FromSeconds(30))"#
-    );
     let output = background_command(
         std::path::PathBuf::from(system).join("System32/WindowsPowerShell/v1.0/powershell.exe"),
     )
@@ -44,7 +58,7 @@ pub fn restart_service(name: &str) -> Result<(), String> {
     if output.status.success() {
         Ok(())
     } else {
-        Err("Windows could not restart MCPHub service".into())
+        Err("Windows could not change MCPHub service state".into())
     }
 }
 
@@ -64,9 +78,26 @@ pub fn service_absent(name: &str) -> bool {
 #[cfg(all(test, windows))]
 mod tests {
     #[test]
+    fn service_actions_have_distinct_idempotent_transitions() {
+        use super::{service_action_script, ServiceAction};
+        let start = service_action_script("MCPHub", ServiceAction::Start).unwrap();
+        assert!(start.contains("$s.Start()"));
+        assert!(!start.contains("$s.Stop()"));
+        let stop = service_action_script("MCPHub", ServiceAction::Stop).unwrap();
+        assert!(stop.contains("$s.Stop()"));
+        assert!(!stop.contains("$s.Start()"));
+        let restart = service_action_script("MCPHub", ServiceAction::Restart).unwrap();
+        assert!(restart.find("$s.Stop()").unwrap() < restart.find("$s.Start()").unwrap());
+        assert!(stop.contains("WaitForStatus('Stopped'"));
+        assert!(start.contains("WaitForStatus('Running'"));
+        for name in ["", "MCPHub';exit", "../other"] {
+            assert!(service_action_script(name, ServiceAction::Stop).is_err());
+        }
+    }
+    #[test]
     fn restarts_an_explicit_test_service_and_waits_for_running() {
         if let Ok(name) = std::env::var("MCPHUB_RESTART_TEST_SERVICE") {
-            super::restart_service(&name).unwrap();
+            super::control_service(&name, super::ServiceAction::Restart).unwrap();
         }
     }
     #[test]
