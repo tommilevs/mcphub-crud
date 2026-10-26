@@ -38,6 +38,9 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
   const prefix = '/api/market/acquisition';
   let admin: PgClient, pool: Pool, registry: http.Server, app: express.Express;
   let id: string | undefined;
+  let holdRegistry = false;
+  let registryReached: (() => void) | undefined;
+  const heldResponses = new Set<http.ServerResponse>();
   const original = { settings: process.env.MCPHUB_SETTING_PATH, useDb: process.env.USE_DB,
     native: process.env.MCPHUB_NATIVE_RUNTIME_ENABLED, pipe: process.env.MCPHUB_NATIVE_PIPE };
   beforeAll(async () => {
@@ -84,6 +87,12 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     registry = http.createServer((req, res) => {
       if (req.url === '/fixture.tgz') { res.setHeader('Content-Type', 'application/octet-stream'); res.end(tarball); return; }
       if (req.url === '/mcphub-acquisition-fixture') {
+        if (holdRegistry) {
+          heldResponses.add(res);
+          res.once('close', () => heldResponses.delete(res));
+          registryReached?.();
+          return;
+        }
         res.setHeader('Content-Type', 'application/json');
         res.end(JSON.stringify({ name: 'mcphub-acquisition-fixture', 'dist-tags': { latest: '1.0.0' }, versions: {
           '1.0.0': { name: 'mcphub-acquisition-fixture', version: '1.0.0',
@@ -110,6 +119,7 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
       await deleteNativeRuntimeSecret(`acq-${createHash('sha256').update(`alice\0${id}\0FIXTURE_KEY`).digest('hex')}`);
       await forgetNativeInstall(id);
     }
+    for (const response of heldResponses) response.destroy();
     if (registry) await new Promise<void>(resolve => registry.close(() => resolve()));
     if (pool) await pool.end();
     if (admin) { await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`); await admin.end(); }
@@ -119,6 +129,50 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     }
     clearSettingsCache(); JsonFileDaoFactory.getInstance().resetInstances();
   }, 30000);
+
+  test('owner cancellation stops an in-flight native npm job without publishing or replaying it', async () => {
+    const token = createUserToken('alice', true);
+    const plan = (await request(app).post(`${prefix}/plans`).set('x-auth-token', token)
+      .send({ serverName: 'native-acquisition-fixture', version: '1.0.0', targetGroup: 'fixture-group' }).expect(201)).body.data;
+    const operationId = (await request(app).post(`${prefix}/plans/${plan.plan_id}/authorize`).set('x-auth-token', token)
+      .send({ digest: plan.manifest_digest, idempotencyKey: randomUUID() }).expect(200)).body.data.operation_id;
+    const endpoint = `${prefix}/operations/${operationId}`;
+    const reached = new Promise<void>(resolve => { registryReached = resolve; });
+    holdRegistry = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await request(app).post(`${endpoint}/execute`).set('x-auth-token', token)
+        .send({ credentials: { FIXTURE_KEY: 'synthetic-cancel-only' } }).expect(202);
+      await Promise.race([reached, new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Native npm did not reach the held registry')), 30000);
+      })]);
+      clearTimeout(timer);
+      const staging = (await request(app).get(endpoint).set('x-auth-token', token).expect(200)).body.data;
+      expect(staging.state).toBe('staging');
+      await request(app).post(`${endpoint}/cancel`).set('x-auth-token', createUserToken('bob', true)).expect(404);
+      await request(app).post(`${endpoint}/cancel`).set('x-auth-token', token).expect(200);
+      const deadline = Date.now() + 20000;
+      let observed: any;
+      do {
+        observed = (await request(app).get(endpoint).set('x-auth-token', token).expect(200)).body.data;
+        if (observed.state === 'failed' || observed.requires_reconciliation) break;
+        await new Promise(resolve => setTimeout(resolve, 100));
+      } while (Date.now() < deadline);
+      expect(observed).toMatchObject({ state: 'failed', cancel_requested: true,
+        failure_code: 'cancelled_requires_cleanup', requires_reconciliation: false });
+      expect(getServerByName('native-acquisition-fixture')).toBeUndefined();
+      expect(JSON.parse(fs.readFileSync(process.env.MCPHUB_SETTING_PATH!, 'utf8')).mcpServers).toEqual({});
+      // Known stopped work retains its package/credentials until explicit owned cleanup.
+      expect(fs.existsSync(path.join(root, 'acquisitions', operationId, 'operation.json'))).toBe(true);
+      await request(app).post(`${endpoint}/execute`).set('x-auth-token', token)
+        .send({ credentials: { FIXTURE_KEY: 'synthetic-cancel-only' } }).expect(409);
+    } finally {
+      clearTimeout(timer); holdRegistry = false; registryReached = undefined;
+      for (const response of heldResponses) response.destroy();
+      await deleteNativeRuntimeSecret(`acq-${createHash('sha256').update(`alice\0${operationId}\0FIXTURE_KEY`).digest('hex')}`);
+      await forgetNativeInstall(operationId);
+    }
+  }, 60000);
 
   test('JWT owner executes once, retains RAW, publishes and activates a credential-backed package', async () => {
     const token = createUserToken('alice', true), bob = createUserToken('bob', true);
