@@ -2,8 +2,14 @@
 // Offline acceptance package: no dependencies, installation scripts or real credentials.
 const { createInterface } = require('node:readline');
 const fs = require('node:fs');
+process.on('uncaughtException', error => {
+  fs.writeFileSync('fixture-error.txt', error.stack || error.message);
+  process.exit(1);
+});
+fs.appendFileSync('fixture-events.txt', 'started\n');
 createInterface({ input: process.stdin }).on('line', line => {
   const request = JSON.parse(line);
+  fs.appendFileSync('fixture-events.txt', `${request.method || 'response'}\n`);
   if (request.id === undefined) return;
   let result;
   switch (request.method) {

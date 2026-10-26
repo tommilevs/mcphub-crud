@@ -27,6 +27,7 @@ import { createMcpAcquisitionPlan, authorizeMcpAcquisitionPlan, executeMcpAcquis
 import { getServerByName, cleanupAllServers, initializeClientsFromSettings } from '../../src/services/mcpService.js';
 import { deleteNativeRuntimeSecret, forgetNativeInstall, getNativeRuntimeStatus } from '../../src/services/nativeRuntimeSecretService.js';
 import * as inspectionModule from '../../src/services/mcpAcquisitionInspection.js';
+import { NativeRuntimeTransport } from '../../src/services/nativeRuntimeTransport.js';
 
 const suite = process.platform === 'win32' && process.env.MCPHUB_ACQUISITION_TEST_ROOT &&
   process.env.MCPHUB_ATTRIBUTION_TEST_PASSWORD ? describe : describe.skip;
@@ -43,6 +44,12 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     process.env.USE_DB = 'false';
     process.env.MCPHUB_NATIVE_RUNTIME_ENABLED = 'true';
     process.env.MCPHUB_NATIVE_PIPE = process.env.MCPHUB_NATIVE_TEST_PIPE;
+    const start = NativeRuntimeTransport.prototype.start;
+    jest.spyOn(NativeRuntimeTransport.prototype, 'start').mockImplementation(async function(this: NativeRuntimeTransport) {
+      const report = this.onerror;
+      this.onerror = error => { process.stderr.write(`Synthetic native transport: ${error.message}\n`); report?.(error); };
+      return start.call(this);
+    });
     const inspect = inspectionModule.inspectAcquiredMcp;
     jest.spyOn(inspectionModule, 'inspectAcquiredMcp').mockImplementation(async (...args) => {
       try { return await inspect(...args); }
@@ -146,6 +153,10 @@ suite('HTTP acquisition through real Windows service and PostgreSQL', () => {
     if (observed.state !== 'ready') {
       process.stderr.write(`Synthetic acquisition phase: ${JSON.stringify(observed)}\n`);
       process.stderr.write(`Synthetic probe journal: ${JSON.stringify((await pool.query('SELECT probe_claim_id,probe_result_id FROM mcp_acquisition_operations WHERE operation_id=$1', [id])).rows)}\n`);
+      for (const name of ['fixture-events.txt', 'fixture-error.txt']) {
+        const file = path.join(root, 'acquisitions', id!, name);
+        if (fs.existsSync(file)) process.stderr.write(`Synthetic ${name}: ${fs.readFileSync(file, 'utf8').slice(0, 2500)}\n`);
+      }
     }
     expect(observed).toMatchObject({ state: 'ready', verification: 'functional', execution_started: true, requires_reconciliation: false });
     await request(app).get(endpoint).set('x-auth-token', bob).expect(404);
