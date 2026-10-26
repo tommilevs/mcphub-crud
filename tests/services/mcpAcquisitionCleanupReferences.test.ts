@@ -36,6 +36,23 @@ test('an unreadable path cannot be treated as proof of absence',async()=>{
   await expect(assertNoCleanupReferences([{name:'other',config:{command:'C:\\other\\server.exe'}}],target,denied)).rejects.toThrow('unconfirmed');
 });
 
+test('a stalled filesystem lookup refuses cleanup after the bounded timeout',async()=>{
+  jest.useFakeTimers();
+  try{
+    const pending=assertNoCleanupReferences([{name:'unavailable',config:{command:'C:\\unavailable\\server.exe'}}],target,
+      ()=>new Promise<string>(()=>{}));
+    const rejected=expect(pending).rejects.toThrow('unconfirmed');
+    await jest.advanceTimersByTimeAsync(2500);await rejected;
+  }finally{jest.useRealTimers();}
+});
+
+test('a directory outside the exact operation identity is rejected before inspection',async()=>{
+  const resolve=jest.fn();
+  await expect(assertNoCleanupReferences([],{...target,directory:'C:\\Windows'},resolve)).rejects.toThrow('identity');
+  await expect(assertNoCleanupReferences([],{...target,secretIds:['unrelated-secret']},resolve)).rejects.toThrow('identity');
+  expect(resolve).not.toHaveBeenCalled();
+});
+
 (process.platform==='win32'?test:test.skip)('real Windows junction aliases cannot hide adopted package usage',async()=>{
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'mcphub-cleanup-alias-'));
   const directory=path.join(root,id),alias=path.join(root,'alias');
