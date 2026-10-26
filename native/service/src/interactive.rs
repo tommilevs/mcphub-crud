@@ -50,6 +50,76 @@ fn token_user(token: HANDLE) -> io::Result<Vec<usize>> {
     Ok(buffer)
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn discovery_rejects_untrusted_names_before_opening() {
+        for name in [
+            "",
+            "mcphub-runtime",
+            "mcphub-user-../pipe",
+            "mcphub-user-a*b",
+        ] {
+            assert!(connect_discovered(name)
+                .err()
+                .unwrap()
+                .to_string()
+                .contains("invalid user agent pipe"));
+        }
+    }
+
+    #[test]
+    fn opened_pipe_must_belong_to_the_explicit_windows_session() {
+        use windows_sys::Win32::{
+            Foundation::INVALID_HANDLE_VALUE,
+            Storage::FileSystem::PIPE_ACCESS_DUPLEX,
+            System::Pipes::{CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_TYPE_BYTE, PIPE_WAIT},
+        };
+        let name = format!(
+            "mcphub-user-peer-test-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let path: Vec<u16> = format!(r"\\.\pipe\{name}")
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let server = unsafe {
+            CreateNamedPipeW(
+                path.as_ptr(),
+                PIPE_ACCESS_DUPLEX,
+                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+                1,
+                1024,
+                1024,
+                0,
+                std::ptr::null(),
+            )
+        };
+        assert_ne!(server, INVALID_HANDLE_VALUE);
+        let _server = Handle(server);
+        let mut actual = 0;
+        assert_ne!(
+            unsafe { ProcessIdToSessionId(std::process::id(), &mut actual) },
+            0
+        );
+        let wrong = actual.checked_add(1).unwrap();
+        let error = connect_named(&name, Some(wrong)).err().unwrap().to_string();
+        assert!(error.contains("agent Windows session mismatch"), "{error}");
+    }
+}
+
+#[allow(dead_code)]
+pub fn connect_discovered(name: &str) -> Result<(u32, Pipe), Box<dyn std::error::Error>> {
+    // Discovery names contain no trusted session ID. Derive it from the opened
+    // server process and perform the same owner/executable checks as delegation.
+    connect_named(name, None)
+}
+
 pub fn connect(context: &serde_json::Value) -> Result<Pipe, Box<dyn std::error::Error>> {
     if context["kind"] != "interactive" {
         return Err("invalid native execution context".into());
@@ -65,6 +135,13 @@ pub fn connect(context: &serde_json::Value) -> Result<Pipe, Box<dyn std::error::
         .transpose()?
         .map(str::to_owned)
         .unwrap_or_else(|| format!("mcphub-user-session-{session}"));
+    connect_named(&name, Some(session)).map(|(_, pipe)| pipe)
+}
+
+fn connect_named(
+    name: &str,
+    session: Option<u32>,
+) -> Result<(u32, Pipe), Box<dyn std::error::Error>> {
     if !name.starts_with("mcphub-user-")
         || name.len() > 128
         || !name
@@ -92,8 +169,11 @@ pub fn connect(context: &serde_json::Value) -> Result<Pipe, Box<dyn std::error::
     if unsafe { ProcessIdToSessionId(pid, &mut actual_session) } == 0 {
         return Err(io::Error::last_os_error().into());
     }
-    if actual_session != session {
+    if session.is_some_and(|expected| actual_session != expected) {
         return Err("agent Windows session mismatch".into());
+    }
+    if actual_session == 0 {
+        return Err("interactive agent cannot run in Windows session zero".into());
     }
     let mut token = std::ptr::null_mut();
     if unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &mut token) } == 0 {
@@ -102,7 +182,7 @@ pub fn connect(context: &serde_json::Value) -> Result<Pipe, Box<dyn std::error::
     let token = Handle(token);
     let mut expected = std::ptr::null_mut();
     // The session's logged-on user, not an IP address, HTTP client or SYSTEM caller.
-    if unsafe { WTSQueryUserToken(session, &mut expected) } == 0 {
+    if unsafe { WTSQueryUserToken(actual_session, &mut expected) } == 0 {
         return Err(io::Error::last_os_error().into());
     }
     let expected = Handle(expected);
@@ -131,7 +211,9 @@ pub fn connect(context: &serde_json::Value) -> Result<Pipe, Box<dyn std::error::
     {
         return Err("agent executable mismatch".into());
     }
-    Ok(unsafe { Pipe::from_raw(file.into_raw_handle()) })
+    Ok((actual_session, unsafe {
+        Pipe::from_raw(file.into_raw_handle())
+    }))
 }
 
 pub fn relay(

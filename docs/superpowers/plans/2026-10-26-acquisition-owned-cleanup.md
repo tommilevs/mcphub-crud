@@ -217,3 +217,12 @@ barrier, authenticated same-handle agent connections and supervisor locks must
 cover discovery through deletion before the cleanup actuator can be enabled.
 Ruling: inventory includes custom pipe names rather than guessing session IDs
 from names; session and executable ownership must be checked on the opened pipe.
+
+`interactive::connect_discovered` now derives the actual session from the server
+PID on a single opened pipe and reuses delegation's logged-on-user SID and exact
+canonical executable checks. Explicit delegation still rejects a different
+session; discovery rejects session zero. Successful validation returns that same
+pipe handle, never a reopened pipe name. Real local pipe tests prove mismatched
+sessions are refused; malformed discovery names fail before opening. Positive
+WTS user-token validation still needs the isolated LocalSystem CI scenario.
+This adapter is internal; no cleanup command or public API has been enabled.
