@@ -1,0 +1,44 @@
+# First-run and native control corrections
+
+## User observations and implementation
+
+- The installed `b3cdac9` login message box did not provide a selectable password
+  or a copy button. Source `05cde03` replaces it with a standard Win32 dialog:
+  readonly selectable edit, Copy password and OK. Copy is explicit, writes only
+  the password to the Unicode clipboard and reports success/failure in the dialog.
+  Password loading remains read-only from DPAPI; no plaintext file is created.
+- The tray exposed Restart but no Stop. Source `035913b` adds Start and Stop,
+  waits for SCM state transitions, and disables all three controls while an
+  operation runs. Repeated Start/Stop is idempotent. Exit tray remains separate.
+- After the user's reboot, the installed service, tray and user agent were all
+  present in the expected sessions, but the three enabled MCP connections
+  retained file-not-found errors. Reloading each connection restored 3/3 healthy
+  servers. Source `035913b` retries disconnected interactive native transports
+  every 15 seconds without pinging connected stdio servers. It preserves explicit
+  session binding and skips on-demand transports and disabled/connecting entries.
+
+## Verified
+
+- `035913b`: 12 keep-alive tests and backend type check passed; regression failed
+  before implementation. Seven standalone tray control tests and the native
+  service/Tauri build check passed. The optional real-SCM test had no fixture
+  configured locally, so this does not prove real Start/Stop clicks.
+- `05cde03`: 41 native tests passed locally, including creation of a real hidden
+  Win32 dialog, correct password field contents, readonly style and Copy label.
+  One clipboard interaction test is intentionally ignored locally; the Windows
+  CI test action explicitly runs it on the disposable runner. This test invokes
+  the actual dialog command and verifies exact clipboard contents, then clears it.
+- Cancellation acceptance source `9fa38f8`, run `40301174778`, job `121499152762`:
+  both full Windows pipeline and in-flight npm cancellation passed. Logs read.
+
+## Pending release gates
+
+- Read final installer CI results for `035913b` and `05cde03`; retain source/run
+  identity and inspect acceptance logs before presenting a new installer.
+- Verify Copy in isolated Windows CI and wizard compatibility with the new dialog.
+- Exercise real tray Start/Stop controls and recovery when the user agent appears
+  after the first gateway connection attempt.
+- Validate a changed Windows logon session separately: reconnect retries do not
+  authorize or automatically retarget another session.
+- Deploy a verified update before claiming these corrections exist in the user's
+  installed application. Existing installation is still `b3cdac9`.
