@@ -149,7 +149,11 @@ mod tests {
         std::fs::create_dir_all(&runtime).unwrap();
         std::fs::create_dir_all(&package).unwrap();
         std::fs::write(runtime.join("node.exe"), []).unwrap();
-        std::fs::write(package.join("main.js"), []).unwrap();
+        std::fs::write(
+            package.join("main.js"),
+            "process.stdout.write('node-entry-ok')",
+        )
+        .unwrap();
         std::fs::write(directory.join("outside.js"), []).unwrap();
         std::fs::write(
             directory.join("operation.json"),
@@ -177,6 +181,17 @@ mod tests {
                 "Node launch paths must not use the verbatim namespace"
             );
         }
+        let launched = std::process::Command::new("node.exe")
+            .arg(result["spec"]["args"][0].as_str().unwrap())
+            .current_dir(result["spec"]["cwd"].as_str().unwrap())
+            .output()
+            .unwrap();
+        assert!(
+            launched.status.success(),
+            "{}",
+            String::from_utf8_lossy(&launched.stderr)
+        );
+        assert_eq!(launched.stdout, b"node-entry-ok");
         assert!(resolve(id, "@fixture/mcp", "1.2.4", &runtime, &stages).is_err());
         write(json!("../../../outside.js"));
         assert!(resolve(id, "@fixture/mcp", "1.2.3", &runtime, &stages)
