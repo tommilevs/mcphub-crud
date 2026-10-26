@@ -1,7 +1,35 @@
 //! Resolve installed JS entrypoints without running or publishing their tools.
 use super::installer_jobs::validate_request;
 use serde_json::{json, Value};
-use std::{io::Read, path::Path};
+use std::{
+    io::Read,
+    path::{Path, PathBuf},
+};
+
+// Node's entrypoint resolver rejects Windows verbatim paths with EISDIR. Keep
+// canonical paths for containment checks, then export an equivalent launch path.
+fn node_launch_path(canonical: &Path) -> Result<PathBuf, &'static str> {
+    let text = canonical.to_str().ok_or("installed path is not Unicode")?;
+    let normal = if let Some(unc) = text.strip_prefix(r"\\?\UNC\") {
+        PathBuf::from(format!(r"\\{unc}"))
+    } else if let Some(disk) = text.strip_prefix(r"\\?\") {
+        let bytes = disk.as_bytes();
+        if bytes.len() < 3 || !bytes[0].is_ascii_alphabetic() || &bytes[1..3] != b":\\" {
+            return Err("installed path namespace is unsupported");
+        }
+        PathBuf::from(disk)
+    } else {
+        canonical.to_path_buf()
+    };
+    if normal
+        .canonicalize()
+        .map_err(|_| "installed launch path unavailable")?
+        != canonical
+    {
+        return Err("installed launch path changes filesystem identity");
+    }
+    Ok(normal)
+}
 
 fn read_json(path: &Path, root: &Path) -> Result<Value, &'static str> {
     let path = path
@@ -89,6 +117,9 @@ pub fn resolve(
     if !node.is_file() {
         return Err("bundled Node runtime unavailable");
     }
+    let node = node_launch_path(&node)?;
+    let executable = node_launch_path(&executable)?;
+    let directory = node_launch_path(&directory)?;
     Ok(
         json!({"verification":"package_metadata","package":{"name":package,"version":version},
       "spec":{"id":format!("acquisition-{id}"),"server_name":package,"command":node,"args":[executable],
@@ -136,6 +167,16 @@ mod tests {
         let result = resolve(id, "@fixture/mcp", "1.2.3", &runtime, &stages).unwrap();
         assert_eq!(result["verification"], "package_metadata");
         assert_eq!(result["spec"]["restart_limit"], 0);
+        for path in [
+            &result["spec"]["command"],
+            &result["spec"]["args"][0],
+            &result["spec"]["cwd"],
+        ] {
+            assert!(
+                !path.as_str().unwrap().starts_with(r"\\?\"),
+                "Node launch paths must not use the verbatim namespace"
+            );
+        }
         assert!(resolve(id, "@fixture/mcp", "1.2.4", &runtime, &stages).is_err());
         write(json!("../../../outside.js"));
         assert!(resolve(id, "@fixture/mcp", "1.2.3", &runtime, &stages)

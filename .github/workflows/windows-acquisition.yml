@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     branches: [feat/tool-result-history]
-    paths: ['.github/workflows/windows-acquisition.yml', 'native/test-acquisition-windows.ps1', 'native/tests/acquisition-fixture/**', 'tests/integration/acquisition-native-windows.test.ts']
+    paths: ['.github/workflows/windows-acquisition.yml', 'native/test-acquisition-windows.ps1', 'native/tests/acquisition-fixture/**', 'native/service/src/**', 'native/runtime-core/src/**', 'src/services/mcpAcquisition*.ts', 'tests/integration/acquisition-native-windows.test.ts']
 
 permissions:
   contents: read
