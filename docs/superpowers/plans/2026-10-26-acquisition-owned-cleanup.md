@@ -234,3 +234,15 @@ no response-body logging. This covers positive WTS/SID/executable validation in
 the actual installed pair. Local PowerShell parsing and diff checks pass; actual
 execution is restricted to hosted Windows CI and must be checked there before
 claiming positive validation. It does not yet exercise connect_discovered itself.
+
+Hosted installer af07e3d run40409248884/job121875108958 passed: logs explicitly
+confirm installed LocalSystem delegation, tray/dashboard/service/login and upload
+of artifact12692089171. This is positive validation through explicit delegation's
+shared authentication path, not yet end-to-end discovery/reservation.
+
+Separate wizard run40409193466 failed the dashboard close assertion against its
+hardcoded historical installer artifact40262852834. Ruling: full installer CI
+already tests the current build's wizard; the separate artifact replay workflow
+must be manual with an explicit installerRunId, with no push trigger or historical
+fallback. This avoids presenting a historical binary failure as a current build
+regression and preserves deliberate replay of a selected installer.

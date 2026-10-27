@@ -6,11 +6,7 @@ on:
       installerRunId:
         description: Successful installer run containing the retained artifact
         required: true
-        default: '40262852834'
         type: string
-  push:
-    branches: [feat/tool-result-history]
-    paths: ['.github/workflows/windows-wizard-acceptance.yml', 'native/test-nsis-ci-windows.ps1']
 
 permissions:
   contents: read
@@ -25,7 +21,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: MCPHub-Windows-tested-installer
-          run-id: ${{ inputs.installerRunId || '40262852834' }}
+          run-id: ${{ inputs.installerRunId }}
           github-token: ${{ github.token }}
           path: tested-installer
       - name: Verify wizard completion and exact dashboard close request
